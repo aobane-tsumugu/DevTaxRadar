@@ -22,7 +22,7 @@ import type {
 } from './client/types'
 import './index.css'
 
-type Page = 'summary' | 'evidence'
+type Page = 'summary' | 'evidence' | 'guide'
 type Provider = 'すべて' | 'Claude Code' | 'Codex'
 
 const yen = new Intl.NumberFormat('ja-JP', {
@@ -187,6 +187,13 @@ function App() {
             <span aria-hidden="true">≡</span>
             <span>なぜそうなる？<small>配賦と根拠ログ</small></span>
           </button>
+          <button
+            className={page === 'guide' ? 'nav-item active' : 'nav-item'}
+            onClick={() => setPage('guide')}
+          >
+            <span aria-hidden="true">?</span>
+            <span>税務QA<small>言葉と境界を知る</small></span>
+          </button>
         </nav>
 
         <div className="sidebar-status">
@@ -242,7 +249,7 @@ function App() {
                 className="demo-cta"
                 onClick={() => setPage(page === 'summary' ? 'evidence' : 'summary')}
               >
-                {page === 'summary' ? 'セッションまで根拠を辿る' : '年間サマリーへ戻る'}
+                {page === 'summary' ? '月次集計の根拠を辿る' : '年間サマリーへ戻る'}
                 <span aria-hidden="true">{page === 'summary' ? ' →' : ' ←'}</span>
               </button>
             </section>
@@ -250,31 +257,35 @@ function App() {
           <section className="page-heading">
             <div>
               <span className="eyebrow">
-                {page === 'summary' ? 'YEARLY OUTLOOK' : 'AUDIT TRAIL'}
+                {page === 'summary' ? 'YEARLY OUTLOOK' : page === 'evidence' ? 'AUDIT TRAIL' : 'TAX GUIDE'}
               </span>
-              <h1>{page === 'summary' ? '今年どうなる？' : 'なぜそうなる？'}</h1>
+              <h1>{page === 'summary' ? '今年どうなる？' : page === 'evidence' ? 'なぜそうなる？' : '税務の言葉を知る'}</h1>
               <p>
                 {page === 'summary'
                   ? '定額のClaude Code／Codexを利用実態で配賦し、今年の費用と将来へ残る原価を見通します。'
-                  : '月額料金から1つのセッションまで、数字の由来を辿れます。'}
+                  : page === 'evidence'
+                    ? '月額料金からProvider・月・プロジェクト集計まで、数字の由来を辿れます。'
+                    : '取得価額や資本的支出を、1文の結論と具体例から確認できます。'}
               </p>
             </div>
-            <div className="filters" aria-label="表示フィルター">
-              <label>
-                <span>Provider</span>
-                <select value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
-                  <option>すべて</option>
-                  <option>Claude Code</option>
-                  <option>Codex</option>
-                </select>
-              </label>
-              <label>
-                <span>Product</span>
-                <select value={product} onChange={(event) => setProduct(event.target.value)}>
-                  {products.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-            </div>
+            {page !== 'guide' && (
+              <div className="filters" aria-label="表示フィルター">
+                <label>
+                  <span>Provider</span>
+                  <select value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
+                    <option>すべて</option>
+                    <option>Claude Code</option>
+                    <option>Codex</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Product</span>
+                  <select value={product} onChange={(event) => setProduct(event.target.value)}>
+                    {products.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+              </div>
+            )}
           </section>
 
           {page === 'summary' ? (
@@ -286,14 +297,17 @@ function App() {
                 setSelectedAllocation(allocation)
                 setPage('evidence')
               }}
+              onOpenGuide={() => setPage('guide')}
             />
-          ) : (
+          ) : page === 'evidence' ? (
             <EvidencePage
               data={data}
               allocations={allocations}
               selected={selectedAllocation}
               onSelect={setSelectedAllocation}
             />
+          ) : (
+            <TaxGuidePage />
           )}
         </main>
       </div>
@@ -323,11 +337,13 @@ function SummaryPage({
   months,
   totals,
   onOpenEvidence,
+  onOpenGuide,
 }: {
   data: DashboardData
   months: DashboardData['months']
   totals: Record<TaxGroup, number>
   onOpenEvidence: (allocation: Allocation) => void
+  onOpenGuide: () => void
 }) {
   const annualTotal = totals.current + totals.future + totals.review
   const maxMonth = Math.max(...months.map((month) => month.current + month.future + month.review), 1)
@@ -364,7 +380,7 @@ function SummaryPage({
         </li>
         <li>
           <span>02</span>
-          <div><strong>定額料金を配賦</strong><small>時間・トークン・プロダクト</small></div>
+          <div><strong>定額料金を配賦</strong><small>加重トークン・プロダクト</small></div>
         </li>
         <li>
           <span>03</span>
@@ -429,7 +445,7 @@ function SummaryPage({
         <PanelHeading
           title="金額境界レーダー"
           subtitle="金額だけで結論を出さず、資産単位と供用状況も合わせて確認します"
-          trailing={<button className="text-button">判定ルールを見る →</button>}
+          trailing={<button className="text-button" onClick={onOpenGuide}>判定ルールを見る →</button>}
         />
         <div className="alert-list">
           {data.boundaries.map((boundary) => {
@@ -489,7 +505,7 @@ function EvidencePage({
         <PanelHeading
           title="配賦明細"
           subtitle={`${allocations.length}件 · 月額料金をProvider内の利用比率で配賦`}
-          trailing={<button className="export-button">CSVを書き出す</button>}
+          trailing={<button className="export-button" disabled title="MVPでは未実装です">CSV（開発中）</button>}
         />
         <div className="table-scroll">
           <table>
@@ -547,6 +563,9 @@ function EvidencePage({
               <div><dt>その他直接費</dt><dd>{yen.format(asset.other)}</dd></div>
               <div className="total-line"><dt>翌年以後へ残る見込</dt><dd>{yen.format(asset.futureBalance)}</dd></div>
             </dl>
+            <p className="scope-warning">
+              AI以外の直接費入力は未実装です。10万円等の境界は、実際の資産全体の取得価額で再確認してください。
+            </p>
             <div className="asset-progress">
               <div><span>10万円境界まで</span><strong>{yen.format(Math.max(100000 - asset.total, 0))}</strong></div>
               <div className="progress"><i style={{ width: `${Math.min(asset.total / 1000, 100)}%` }} /></div>
@@ -591,6 +610,144 @@ function EvidencePage({
           </section>
         </div>
       )}
+    </>
+  )
+}
+
+const TAX_GUIDE_ITEMS = [
+  {
+    term: '取得価額とは？',
+    answer: '資産を買う・作るために直接必要だった金額を、使用開始まで集めたものです。',
+    example: '新規アプリの実装に直接使ったAIサブスク配賦額は、自作ソフトウェアの取得価額に含める候補になります。',
+    check: 'その作業は特定の資産へ直接対応するか。一般学習・保守・私用が混ざっていないか。',
+  },
+  {
+    term: '資本的支出とは？',
+    answer: '既存資産の価値を高めたり、使える期間を延ばしたりする改良費です。',
+    example: '既存アプリへ独立した大型機能を追加する開発は候補です。小さな不具合修正や現状維持は通常経費の候補になり得ます。',
+    check: '一つの改良計画として何を増強したか。通常の維持管理との境界を仕様・Issue・リリース記録で説明できるか。',
+  },
+  {
+    term: '通常経費との違いは？',
+    answer: '当年の活動を維持する費用か、将来にも効果が残る資産形成の費用かが大きな分岐です。',
+    example: '稼働中サービスの軽微なバグ修正は通常経費、新規ソフトウェアの完成へ直接必要な実装は取得価額の候補です。',
+    check: '支払名目だけで決めず、実際の作業目的・成果・供用状況を確認する。',
+  },
+  {
+    term: '制作原価とは？',
+    answer: '販売するコンテンツや棚卸資産を作るために直接かかった費用として集める候補です。',
+    example: '販売用デジタル教材の本文生成に直接使ったAI利用分を、作品・商品単位で集計します。',
+    check: '販売目的の成果物か、いつ売上原価になるか、仕掛中の扱いを含めて申告時に確認する。',
+  },
+  {
+    term: '前払費用とは？',
+    answer: '支払い済みでも、まだ提供を受けていない将来期間のサービスに対応する金額です。',
+    example: '年払い契約のうち翌年分は候補になり得ます。一方、今月すでに利用したAI料金を単に翌年へ移す制度ではありません。',
+    check: '契約期間、サービス提供済みの期間、短期前払費用の適用可否を契約書・請求書で確認する。',
+  },
+  {
+    term: '10万円・20万円の境界は？',
+    answer: '原則として、10万円未満は当年費用、10万円以上20万円未満は通常償却または3年の一括償却、20万円以上は通常の減価償却を検討します。',
+    example: '99,999円は10万円未満、100,000円は10万円以上です。200,000円ちょうども「20万円未満」には入りません。',
+    check: '青色申告者の少額特例など別制度の要件、取得・製作日、所得区分、年間上限も個別に確認する。',
+  },
+  {
+    term: '金額の判定単位は？',
+    answer: 'AIの月額料金1行ではなく、完成する一つの資産や一つの改良計画ごとに集めた金額が判定の出発点です。',
+    example: '月3万円を4か月使って一つのアプリを作った場合、各月3万円だけを見て10万円未満とは判断しません。',
+    check: 'リポジトリ名だけで機械的に分けず、仕様・用途・一体で機能する範囲から税務上の単位を確認する。',
+  },
+  {
+    term: '供用開始とは？',
+    answer: '資産が完成しただけでなく、本来の目的のため実際に使い始めた時点です。',
+    example: '開発中のテストだけなら未供用候補。顧客向けサービスや正式な制作工程で使い始めれば供用開始候補です。',
+    check: '初回リリース、正式採用、運用ログなど、実際に使い始めた日を示す証拠を残す。',
+  },
+  {
+    term: '直接対応費と証拠は？',
+    answer: '特定のプロダクトへ合理的に結び付く利用分だけを、同じ方法で継続配賦することが説明力につながります。',
+    example: 'Claude Code／Codexの加重トークン、作業フォルダ、Gitブランチを使い、月額料金をプロダクト別に配賦します。',
+    check: '請求書、配賦ルール、セッションメタデータ、手動修正理由、仕様・コミット・供用日の記録を保存する。',
+  },
+  {
+    term: '旧版から新版へ作り直すときは？',
+    answer: '大幅な仕様変更で新しいソフトウェアを製作し、完成後に旧版を使わない場合は、旧版残価を新版の原材料費に含める取扱いの検討対象です。',
+    example: '旧パイプラインを廃止し、M1〜M5で構造を再設計する場合は、単なる機能追加か新しい資産かを移行記録で説明します。',
+    check: '大幅な仕様変更、旧版廃止、移行日、二重控除がないことを確認する。旧版を10万円未満として全額費用化済みなら、移す残価は通常0円です。',
+  },
+  {
+    term: '公開前なら未供用ですか？',
+    answer: '公開前という事実だけでは決まりません。本来の目的で正式原稿や本番工程に使い始めたかを確認します。',
+    example: '評価用コピーで比較するだけなら開発・試験寄りですが、新版の出力を正式原稿へ採用すれば供用済みとなる可能性があります。',
+    check: 'テストのみ／正式採用、初回本番利用日、リリース記録、正式原稿への反映履歴を残す。',
+  },
+  {
+    term: 'このMVPで未計算のものは？',
+    answer: 'PC・家賃・電気・交通費、暗号資産益との所得集計、AI以外の直接費、当年の減価償却額はまだ計算しません。',
+    example: '画面の境界額はAI配賦額中心の候補プールです。PC本体は別資産、家事関連費は合理的な按分という別論点です。',
+    check: '申告時は他の直接費、所得区分、供用日、耐用年数、償却方法を追加し、必要に応じて税理士へ確認する。',
+  },
+] as const
+
+function TaxGuidePage() {
+  return (
+    <>
+      <section className="guide-intro">
+        <div>
+          <span className="guide-intro-label">START HERE</span>
+          <h2>月額料金を、そのまま税務処理しない。</h2>
+          <p>
+            まず「何を作るための利用か」を資産・改良計画単位で集め、
+            金額境界と供用状況を確認します。DevTax Radarは判断を確定せず、候補と不足証拠を示します。
+          </p>
+        </div>
+        <ol className="guide-route" aria-label="税務候補を確認する順序">
+          <li><span>1</span><strong>作業目的</strong><small>新規・改良・保守・私用</small></li>
+          <li><span>2</span><strong>税務単位</strong><small>資産・一つの改良計画</small></li>
+          <li><span>3</span><strong>時点と金額</strong><small>供用開始・合計額</small></li>
+          <li><span>4</span><strong>証拠</strong><small>履歴・仕様・請求書</small></li>
+        </ol>
+      </section>
+
+      <section className="tax-qa-grid" aria-label="税務用語のよくある質問">
+        {TAX_GUIDE_ITEMS.map((item, index) => (
+          <details className="tax-qa-card" key={item.term} open={index < 2}>
+            <summary>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{item.term}</strong>
+              <i aria-hidden="true">＋</i>
+            </summary>
+            <div className="tax-qa-answer">
+              <p className="one-line-answer">{item.answer}</p>
+              <dl>
+                <div><dt>例</dt><dd>{item.example}</dd></div>
+                <div><dt>確認</dt><dd>{item.check}</dd></div>
+              </dl>
+            </div>
+          </details>
+        ))}
+      </section>
+
+      <section className="official-sources" aria-labelledby="official-sources-title">
+        <div>
+          <span aria-hidden="true">↗</span>
+          <div>
+            <h2 id="official-sources-title">国税庁の公式資料で確認する</h2>
+            <p>個別事情や制度改正で結論は変わります。申告前は原文と専門家へ確認してください。</p>
+          </div>
+        </div>
+        <ul>
+          <li><a href="https://www.nta.go.jp/law/tsutatsu/kihon/shotoku/08/06.htm" target="_blank" rel="noreferrer">自己の製作に係るソフトウェアの取得価額等</a></li>
+          <li><a href="https://www.nta.go.jp/law/tsutatsu/kihon/shotoku/05/07.htm" target="_blank" rel="noreferrer">資本的支出と修繕費等</a></li>
+          <li><a href="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/2100.htm" target="_blank" rel="noreferrer">減価償却のあらまし</a></li>
+          <li><a href="https://www.nta.go.jp/law/tsutatsu/kihon/shotoku/08/12.htm" target="_blank" rel="noreferrer">少額減価償却資産・一括償却資産</a></li>
+        </ul>
+      </section>
+
+      <footer className="tax-disclaimer">
+        <span aria-hidden="true">ⓘ</span>
+        このQAは一般的な整理候補です。資産計上・必要経費・申告内容を確定するものではありません。
+      </footer>
     </>
   )
 }
