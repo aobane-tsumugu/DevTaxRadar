@@ -18,6 +18,10 @@ const providerLabel = {
   codex: 'Codex',
 } as const
 
+function displayBillingMonth(month: string): string {
+  return `${month.slice(0, 4)}年${Number(month.slice(5))}月`
+}
+
 const classificationView: Record<ProjectMapping['classification'], {
   group: TaxGroup
   stage: string
@@ -103,7 +107,7 @@ function allocationForProject(
   const product = displayProject(row, mapping)
   return {
     id: `${row.provider}-${row.month}-${row.projectKey}`,
-    month: `${Number(row.month.slice(5))}月`,
+    month: displayBillingMonth(row.month),
     provider: providerLabel[row.provider],
     product,
     asset: mapping?.assetName || '要確認',
@@ -141,7 +145,7 @@ function unobservedAllocation(
   const isAdjustment = line.kind === 'rounding-adjustment'
   return {
     id: `${provider}-${month}-${line.kind}`,
-    month: `${Number(month.slice(5))}月`,
+    month: displayBillingMonth(month),
     provider: providerLabel[provider],
     product: isAdjustment ? '丸め調整' : '未取得利用',
     asset: '要確認',
@@ -194,7 +198,12 @@ export function buildDashboard(): DashboardData {
     grouped.set(key, [...(grouped.get(key) ?? []), row])
   }
 
-  const inputs = [...grouped.entries()].map(([key, groupRows]) => {
+  const providerMonthKeys = new Set([
+    ...grouped.keys(),
+    ...monthlyChargeByKey.keys(),
+  ])
+  const inputs = [...providerMonthKeys].sort().map((key) => {
+    const groupRows = grouped.get(key) ?? []
     const [provider, month] = key.split(':') as ['claude' | 'codex', string]
     return {
       provider,
@@ -239,9 +248,9 @@ export function buildDashboard(): DashboardData {
     }
   }
 
-  const monthLabels = [...new Set(rows.map((row) => row.month))].sort()
+  const monthLabels = [...new Set(inputs.map((input) => input.billingMonth))].sort()
   const months = monthLabels.map((month) => {
-    const label = `${Number(month.slice(5))}月`
+    const label = displayBillingMonth(month)
     const monthAllocations = allocations.filter((row) => row.month === label)
     return {
       label,
@@ -271,21 +280,26 @@ export function buildDashboard(): DashboardData {
   const futureByAsset = new Map<string, {
     product: string
     name: string
+    candidate: string
     total: number
   }>()
   for (const row of allocations.filter((item) => item.group === 'future')) {
-    const key = `${row.product}:${row.asset}`
+    const key = JSON.stringify([row.product, row.asset, row.taxCandidate])
     const current = futureByAsset.get(key)
     futureByAsset.set(key, {
       product: row.product,
       name: row.asset,
+      candidate: row.taxCandidate,
       total: (current?.total ?? 0) + row.amount,
     })
   }
 
   const assets = [...futureByAsset.values()].map((asset) => ({
     product: asset.product,
-    name: asset.name,
+    name: asset.candidate === '資本的支出'
+      ? `${asset.name}（改良計画）`
+      : asset.name,
+    candidate: asset.candidate,
     total: asset.total,
     aiCost: asset.total,
     outsource: 0,
@@ -294,18 +308,43 @@ export function buildDashboard(): DashboardData {
     inService: false,
   }))
   const boundaries = assets.map((asset) => {
-    const threshold = asset.total < 100_000 ? 100_000 : asset.total < 200_000 ? 200_000 : 400_000
+    if (asset.candidate === '資本的支出') {
+      return {
+        product: asset.product,
+        asset: asset.name,
+        kind: '一つの改良計画（候補）',
+        amount: asset.total,
+        threshold: 200_000,
+        thresholdLabel: '修繕・改良の20万円形式基準（別判定）',
+        status: asset.total < 200_000
+          ? `${(200_000 - asset.total).toLocaleString()}円手前・作業実態も確認`
+          : '20万円以上：改良計画の範囲と作業実態を確認',
+        tone: 'review' as const,
+      }
+    }
+
+    const underImmediateExpenseBoundary = asset.total < 100_000
+    const underThreeYearPoolBoundary = asset.total < 200_000
+    const threshold = underImmediateExpenseBoundary ? 100_000
+      : underThreeYearPoolBoundary ? 100_000
+        : 200_000
+    const thresholdLabel = threshold === 100_000 ? '10万円境界' : '20万円境界'
+    const status = underImmediateExpenseBoundary
+      ? `${(100_000 - asset.total).toLocaleString()}円手前`
+      : underThreeYearPoolBoundary
+        ? '10万円以上：通常償却または3年一括の候補を確認'
+        : '20万円以上：通常償却等の候補を確認（青色特例は別途要件確認）'
     return {
       product: asset.product,
       asset: asset.name,
       kind: 'ユーザー確認中の資産単位',
       amount: asset.total,
       threshold,
-      thresholdLabel: `${threshold / 10_000}万円境界`,
-      status: asset.total < threshold
-        ? `${(threshold - asset.total).toLocaleString()}円手前`
-        : '通常償却等を確認',
-      tone: asset.total >= threshold * 0.8 ? 'near' as const : 'safe' as const,
+      thresholdLabel,
+      status,
+      tone: underImmediateExpenseBoundary
+        ? asset.total >= 80_000 ? 'near' as const : 'safe' as const
+        : 'review' as const,
     }
   })
 

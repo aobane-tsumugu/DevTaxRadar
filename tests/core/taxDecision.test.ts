@@ -80,6 +80,40 @@ describe("tax candidate decision tree", () => {
     expect(result.futureBalanceEstimate).toBe(50_000);
   });
 
+  it("does not carry all sales-production cost forward before period-end status is known", () => {
+    const unknownStatus = decideTaxCandidate({
+      amountJpy: 50_000,
+      businessUse: "business",
+      workPurpose: "sales-production",
+      placedInService: "before",
+      revenueModel: "digital-content-sale",
+      userConfirmed: true,
+    });
+    const completedStatus = decideTaxCandidate({
+      amountJpy: 50_000,
+      businessUse: "business",
+      workPurpose: "sales-production",
+      placedInService: "before",
+      revenueModel: "digital-content-sale",
+      workInProgressAtPeriodEnd: false,
+      userConfirmed: true,
+    });
+
+    expect(unknownStatus).toMatchObject({
+      candidate: "unclassified",
+      currentYearExpenseEstimate: null,
+      futureBalanceEstimate: null,
+      estimateStatus: "not-calculated",
+    });
+    expect(unknownStatus.missingFacts).toContain(
+      "期末時点の販売済み・完成在庫・制作中の区分",
+    );
+    expect(completedStatus.candidate).toBe("unclassified");
+    expect(completedStatus.missingFacts).toContain(
+      "期末時点の販売済み・完成在庫の区分",
+    );
+  });
+
   it("does not silently assert that general learning is deductible", () => {
     const result = decideTaxCandidate({
       amountJpy: 8_000,
@@ -138,7 +172,8 @@ describe("tax candidate decision tree", () => {
     });
 
     expect(result.candidate).toBe("unclassified");
-    expect(result.futureBalanceEstimate).toBe(0);
+    expect(result.futureBalanceEstimate).toBeNull();
+    expect(result.estimateStatus).toBe("not-calculated");
     expect(result.missingFacts).toContain("共通費として合理的・継続的に配賦できるか");
   });
 });

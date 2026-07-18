@@ -218,18 +218,41 @@ function App() {
             <span className={data.meta.source === 'local' ? 'source-badge live' : 'source-badge'}>
               {data.meta.source === 'local' ? '実データ' : 'デモデータ'}
             </span>
-            <button className="primary-button" onClick={() => setOnboarding(true)}>
-              ＋ 月次確認
-            </button>
+            {data.meta.source === 'demo' ? (
+              <button
+                className="primary-button"
+                onClick={() => setPage(page === 'summary' ? 'evidence' : 'summary')}
+              >
+                {page === 'summary' ? '配賦根拠を見る →' : '年間サマリーへ ←'}
+              </button>
+            ) : (
+              <button className="primary-button" onClick={() => setOnboarding(true)}>
+                ＋ 月次確認
+              </button>
+            )}
           </div>
         </header>
 
         <main className="content">
           {data.meta.source === 'demo' && (
-            <div className="demo-mode-banner public-demo-banner" role="status">
-              <strong>PUBLIC DEMO</strong>
-              完全な合成データです。GitHub版では自分のPC内のClaude Code／Codex履歴を集計できます。
-            </div>
+            <section className="public-demo-banner" aria-labelledby="public-demo-title">
+              <span className="demo-shield" aria-hidden="true">✓</span>
+              <div className="demo-banner-copy">
+                <span className="demo-label">PUBLIC DEMO · 合成データ</span>
+                <strong id="public-demo-title">AIサブスク費用を、税務説明できるプロダクト原価へ。</strong>
+                <p>
+                  この画面に実在の履歴・請求額・パスは含まれません。
+                  GitHub版はClaude Code／Codexの履歴をPC内だけで集計します。
+                </p>
+              </div>
+              <button
+                className="demo-cta"
+                onClick={() => setPage(page === 'summary' ? 'evidence' : 'summary')}
+              >
+                {page === 'summary' ? 'セッションまで根拠を辿る' : '年間サマリーへ戻る'}
+                <span aria-hidden="true">{page === 'summary' ? ' →' : ' ←'}</span>
+              </button>
+            </section>
           )}
           <section className="page-heading">
             <div>
@@ -239,7 +262,7 @@ function App() {
               <h1>{page === 'summary' ? '今年どうなる？' : 'なぜそうなる？'}</h1>
               <p>
                 {page === 'summary'
-                  ? 'AIサブスクの利用実態から、2026年の費用と将来へ残る原価を見通します。'
+                  ? '定額のClaude Code／Codexを利用実態で配賦し、今年の費用と将来へ残る原価を見通します。'
                   : '月額料金から1つのセッションまで、数字の由来を辿れます。'}
               </p>
             </div>
@@ -340,6 +363,21 @@ function SummaryPage({
           </article>
         ))}
       </section>
+
+      <ol className="value-flow" aria-label="DevTax Radarの処理フロー">
+        <li>
+          <span>01</span>
+          <div><strong>利用履歴を読む</strong><small>Claude Code・Codex</small></div>
+        </li>
+        <li>
+          <span>02</span>
+          <div><strong>定額料金を配賦</strong><small>時間・トークン・プロダクト</small></div>
+        </li>
+        <li>
+          <span>03</span>
+          <div><strong>税務候補と根拠を残す</strong><small>通常経費・取得価額・要確認</small></div>
+        </li>
+      </ol>
 
       <div className="main-grid">
         <section className="panel chart-panel">
@@ -474,6 +512,15 @@ function EvidencePage({
                   key={row.id}
                   className={active?.id === row.id ? 'selected-row' : ''}
                   onClick={() => onSelect(row)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelect(row)
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${row.month} ${row.provider} ${row.product}、配賦額${yen.format(row.amount)}の根拠を表示`}
                 >
                   <td>{row.month}</td>
                   <td><span className={`provider-logo ${row.provider === 'Codex' ? 'codex' : ''}`}>

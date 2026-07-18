@@ -83,6 +83,12 @@ describe("local server boundary", () => {
       resolve("fixtures/claude/synthetic-history.jsonl"),
       join(claudeHistory, "synthetic-history.jsonl"),
     );
+    const codexHistory = join(isolatedHome, ".codex", "sessions", "2026", "04");
+    mkdirSync(codexHistory, { recursive: true });
+    copyFileSync(
+      resolve("fixtures/codex/2026/04/synthetic-session.jsonl"),
+      join(codexHistory, "synthetic-session.jsonl"),
+    );
 
     const child = spawn(
       process.execPath,
@@ -173,32 +179,54 @@ describe("local server boundary", () => {
         origin: `http://127.0.0.1:${port}`,
         "x-devtax-csrf": runtime.csrfToken,
       },
-      body: JSON.stringify({ providers: ["claude"] }),
+      body: JSON.stringify({ providers: ["claude", "codex"] }),
     });
     expect(scanResponse.status).toBe(200);
 
     const unconfiguredDashboard = await fetch(
       `http://127.0.0.1:${port}/api/dashboard`,
     ).then(async (response) => await response.json()) as {
-      products: Array<{ projectKey: string }>;
+      products: Array<{ projectKey: string; folder: string }>;
     };
-    const projectKey = unconfiguredDashboard.products[0]?.projectKey;
+    const productA = unconfiguredDashboard.products.find(
+      (product) => product.folder === "Product-A",
+    );
+    const productB = unconfiguredDashboard.products.find(
+      (product) => product.folder === "Product-B",
+    );
+    const projectKey = productA?.projectKey;
     expect(projectKey).toMatch(/^project_[0-9a-f]{24}$/);
+    expect(productB?.projectKey).toMatch(/^project_[0-9a-f]{24}$/);
 
     const configuration = {
       charges: { claude: 30_001, codex: 20_003 },
-      monthlyCharges: [{
-        provider: "claude",
-        month: "2026-04",
-        amountJpy: 31_337,
-      }],
+      monthlyCharges: [
+        {
+          provider: "claude",
+          month: "2025-04",
+          amountJpy: 12_345,
+        },
+        {
+          provider: "claude",
+          month: "2026-04",
+          amountJpy: 120_000,
+        },
+      ],
       unobservedRatio: 0.1,
-      mappings: [{
-        projectKey,
-        productName: "Product A",
-        assetName: "A-v1",
-        classification: "new-development",
-      }],
+      mappings: [
+        {
+          projectKey,
+          productName: "Product A",
+          assetName: "A-v1",
+          classification: "new-development",
+        },
+        {
+          projectKey: productB!.projectKey,
+          productName: "Product A",
+          assetName: "A-v1",
+          classification: "feature-addition",
+        },
+      ],
     };
     const saveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: "POST",
@@ -214,8 +242,15 @@ describe("local server boundary", () => {
 
     const storedConfiguration = await fetch(
       `http://127.0.0.1:${port}/api/config`,
-    ).then(async (response) => await response.json());
-    expect(storedConfiguration).toEqual(configuration);
+    ).then(async (response) => await response.json()) as typeof configuration;
+    expect(storedConfiguration).toMatchObject({
+      charges: configuration.charges,
+      monthlyCharges: configuration.monthlyCharges,
+      unobservedRatio: configuration.unobservedRatio,
+    });
+    expect(storedConfiguration.mappings).toEqual(
+      expect.arrayContaining(configuration.mappings),
+    );
 
     const dashboard = await fetch(
       `http://127.0.0.1:${port}/api/dashboard`,
@@ -237,7 +272,13 @@ describe("local server boundary", () => {
         session: { folder: string };
       }>;
       assets: Array<{ product: string; name: string; total: number }>;
-      boundaries: unknown[];
+      boundaries: Array<{
+        amount: number;
+        threshold: number;
+        thresholdLabel: string;
+        status: string;
+        tone: string;
+      }>;
       guidance: unknown[];
       products: Array<{
         name: string;
@@ -249,15 +290,37 @@ describe("local server boundary", () => {
 
     expect(dashboard.meta).toMatchObject({
       source: "local",
-      sessionCount: 1,
+      sessionCount: 2,
       allocatedRate: 100,
     });
-    expect(dashboard.months).toHaveLength(1);
-    expect(dashboard.allocations.length).toBeGreaterThanOrEqual(2);
-    expect(dashboard.assets).toEqual([
-      expect.objectContaining({ product: "Product A", name: "A-v1" }),
+    expect(dashboard.months).toHaveLength(2);
+    expect(dashboard.months.map((month) => month.label)).toEqual([
+      "2025年4月",
+      "2026年4月",
     ]);
-    expect(Array.isArray(dashboard.boundaries)).toBe(true);
+    expect(dashboard.allocations.length).toBeGreaterThanOrEqual(2);
+    expect(dashboard.assets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ product: "Product A", name: "A-v1" }),
+      expect.objectContaining({
+        product: "Product A",
+        name: "A-v1（改良計画）",
+      }),
+    ]));
+    expect(dashboard.boundaries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        amount: 108_000,
+        threshold: 100_000,
+        thresholdLabel: "10万円境界",
+        status: expect.stringContaining("通常償却または3年一括の候補"),
+        tone: "review",
+      }),
+      expect.objectContaining({
+        asset: "A-v1（改良計画）",
+        threshold: 200_000,
+        thresholdLabel: expect.stringContaining("修繕・改良"),
+        tone: "review",
+      }),
+    ]));
     expect(Array.isArray(dashboard.guidance)).toBe(true);
     expect(dashboard.products[0]).toEqual(
       expect.objectContaining({
@@ -271,12 +334,25 @@ describe("local server boundary", () => {
     const claudeTotal = dashboard.allocations
       .filter((allocation) => allocation.provider === "Claude Code")
       .reduce((sum, allocation) => sum + allocation.amount, 0);
-    expect(claudeTotal).toBe(configuration.monthlyCharges[0].amountJpy);
+    expect(claudeTotal).toBe(
+      configuration.monthlyCharges.reduce(
+        (sum, charge) => sum + charge.amountJpy,
+        0,
+      ),
+    );
     expect(
       dashboard.months[0]!.current +
       dashboard.months[0]!.future +
       dashboard.months[0]!.review,
     ).toBe(configuration.monthlyCharges[0].amountJpy);
+    expect(
+      dashboard.months[1]!.current +
+      dashboard.months[1]!.future +
+      dashboard.months[1]!.review,
+    ).toBe(
+      configuration.monthlyCharges[1].amountJpy +
+      configuration.charges.codex,
+    );
 
     const serializedDashboard = JSON.stringify(dashboard);
     expect(serializedDashboard).not.toContain("C:\\Synthetic");

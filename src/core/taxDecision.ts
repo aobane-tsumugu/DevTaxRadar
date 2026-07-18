@@ -82,6 +82,13 @@ function monetaryEstimates(
       estimateStatus: "estimated" as const,
     };
   }
+  if (candidate === "unclassified") {
+    return {
+      currentYearExpenseEstimate: null,
+      futureBalanceEstimate: null,
+      estimateStatus: "not-calculated" as const,
+    };
+  }
   return {
     currentYearExpenseEstimate: 0,
     futureBalanceEstimate: 0,
@@ -130,19 +137,34 @@ export function decideTaxCandidate(input: TaxDecisionInput): TaxDecision {
     candidate = "prepaid-expense";
     appliedRuleIds.push("TAX-TIMING-PREPAID");
     reasons.push("当期末時点でサービス提供を受けていない期間に対応します。");
+  } else if (input.workPurpose === "sales-production") {
+    if (input.workInProgressAtPeriodEnd === true) {
+      candidate = "production-cost";
+      appliedRuleIds.push("TAX-PRODUCTION-WIP");
+      reasons.push("販売目的で、期末時点に制作中のものへ直接対応します。");
+    } else {
+      candidate = "unclassified";
+      appliedRuleIds.push("TAX-PRODUCTION-PERIOD-END-STATUS-REQUIRED");
+      reasons.push(
+        input.workInProgressAtPeriodEnd === false
+          ? "期末仕掛品ではないため、販売済みか完成在庫かの確認が必要です。"
+          : "販売目的の制作費は、期末時点の制作・販売状況の確認が必要です。",
+      );
+      missingFacts.push(
+        input.workInProgressAtPeriodEnd === false
+          ? "期末時点の販売済み・完成在庫の区分"
+          : "期末時点の販売済み・完成在庫・制作中の区分",
+      );
+    }
   } else if (
-    input.workPurpose === "sales-production" ||
-    (input.workInProgressAtPeriodEnd === true &&
-      (input.revenueModel === "software-sale" ||
-        input.revenueModel === "contract-development" ||
-        input.revenueModel === "digital-content-sale"))
+    input.workInProgressAtPeriodEnd === true &&
+    (input.revenueModel === "software-sale" ||
+      input.revenueModel === "contract-development" ||
+      input.revenueModel === "digital-content-sale")
   ) {
     candidate = "production-cost";
     appliedRuleIds.push("TAX-PRODUCTION-WIP");
-    reasons.push("販売目的の制作物または期末仕掛品へ直接対応します。");
-    if (input.workInProgressAtPeriodEnd === undefined) {
-      missingFacts.push("期末時点の販売済み・未販売・制作中の区分");
-    }
+    reasons.push("販売目的で、期末時点に制作中のものへ直接対応します。");
   } else if (input.placedInService === "before") {
     if (input.workPurpose === "new-development") {
       if (input.directlyAttributable === true) {
