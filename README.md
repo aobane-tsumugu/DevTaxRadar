@@ -16,7 +16,9 @@ https://luma.com/uj22d2rs
 
 ## 公開デモ
 
-Cloudflare Pages版は、複数月の動作確認に使える**完全な合成データ専用デモ**です。実在するセッション、パス、プロンプト、請求額はアップロードしません。公開URLは初回デプロイ後に追記します。
+Cloudflare Pages版は、複数月の動作確認に使える**完全な合成データ専用デモ**です。実在するセッション、パス、プロンプト、請求額はアップロードしません。
+
+**公開URL: [https://devtax-radar.pages.dev/](https://devtax-radar.pages.dev/)**
 
 公開デモは閲覧・画面操作用です。自分のClaude Code／Codex履歴を走査する場合は、下記のローカル版を使用してください。
 
@@ -70,7 +72,7 @@ npm ci
 npm run deploy:cloudflare
 ```
 
-Cloudflare Pagesの設定値は、Build commandが`npm run build`、Build output directoryが`dist`、Production branchが`main`です。GitHub連携を設定すると、`main`へのpushから継続デプロイできます。
+このPagesプロジェクトはWranglerによるDirect Upload方式です。自動デプロイを追加する場合は、Cloudflareで`Cloudflare Pages: Edit`だけを対象アカウントへ許可したAPIトークンを作成し、GitHub ActionsのRepository secretsへ`CLOUDFLARE_API_TOKEN`と`CLOUDFLARE_ACCOUNT_ID`を登録します。秘密値をリポジトリやIssueへ記載しないでください。
 
 ## 実装済み
 
