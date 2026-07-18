@@ -218,14 +218,7 @@ function App() {
             <span className={data.meta.source === 'local' ? 'source-badge live' : 'source-badge'}>
               {data.meta.source === 'local' ? '実データ' : 'デモデータ'}
             </span>
-            {data.meta.source === 'demo' ? (
-              <button
-                className="primary-button"
-                onClick={() => setPage(page === 'summary' ? 'evidence' : 'summary')}
-              >
-                {page === 'summary' ? '配賦根拠を見る →' : '年間サマリーへ ←'}
-              </button>
-            ) : (
+            {data.meta.source !== 'demo' && (
               <button className="primary-button" onClick={() => setOnboarding(true)}>
                 ＋ 月次確認
               </button>

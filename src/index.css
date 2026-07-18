@@ -501,6 +501,7 @@ td.number, th.number { text-align: right; font-variant-numeric: tabular-nums; }
   .content { width: calc(100% - 22px); }
   .public-demo-banner { grid-template-columns: 1fr; }
   .demo-shield { display: none; }
+  .demo-banner-copy p { display: none; }
   .chart-legend { justify-content: flex-start; flex-wrap: wrap; }
   .bar-chart { height: 245px; margin-left: 54px; margin-right: 12px; }
   .bar-column { width: min(54px, 20%); }
