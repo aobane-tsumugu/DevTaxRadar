@@ -306,6 +306,7 @@ td.number, th.number { text-align: right; font-variant-numeric: tabular-nums; }
 .confirmation input { accent-color: var(--indigo); }
 .demo-mode-banner { margin: -16px 0 17px; padding: 9px 11px; display: flex; align-items: center; gap: 9px; color: #805d1c; border: 1px solid #f0d79d; border-radius: 8px; background: #fff8e8; font-size: 8px; }
 .demo-mode-banner strong { padding: 4px 6px; border-radius: 5px; color: #fff; background: #c48a22; font-size: 7px; letter-spacing: .06em; }
+.public-demo-banner { margin: 0 0 18px; font-size: 11px; }
 .setup-notice { margin-top: 12px; padding: 9px 11px; display: flex; align-items: center; gap: 8px; border-radius: 8px; font-size: 8px; line-height: 1.5; }
 .setup-notice span { width: 18px; height: 18px; flex: 0 0 18px; display: grid; place-items: center; border-radius: 50%; font-weight: 800; }
 .setup-notice.success { color: #337963; background: var(--green-soft); }

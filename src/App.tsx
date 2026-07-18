@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   getDashboardData,
+  isLocalRuntime,
   type Allocation,
   type DashboardData,
   type TaxGroup,
@@ -57,6 +58,10 @@ function App() {
 
   useEffect(() => {
     getDashboardData().then(setData)
+    if (!isLocalRuntime()) {
+      setRuntimeLoading(false)
+      return
+    }
     Promise.all([getRuntime(), getConfiguration()])
       .then(([nextRuntime, nextConfiguration]) => {
         setRuntime(nextRuntime)
@@ -187,7 +192,7 @@ function App() {
         <div className="sidebar-status">
           <div className="status-line">
             <span className="pulse" />
-            <span>ローカル接続中</span>
+            <span>{data.meta.source === 'local' ? 'ローカル接続中' : '合成データデモ'}</span>
           </div>
           <strong>{data.meta.sessionCount.toLocaleString()} sessions</strong>
           <small>最終同期 {data.meta.lastSynced}</small>
@@ -195,7 +200,11 @@ function App() {
             設定を確認
           </button>
         </div>
-        <p className="local-note">履歴本文はこのPCから送信されません</p>
+        <p className="local-note">
+          {data.meta.source === 'local'
+            ? '履歴本文はこのPCから送信されません'
+            : '実在する履歴・請求額・パスは含みません'}
+        </p>
       </aside>
 
       <div className="workspace" id="top">
@@ -216,6 +225,12 @@ function App() {
         </header>
 
         <main className="content">
+          {data.meta.source === 'demo' && (
+            <div className="demo-mode-banner public-demo-banner" role="status">
+              <strong>PUBLIC DEMO</strong>
+              完全な合成データです。GitHub版では自分のPC内のClaude Code／Codex履歴を集計できます。
+            </div>
+          )}
           <section className="page-heading">
             <div>
               <span className="eyebrow">

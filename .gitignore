@@ -3,6 +3,8 @@ node_modules/
 dist/
 coverage/
 .vite/
+.wrangler/
+.wrangler-*.log
 artifacts/
 
 # Environment and secrets

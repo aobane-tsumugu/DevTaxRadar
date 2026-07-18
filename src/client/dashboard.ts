@@ -126,7 +126,16 @@ function isDashboardData(value: unknown): value is DashboardData {
   return Boolean(candidate.meta && Array.isArray(candidate.months) && Array.isArray(candidate.allocations))
 }
 
+export function isLocalRuntime(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+}
+
 export async function getDashboardData(): Promise<DashboardData> {
+  // A hosted demo must never probe for local history APIs. Only loopback builds
+  // may request the read-only collector; every other origin uses synthetic data.
+  if (!isLocalRuntime()) return demoDashboard
+
   try {
     const response = await fetch('/api/dashboard', { headers: { Accept: 'application/json' } })
     if (!response.ok) throw new Error(`Dashboard API: ${response.status}`)
