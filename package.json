@@ -1,0 +1,44 @@
+{
+  "name": "devtax-radar",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Allocate Claude Code and Codex subscriptions to explainable product costs.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch src/server/index.ts",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc -b",
+    "start": "tsx src/server/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint",
+    "preview": "vite preview --host 127.0.0.1",
+    "privacy:check": "tsx scripts/privacy-check.ts",
+    "release:pack": "tsx scripts/package-release.ts"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.0",
+    "fastify": "^5.10.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "esbuild": "^0.28.1",
+    "oxlint": "^1.71.0",
+    "tsx": "^4.23.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
+  }
+}

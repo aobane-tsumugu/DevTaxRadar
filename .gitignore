@@ -1,0 +1,45 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.vite/
+artifacts/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Real local usage data
+.local/
+local-data/
+private-data/
+raw-data/
+public/generated/
+**/local-usage.json
+**/raw-usage.json
+**/unsanitized-*.json
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Accidentally copied provider state
+.claude/
+.codex/
+**/.claude/
+**/.codex/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
