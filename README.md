@@ -5,7 +5,6 @@
 > **Claude CodeとCodexの定額料金を、説明可能なプロダクト別AI原価へ。**
 
 **[公開デモを試す](https://devtax-radar.pages.dev/)**（合成データのみ） ·
-**[30秒の審査ガイド](./docs/JUDGING_GUIDE.md)** ·
 **[ローカル版を起動する](#ローカルで起動)**
 
 ## 30秒でわかるDevTax Radar
@@ -209,8 +208,6 @@ npm run build
 
 ## 設計資料
 
-- [30秒の審査ガイド](./docs/JUDGING_GUIDE.md)
-- [共有ペルソナに対する適合監査と改修候補](./docs/PERSONA_GAP_AUDIT.md)
 - [統合プロダクト仕様](./PRODUCT_SPEC.md)
 - [技術設計](./TECHNICAL_DESIGN.md)
 - [セキュリティ方針](./docs/SECURITY.md)
