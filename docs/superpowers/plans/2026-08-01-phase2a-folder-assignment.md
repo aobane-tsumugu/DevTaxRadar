@@ -1745,7 +1745,9 @@ export function buildResumeCommand(
   if (!workingDirectoryExists) {
     return { command: resume, resume, workingDirectoryExists: false }
   }
-  const changeDirectory = `cd "${workingDirectory.replaceAll('"', '\\"')}"`
+  // シェルごとに引用符のエスケープ規則が違うため、エスケープは試みない。
+  // 引用符を含むパスでは cd を省き、理由を返して利用者に判断を委ねる。
+  const changeDirectory = `cd "${workingDirectory}"`
   return {
     command: `${changeDirectory} && ${resume}`,
     changeDirectory,
