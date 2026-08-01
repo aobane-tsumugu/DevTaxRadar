@@ -142,7 +142,7 @@ function App() {
       configuration.charges.claude > 0 ||
       configuration.charges.codex > 0 ||
       configuration.monthlyCharges.some((charge) => charge.amountJpy > 0)
-    if (!hasAnyCharge || data.meta.allocatedRate === 0) {
+    if (!hasAnyCharge || data.meta.classifiedRate === 0) {
       autoOnboardingShown.current = true
       setOnboardingStep(data.meta.sessionCount > 0 ? 1 : 0)
       setOnboarding(true)
@@ -533,7 +533,7 @@ function SummaryPage({
           <PanelHeading
             title="費用の行き先"
             subtitle="AIサービスごとに配賦した月額の積み上げ"
-            trailing={<span className="confidence">配賦済み {data.meta.allocatedRate}%</span>}
+            trailing={<span className="confidence">分類済み {data.meta.classifiedRate}%</span>}
           />
           <div className="chart-legend" aria-hidden="true">
             <span><i className="dot coral" />今年の費用</span>

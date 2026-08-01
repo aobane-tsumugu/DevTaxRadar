@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { emptyPlanningSnapshot, type PlanningSnapshot } from "../../src/planning/types.js";
 
 const children: ChildProcess[] = [];
 const temporaryDirectories: string[] = [];
@@ -252,13 +253,71 @@ describe("local server boundary", () => {
       expect.arrayContaining(configuration.mappings),
     );
 
+    // Task 7: buildDashboard no longer reads configuration.mappings for
+    // classification or product naming (that legacy path is dead; Task 8
+    // removes it). Register planning project rules covering the same two
+    // synthetic sessions so the dashboard groups them the way this test
+    // expects.
+    const planningSnapshot: PlanningSnapshot = {
+      version: 1,
+      profile: {
+        taxYear: 2026,
+        journeyMode: "retrospective",
+        incomeCategory: "undecided",
+        filingType: "undecided",
+        monetizationStatus: "planned",
+        hasBookkeeping: false,
+      },
+      taxUnits: [{
+        id: "tax-unit-product-a",
+        name: "Product A",
+        unitType: "new-software",
+        usageMode: "external",
+        revenueModel: "sales",
+        lifecycleStatus: "developing",
+      }],
+      projectRules: [
+        {
+          id: "rule-product-a",
+          projectKey: projectKey!,
+          effectiveFrom: "2025-01-01",
+          taxUnitId: "tax-unit-product-a",
+          classification: "new-development",
+        },
+        {
+          id: "rule-product-b",
+          projectKey: productB!.projectKey,
+          effectiveFrom: "2025-01-01",
+          taxUnitId: "tax-unit-product-a",
+          classification: "feature-addition",
+        },
+      ],
+      lifecycleEvents: [],
+      equipment: [],
+      homeCosts: [],
+      directCosts: [],
+      evidence: [],
+      decisions: [],
+    };
+    const planningResponse = await fetch(`http://127.0.0.1:${port}/api/planning`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        origin: `http://127.0.0.1:${port}`,
+        "x-devtax-csrf": runtime.csrfToken,
+      },
+      body: JSON.stringify(planningSnapshot),
+    });
+    expect(planningResponse.status).toBe(200);
+
     const dashboard = await fetch(
       `http://127.0.0.1:${port}/api/dashboard`,
     ).then(async (response) => await response.json()) as {
       meta: {
         source: string;
         sessionCount: number;
-        allocatedRate: number;
+        mappedRate: number;
+        classifiedRate: number;
       };
       months: Array<{
         label: string;
@@ -291,7 +350,8 @@ describe("local server boundary", () => {
     expect(dashboard.meta).toMatchObject({
       source: "local",
       sessionCount: 2,
-      allocatedRate: 100,
+      mappedRate: 100,
+      classifiedRate: 100,
     });
     expect(dashboard.months).toHaveLength(2);
     expect(dashboard.months.map((month) => month.label)).toEqual([
@@ -300,10 +360,10 @@ describe("local server boundary", () => {
     ]);
     expect(dashboard.allocations.length).toBeGreaterThanOrEqual(2);
     expect(dashboard.assets).toEqual(expect.arrayContaining([
-      expect.objectContaining({ product: "Product A", name: "A-v1" }),
+      expect.objectContaining({ product: "Product A", name: "Product A" }),
       expect.objectContaining({
         product: "Product A",
-        name: "A-v1（改良計画）",
+        name: "Product A（改良計画）",
       }),
     ]));
     expect(dashboard.boundaries).toEqual(expect.arrayContaining([
@@ -315,7 +375,7 @@ describe("local server boundary", () => {
         tone: "review",
       }),
       expect.objectContaining({
-        asset: "A-v1（改良計画）",
+        asset: "Product A（改良計画）",
         threshold: 200_000,
         thresholdLabel: expect.stringContaining("修繕・改良"),
         tone: "review",
@@ -408,4 +468,122 @@ describe("local server boundary", () => {
     ).then(async (response) => await response.json());
     expect(configurationAfterClear).toEqual(clearedConfiguration);
   }, 20_000);
+});
+
+describe("セッション単位のダッシュボード集計", () => {
+  // This describe block's server and database directory are shared across
+  // both `it` blocks below (the second test relies on a session the first
+  // test wrote), so they are set up once in `beforeAll` and torn down once
+  // in `afterAll` here -- deliberately not registered with the module-level
+  // `children`/`temporaryDirectories` arrays, since the top-level `afterEach`
+  // would tear them down after the first test and break the second.
+  let testPort: number;
+  let dataDirectory: string;
+  let dashboardChild: ChildProcess | undefined;
+  let databaseModule: typeof import("../../src/server/database.ts");
+  let replaceProviderSessions: (typeof import("../../src/server/database.ts"))["replaceProviderSessions"];
+  let savePlanningSnapshot: (typeof import("../../src/server/planningRepository.ts"))["savePlanningSnapshot"];
+
+  beforeAll(async () => {
+    testPort = await reservePort();
+    dataDirectory = mkdtempSync(join(tmpdir(), "devtax-dashboard-agg-"));
+
+    // The two tests below seed the database directly, in this process, so
+    // they don't need real Claude/Codex history fixtures.
+    process.env.DEVTAX_RADAR_DATA_DIR = dataDirectory;
+    vi.resetModules();
+    databaseModule = await import("../../src/server/database.ts");
+    ({ replaceProviderSessions } = databaseModule);
+    ({ savePlanningSnapshot } = await import("../../src/server/planningRepository.ts"));
+
+    dashboardChild = spawn(
+      process.execPath,
+      ["--import", "tsx", resolve("src/server/index.ts")],
+      {
+        cwd: resolve("."),
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          PORT: String(testPort),
+          DEVTAX_RADAR_DATA_DIR: dataDirectory,
+        },
+      },
+    );
+    await waitForRuntime(testPort);
+  });
+
+  afterAll(async () => {
+    if (dashboardChild && dashboardChild.exitCode === null) {
+      dashboardChild.kill();
+      await new Promise<void>((resolveExit) => {
+        const timeout = setTimeout(resolveExit, 2_000);
+        dashboardChild!.once("exit", () => {
+          clearTimeout(timeout);
+          resolveExit();
+        });
+      });
+    }
+    databaseModule?.getDatabase().close();
+    delete process.env.DEVTAX_RADAR_DATA_DIR;
+    rmSync(dataDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  });
+
+  async function getJson(path: string): Promise<any> {
+    const response = await fetch(`http://127.0.0.1:${testPort}${path}`);
+    return await response.json();
+  }
+
+  it("ルールがなければ分類済みは0%、対応付け済みも0%になる", async () => {
+    replaceProviderSessions("claude", [{
+      provider: "claude",
+      sessionKey: "session_integration_a",
+      projectKey: "project_integration_a",
+      month: "2026-07",
+      startedAt: "2026-07-15T10:00:00.000Z",
+      endedAt: "2026-07-15T11:00:00.000Z",
+      messageCount: 3,
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      schemaVersion: "test-v1",
+      confidence: "medium",
+    }], { filesSeen: 1, malformedLines: 0 });
+
+    const dashboard = await getJson("/api/dashboard");
+    expect(dashboard.meta.classifiedRate).toBe(0);
+    expect(dashboard.meta.mappedRate).toBe(0);
+  });
+
+  it("ルールを登録すると分類済みが上がる", async () => {
+    savePlanningSnapshot({
+      ...emptyPlanningSnapshot(2026),
+      taxUnits: [{
+        id: "tax-unit-integration",
+        name: "統合テスト用アプリ",
+        unitType: "new-software",
+        usageMode: "external",
+        revenueModel: "sales",
+        lifecycleStatus: "developing",
+      }],
+      projectRules: [{
+        id: "rule-integration",
+        projectKey: "project_integration_a",
+        effectiveFrom: "2026-07-01",
+        taxUnitId: "tax-unit-integration",
+        classification: "new-development",
+      }],
+    });
+
+    const dashboard = await getJson("/api/dashboard");
+    expect(dashboard.meta.classifiedRate).toBe(100);
+    expect(dashboard.allocations.some(
+      (row: { product: string }) => row.product === "統合テスト用アプリ",
+    )).toBe(true);
+  });
 });

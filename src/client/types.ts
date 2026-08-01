@@ -32,7 +32,8 @@ export type DashboardData = {
     source: 'local' | 'demo'
     sessionCount: number
     lastSynced: string
-    allocatedRate: number
+    mappedRate: number
+    classifiedRate: number
   }
   months: Array<{ label: string; current: number; future: number; review: number }>
   allocations: Allocation[]

@@ -164,7 +164,8 @@ export const demoDashboard: DashboardData = {
     source: 'demo',
     sessionCount: 1051,
     lastSynced: 'たった今',
-    allocatedRate: 92,
+    mappedRate: 92,
+    classifiedRate: 88,
   },
   months: [
     { label: '4月', current: 11400, future: 29400, review: 4200 },

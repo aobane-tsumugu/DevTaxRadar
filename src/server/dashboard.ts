@@ -5,19 +5,16 @@ import {
   type BillingMonth,
 } from '../core/index.js'
 import type { Allocation, DashboardData, TaxGroup } from '../client/types.js'
-import type { PlanningSnapshot } from '../planning/types.js'
+import type { ProjectClassification, TaxUnitRecord } from '../planning/types.js'
+import type { UsageProvider } from '../adapters/types.ts'
 import {
   getConfiguration,
-  getProjectUsage,
   getUsageOverview,
-  type ProjectMapping,
-  type ProjectUsageRow,
+  getUsageSessions,
+  type UsageSessionRow,
 } from './database.js'
 import { getPlanningSnapshot } from './planningRepository.js'
-
-type ResolvedProjectMapping = ProjectMapping & {
-  source: 'planning' | 'legacy'
-}
+import { resolveSessionAssignment, type SessionAssignment } from './sessionAssignment.js'
 
 const providerLabel = {
   claude: 'Claude Code',
@@ -28,7 +25,7 @@ function displayBillingMonth(month: string): string {
   return `${month.slice(0, 4)}年${Number(month.slice(5))}月`
 }
 
-const classificationView: Record<ProjectMapping['classification'], {
+const classificationView: Record<ProjectClassification, {
   group: TaxGroup
   stage: string
   candidate: string
@@ -56,6 +53,13 @@ const classificationView: Record<ProjectMapping['classification'], {
     rule: '既存資産への新機能追加・価値増加',
     reason: 'ユーザーが一つの改良計画として登録したAI利用です。',
   },
+  'general-learning': {
+    group: 'review',
+    stage: '一般学習',
+    candidate: '対象外',
+    rule: 'ユーザーが一般学習として登録',
+    reason: '特定の制作物へ直接対応しない学習として登録されています。',
+  },
   private: {
     group: 'review',
     stage: '私用',
@@ -70,15 +74,6 @@ const classificationView: Record<ProjectMapping['classification'], {
     rule: 'ユーザー確認待ち',
     reason: 'プロダクトと作業目的がまだ確定していません。',
   },
-}
-
-function usageWeight(row: ProjectUsageRow): number {
-  return calculateWeightedTokenUsage({
-    inputTokens: row.inputTokens,
-    cachedInputTokens: row.cacheReadTokens,
-    cacheCreationTokens: row.cacheWriteTokens,
-    outputTokens: row.outputTokens,
-  })
 }
 
 function safeLocalLabel(value: string | null, fallback: string): string {
@@ -96,103 +91,85 @@ function safeLocalLabel(value: string | null, fallback: string): string {
   return cleaned || fallback
 }
 
-function displayProject(row: ProjectUsageRow, mapping?: ResolvedProjectMapping): string {
-  return mapping?.productName || safeLocalLabel(
-    row.projectLabel,
-    `Project ${row.projectKey.slice(-6)}`,
-  )
+function displayProject(
+  projectKey: string,
+  projectLabel: string | null,
+  taxUnitId: string | null,
+  taxUnitById: Map<string, TaxUnitRecord>,
+): string {
+  const taxUnit = taxUnitId ? taxUnitById.get(taxUnitId) : undefined
+  return taxUnit?.name ?? safeLocalLabel(projectLabel, `Project ${projectKey.slice(-6)}`)
 }
 
-function monthBounds(month: string): { first: string; last: string } {
-  const [year, monthNumber] = month.split('-').map(Number)
-  const lastDay = new Date(Date.UTC(year!, monthNumber!, 0)).getUTCDate()
-  return {
-    first: `${month}-01`,
-    last: `${month}-${String(lastDay).padStart(2, '0')}`,
-  }
+type AssignedSession = UsageSessionRow & { assignment: SessionAssignment }
+
+type ProjectMonthGroup = {
+  provider: 'claude' | 'codex'
+  month: string
+  projectKey: string
+  taxUnitId: string | null
+  classification: ProjectClassification
+  projectLabel: string | null
+  model: string | null
+  sessions: number
+  messageCount: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  firstStartedAt: string
+  lastEndedAt: string
 }
 
-/**
- * Resolve a monthly aggregate conservatively. Since the usage row no longer
- * contains daily detail, a planning rule is usable only when it is the sole
- * compatible rule touching the month and covers every day of that month.
- */
-export function resolveMonthlyProjectMapping(
-  planning: PlanningSnapshot,
-  row: Pick<ProjectUsageRow, 'projectKey' | 'provider' | 'month'>,
-  legacyMapping?: ProjectMapping,
-): ResolvedProjectMapping | undefined {
-  const projectRules = planning.projectRules.filter((rule) => rule.projectKey === row.projectKey)
-  if (projectRules.length === 0) {
-    return legacyMapping ? { ...legacyMapping, source: 'legacy' } : undefined
-  }
-
-  const { first, last } = monthBounds(row.month)
-  const touchingRules = projectRules.filter((rule) =>
-    (!rule.provider || rule.provider === row.provider) &&
-    rule.effectiveFrom <= last &&
-    (!rule.effectiveTo || rule.effectiveTo >= first),
-  )
-  if (touchingRules.length !== 1) return undefined
-
-  const rule = touchingRules[0]!
-  if (rule.effectiveFrom > first || (rule.effectiveTo && rule.effectiveTo < last)) {
-    return undefined
-  }
-  const taxUnit = planning.taxUnits.find((unit) => unit.id === rule.taxUnitId)
-  if (!taxUnit) return undefined
-
-  return {
-    projectKey: row.projectKey,
-    productName: taxUnit.name,
-    assetName: taxUnit.name,
-    classification: rule.classification,
-    source: 'planning',
-  }
+function groupKey(group: ProjectMonthGroup): string {
+  return [
+    group.provider, group.month, group.projectKey,
+    group.taxUnitId ?? '', group.classification,
+  ].join(':')
 }
 
-function allocationForProject(
-  row: ProjectUsageRow,
+function allocationForGroup(
+  group: ProjectMonthGroup,
   line: AllocationLine,
-  mapping: ResolvedProjectMapping | undefined,
+  taxUnitById: Map<string, TaxUnitRecord>,
 ): Allocation {
-  const classification = mapping?.classification ?? 'unclassified'
-  const view = classificationView[classification]
-  const product = displayProject(row, mapping)
+  const view = classificationView[group.classification]
+  const taxUnit = group.taxUnitId ? taxUnitById.get(group.taxUnitId) : undefined
+  const product = taxUnit?.name
+    ?? safeLocalLabel(group.projectLabel, `Project ${group.projectKey.slice(-6)}`)
   return {
-    id: `${row.provider}-${row.month}-${row.projectKey}`,
-    month: displayBillingMonth(row.month),
-    provider: providerLabel[row.provider],
+    id: groupKey(group),
+    month: displayBillingMonth(group.month),
+    provider: providerLabel[group.provider],
     product,
-    asset: mapping?.assetName || '要確認',
+    asset: taxUnit?.name ?? '要確認',
     stage: view.stage,
     usageRate: Math.round(line.allocationRatio * 1000) / 10,
     amount: line.allocatedAmountJpy,
     group: view.group,
     taxCandidate: view.candidate,
-    confidence: mapping ? 'B' : 'C',
+    confidence: taxUnit ? 'B' : 'C',
     rule: view.rule,
     reason: view.reason,
-    missing: mapping
+    missing: taxUnit
       ? '供用状況と証拠を月次確認してください。'
       : 'プロダクト、資産単位、作業目的を選択してください。',
     session: {
-      date: row.month,
-      id: `${row.provider === 'codex' ? 'cdx' : 'cld'}-••••-${row.projectKey.slice(-4)}`,
-      folder: safeLocalLabel(row.projectLabel, '名称未取得'),
+      date: `${group.firstStartedAt.slice(0, 10)} 〜 ${group.lastEndedAt.slice(0, 10)}`,
+      id: `${group.provider === 'codex' ? 'cdx' : 'cld'}-••••-${group.projectKey.slice(-4)}`,
+      folder: safeLocalLabel(group.projectLabel, '名称未取得'),
       branch: '取得対象外',
-      model: row.model ?? 'unknown',
-      tokens: row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens,
-      classification: mapping
-        ? `${mapping.source === 'planning' ? '期間ルール' : 'ローカル設定'} → ${mapping.productName}`
-        : '未分類',
-      manualEdit: mapping ? '確認済み' : '要確認',
+      model: group.model ?? 'unknown',
+      tokens: group.inputTokens + group.outputTokens
+        + group.cacheReadTokens + group.cacheWriteTokens,
+      classification: taxUnit ? `期間ルール → ${taxUnit.name}` : '未分類',
+      manualEdit: `${group.sessions}セッション / ${group.messageCount}メッセージ`,
     },
   }
 }
 
 function unobservedAllocation(
-  provider: 'claude' | 'codex',
+  provider: UsageProvider,
   month: string,
   line: AllocationLine,
 ): Allocation {
@@ -232,42 +209,83 @@ function unobservedAllocation(
 }
 
 export function buildDashboard(): DashboardData {
-  const rows = getProjectUsage()
+  const sessions = getUsageSessions()
   const overview = getUsageOverview()
   const configuration = getConfiguration()
   const planning = getPlanningSnapshot()
-  const legacyMappingByProject = new Map(
-    configuration.mappings.map((mapping) => [mapping.projectKey, mapping]),
-  )
-  const resolvedMappingBySource = new Map<string, ResolvedProjectMapping>()
-  const rowBySource = new Map<string, ProjectUsageRow>()
-  const grouped = new Map<string, ProjectUsageRow[]>()
+  const taxUnitById = new Map(planning.taxUnits.map((unit) => [unit.id, unit]))
+
+  const assigned: AssignedSession[] = sessions.map((session) => ({
+    ...session,
+    assignment: resolveSessionAssignment(session, planning.projectRules),
+  }))
+
+  const classifiedSessions = assigned.filter(
+    (session) => session.assignment.classification !== 'unclassified',
+  ).length
+  const mappedSessions = assigned.filter(
+    (session) => session.assignment.ruleId !== null,
+  ).length
+
+  const groups = new Map<string, ProjectMonthGroup>()
+  for (const session of assigned) {
+    const key = [
+      session.provider, session.month, session.projectKey,
+      session.assignment.taxUnitId ?? '', session.assignment.classification,
+    ].join(':')
+    const current = groups.get(key)
+    if (!current) {
+      groups.set(key, {
+        provider: session.provider,
+        month: session.month,
+        projectKey: session.projectKey,
+        taxUnitId: session.assignment.taxUnitId,
+        classification: session.assignment.classification,
+        projectLabel: session.projectLabel,
+        model: session.model,
+        sessions: 1,
+        messageCount: session.messageCount,
+        inputTokens: session.inputTokens,
+        outputTokens: session.outputTokens,
+        cacheReadTokens: session.cacheReadTokens,
+        cacheWriteTokens: session.cacheWriteTokens,
+        firstStartedAt: session.startedAt,
+        lastEndedAt: session.endedAt,
+      })
+      continue
+    }
+    current.sessions += 1
+    current.messageCount += session.messageCount
+    current.inputTokens += session.inputTokens
+    current.outputTokens += session.outputTokens
+    current.cacheReadTokens += session.cacheReadTokens
+    current.cacheWriteTokens += session.cacheWriteTokens
+    current.projectLabel ??= session.projectLabel
+    current.model ??= session.model
+    if (session.startedAt < current.firstStartedAt) current.firstStartedAt = session.startedAt
+    if (session.endedAt > current.lastEndedAt) current.lastEndedAt = session.endedAt
+  }
+
+  const groupById = new Map([...groups.values()].map((group) => [groupKey(group), group]))
+  const byProviderMonth = new Map<string, ProjectMonthGroup[]>()
+  for (const group of groups.values()) {
+    const key = `${group.provider}:${group.month}`
+    byProviderMonth.set(key, [...(byProviderMonth.get(key) ?? []), group])
+  }
+
   const monthlyChargeByKey = new Map(
     configuration.monthlyCharges.map((charge) => [
       `${charge.provider}:${charge.month}`,
       charge.amountJpy,
     ]),
   )
-
-  for (const row of rows) {
-    const key = `${row.provider}:${row.month}`
-    grouped.set(key, [...(grouped.get(key) ?? []), row])
-    const sourceId = `${row.provider}:${row.month}:${row.projectKey}`
-    const resolved = resolveMonthlyProjectMapping(
-      planning,
-      row,
-      legacyMappingByProject.get(row.projectKey),
-    )
-    if (resolved) resolvedMappingBySource.set(sourceId, resolved)
-  }
-
   const providerMonthKeys = new Set([
-    ...grouped.keys(),
+    ...byProviderMonth.keys(),
     ...monthlyChargeByKey.keys(),
   ])
+
   const inputs = [...providerMonthKeys].sort().map((key) => {
-    const groupRows = grouped.get(key) ?? []
-    const [provider, month] = key.split(':') as ['claude' | 'codex', string]
+    const [provider, month] = key.split(':') as [UsageProvider, string]
     return {
       provider,
       billingMonth: month as BillingMonth,
@@ -276,38 +294,34 @@ export function buildDashboard(): DashboardData {
         kind: 'estimated' as const,
         ratio: configuration.unobservedRatio,
       },
-      usageLines: groupRows.map((row) => {
-        const id = `${row.provider}:${row.month}:${row.projectKey}`
-        rowBySource.set(id, row)
-        return {
-          id,
-          productId: row.projectKey,
-          bucket: resolvedMappingBySource.get(id)?.classification === 'private'
-            ? 'private' as const
-            : 'product' as const,
-          usageWeight: usageWeight(row),
-        }
-      }),
+      usageLines: (byProviderMonth.get(key) ?? []).map((group) => ({
+        id: groupKey(group),
+        productId: group.projectKey,
+        taxUnitId: group.taxUnitId ?? undefined,
+        bucket: group.classification === 'private' || group.classification === 'general-learning'
+          ? 'private' as const
+          : 'product' as const,
+        usageWeight: calculateWeightedTokenUsage({
+          inputTokens: group.inputTokens,
+          cachedInputTokens: group.cacheReadTokens,
+          cacheCreationTokens: group.cacheWriteTokens,
+          outputTokens: group.outputTokens,
+        }),
+      })),
     }
   })
 
   const allocations: Allocation[] = []
   for (const result of allocateSubscriptions(inputs)) {
     for (const line of result.lines) {
-      if (line.kind === 'rounding-adjustment' && line.allocatedAmountJpy === 0) {
-        continue
-      }
+      if (line.kind === 'rounding-adjustment' && line.allocatedAmountJpy === 0) continue
       if (line.kind === 'unobserved' || line.kind === 'rounding-adjustment') {
         allocations.push(unobservedAllocation(result.provider, result.billingMonth, line))
         continue
       }
-      const row = line.sourceId ? rowBySource.get(line.sourceId) : undefined
-      if (!row) continue
-      allocations.push(allocationForProject(
-        row,
-        line,
-        line.sourceId ? resolvedMappingBySource.get(line.sourceId) : undefined,
-      ))
+      const group = line.sourceId ? groupById.get(line.sourceId) : undefined
+      if (!group) continue
+      allocations.push(allocationForGroup(group, line, taxUnitById))
     }
   }
 
@@ -323,6 +337,9 @@ export function buildDashboard(): DashboardData {
     }
   })
 
+  // Built from the raw session rows (pre-classification), not from `groups`:
+  // a folder must appear exactly once in the product list regardless of how
+  // many classifications its sessions carry across a month.
   const projectSummaries = new Map<string, {
     name: string
     folder: string
@@ -334,26 +351,27 @@ export function buildDashboard(): DashboardData {
     lastObservedMonth: string
     providers: Array<'Claude Code' | 'Codex'>
   }>()
-  for (const row of rows) {
-    const current = projectSummaries.get(row.projectKey)
-    const mapping = resolvedMappingBySource.get(`${row.provider}:${row.month}:${row.projectKey}`)
-    projectSummaries.set(row.projectKey, {
-      name: displayProject(row, mapping),
-      folder: safeLocalLabel(row.projectLabel, `Project ${row.projectKey.slice(-6)}`),
-      sessions: (current?.sessions ?? 0) + row.sessions,
-      projectKey: row.projectKey,
-      firstObservedAt: [current?.firstObservedAt, row.firstObservedAt]
+  for (const session of assigned) {
+    const current = projectSummaries.get(session.projectKey)
+    projectSummaries.set(session.projectKey, {
+      name: displayProject(
+        session.projectKey, session.projectLabel, session.assignment.taxUnitId, taxUnitById,
+      ),
+      folder: safeLocalLabel(session.projectLabel, `Project ${session.projectKey.slice(-6)}`),
+      sessions: (current?.sessions ?? 0) + 1,
+      projectKey: session.projectKey,
+      firstObservedAt: [current?.firstObservedAt, session.startedAt]
         .filter((value): value is string => Boolean(value))
         .sort()[0],
-      lastObservedAt: [current?.lastObservedAt, row.lastObservedAt]
+      lastObservedAt: [current?.lastObservedAt, session.endedAt]
         .filter((value): value is string => Boolean(value))
         .sort()
         .at(-1),
-      firstObservedMonth: [current?.firstObservedMonth, row.month].filter(Boolean).sort()[0]!,
-      lastObservedMonth: [current?.lastObservedMonth, row.month].filter(Boolean).sort().at(-1)!,
+      firstObservedMonth: [current?.firstObservedMonth, session.month].filter(Boolean).sort()[0]!,
+      lastObservedMonth: [current?.lastObservedMonth, session.month].filter(Boolean).sort().at(-1)!,
       providers: [...new Set([
         ...(current?.providers ?? []),
-        row.provider === 'claude' ? 'Claude Code' as const : 'Codex' as const,
+        session.provider === 'claude' ? 'Claude Code' as const : 'Codex' as const,
       ])],
     })
   }
@@ -429,9 +447,6 @@ export function buildDashboard(): DashboardData {
     }
   })
 
-  const mappedRows = rows.filter((row) =>
-    resolvedMappingBySource.has(`${row.provider}:${row.month}:${row.projectKey}`),
-  ).length
   const lastScan = overview.recentScans.find((scan) => scan.status === 'complete')
 
   return {
@@ -441,7 +456,8 @@ export function buildDashboard(): DashboardData {
       lastSynced: typeof lastScan?.completedAt === 'string'
         ? new Date(lastScan.completedAt).toLocaleString('ja-JP')
         : '未走査',
-      allocatedRate: rows.length === 0 ? 0 : Math.round(mappedRows / rows.length * 100),
+      mappedRate: sessions.length === 0 ? 0 : Math.round(mappedSessions / sessions.length * 100),
+      classifiedRate: sessions.length === 0 ? 0 : Math.round(classifiedSessions / sessions.length * 100),
     },
     months,
     allocations,
@@ -449,9 +465,9 @@ export function buildDashboard(): DashboardData {
     assets,
     guidance: [
       {
-        title: `${rows.length - mappedRows}件の未分類利用（月・プロジェクト単位）`,
+        title: `${sessions.length - classifiedSessions}件の未分類利用（セッション単位）`,
         description: 'オンボーディングでプロダクトと作業目的を確認してください',
-        severity: rows.length === mappedRows ? 'ok' : 'warning',
+        severity: sessions.length === classifiedSessions ? 'ok' : 'warning',
       },
       {
         title: `未取得利用 ${Math.round(configuration.unobservedRatio * 100)}%`,
