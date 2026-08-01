@@ -52,9 +52,10 @@ const projectRuleSchema = z.object({
   provider: z.enum(['claude', 'codex']).optional(),
   effectiveFrom: date,
   effectiveTo: date.optional(),
-  taxUnitId: identifier,
+  taxUnitId: identifier.optional(),
   classification: z.enum([
-    'new-development', 'maintenance', 'feature-addition', 'private', 'unclassified',
+    'new-development', 'maintenance', 'feature-addition',
+    'general-learning', 'private', 'unclassified',
   ]),
   reason: z.string().trim().max(1_000).optional(),
 })
@@ -283,6 +284,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
         ...row,
         provider: optional(row.provider as string | null),
         effectiveTo: optional(row.effectiveTo as string | null),
+        taxUnitId: optional(row.taxUnitId as string | null),
         reason: optional(row.reason as string | null),
       })),
     lifecycleEvents: (db.prepare(`SELECT id, tax_unit_id AS taxUnitId, event_type AS eventType,
@@ -385,7 +387,7 @@ export function savePlanningSnapshot(snapshot: PlanningSnapshot, db: DatabaseSyn
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     for (const item of parsed.projectRules) projectRule.run(item.id, item.projectKey,
       item.provider ?? null, item.effectiveFrom, item.effectiveTo ?? null,
-      item.taxUnitId, item.classification, item.reason ?? null)
+      item.taxUnitId ?? null, item.classification, item.reason ?? null)
 
     const event = db.prepare(`INSERT INTO planning_lifecycle_events(id, tax_unit_id,
       event_type, occurred_on, recorded_at, evidence_ids_json, note) VALUES (?, ?, ?, ?, ?, ?, ?)`)

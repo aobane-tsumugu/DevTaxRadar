@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { PlanningSnapshot } from '../../src/planning/types.js'
+import { emptyPlanningSnapshot, type PlanningSnapshot } from '../../src/planning/types.js'
 
 const directories: string[] = []
 
@@ -175,5 +175,84 @@ describe('planning repository', () => {
     expect(markdown).toContain('AIワークステーション')
     expect(markdown).toContain('正式な制作作業へ初めて利用した')
     expect(markdown).not.toContain('C:/private/receipt.pdf')
+  })
+
+  it('制作物を指定しないルールを保存できる', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'devtax-planning-'))
+    directories.push(directory)
+    process.env.DEVTAX_RADAR_DATA_DIR = directory
+    const repository = await import('../../src/server/planningRepository.js')
+    const database = await import('../../src/server/database.js')
+    const db = database.getDatabase()
+
+    try {
+      const snapshot = {
+        ...emptyPlanningSnapshot(2026),
+        projectRules: [{
+          id: 'rule-private',
+          projectKey: 'project_private_0001',
+          effectiveFrom: '2026-01-01',
+          classification: 'private' as const,
+        }],
+      }
+
+      repository.savePlanningSnapshot(snapshot, db)
+      const stored = repository.getPlanningSnapshot(db)
+      expect(stored.projectRules[0]?.taxUnitId).toBeUndefined()
+      expect(stored.projectRules[0]?.classification).toBe('private')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('一般学習の分類を保存できる', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'devtax-planning-'))
+    directories.push(directory)
+    process.env.DEVTAX_RADAR_DATA_DIR = directory
+    const repository = await import('../../src/server/planningRepository.js')
+    const database = await import('../../src/server/database.js')
+    const db = database.getDatabase()
+
+    try {
+      const snapshot = {
+        ...emptyPlanningSnapshot(2026),
+        projectRules: [{
+          id: 'rule-learning',
+          projectKey: 'project_learning_001',
+          effectiveFrom: '2026-01-01',
+          classification: 'general-learning' as const,
+        }],
+      }
+
+      repository.savePlanningSnapshot(snapshot, db)
+      expect(repository.getPlanningSnapshot(db).projectRules[0]?.classification).toBe('general-learning')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('存在しない制作物を指すルールは拒否する', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'devtax-planning-'))
+    directories.push(directory)
+    process.env.DEVTAX_RADAR_DATA_DIR = directory
+    const repository = await import('../../src/server/planningRepository.js')
+    const database = await import('../../src/server/database.js')
+    const db = database.getDatabase()
+
+    try {
+      const snapshot = {
+        ...emptyPlanningSnapshot(2026),
+        projectRules: [{
+          id: 'rule-orphan',
+          projectKey: 'project_orphan_0001',
+          effectiveFrom: '2026-01-01',
+          taxUnitId: 'missing-unit',
+          classification: 'new-development' as const,
+        }],
+      }
+      expect(() => repository.savePlanningSnapshot(snapshot, db)).toThrow()
+    } finally {
+      db.close()
+    }
   })
 })

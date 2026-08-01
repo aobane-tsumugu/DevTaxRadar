@@ -86,6 +86,7 @@ export type ProjectClassification =
   | 'new-development'
   | 'maintenance'
   | 'feature-addition'
+  | 'general-learning'
   | 'private'
   | 'unclassified'
 

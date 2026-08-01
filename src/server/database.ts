@@ -64,6 +64,19 @@ const USAGE_EVENTS_SCHEMA = `
   CREATE INDEX IF NOT EXISTS usage_events_project ON usage_events(project_key);
 `
 
+const PLANNING_PROJECT_RULES_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS planning_project_rules (
+    id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL,
+    provider TEXT,
+    effective_from TEXT NOT NULL,
+    effective_to TEXT,
+    tax_unit_id TEXT REFERENCES planning_tax_units(id),
+    classification TEXT NOT NULL,
+    reason TEXT
+  ) STRICT;
+`
+
 export function getDatabase(): DatabaseSync {
   if (database) {
     return database
@@ -159,16 +172,7 @@ export function getDatabase(): DatabaseSync {
       notes TEXT
     ) STRICT;
 
-    CREATE TABLE IF NOT EXISTS planning_project_rules (
-      id TEXT PRIMARY KEY,
-      project_key TEXT NOT NULL,
-      provider TEXT,
-      effective_from TEXT NOT NULL,
-      effective_to TEXT,
-      tax_unit_id TEXT NOT NULL REFERENCES planning_tax_units(id),
-      classification TEXT NOT NULL,
-      reason TEXT
-    ) STRICT;
+    ${PLANNING_PROJECT_RULES_SCHEMA}
 
     CREATE TABLE IF NOT EXISTS planning_lifecycle_events (
       id TEXT PRIMARY KEY,
@@ -260,6 +264,20 @@ export function getDatabase(): DatabaseSync {
   }
   if (!taxUnitColumns.has('monetization_status')) {
     database.exec(`ALTER TABLE planning_tax_units ADD COLUMN monetization_status TEXT NOT NULL DEFAULT 'planned'`)
+  }
+
+  // v0.1.0 is unreleased; only developers hold a database where tax_unit_id
+  // on planning_project_rules is still NOT NULL. Rules are re-enterable
+  // configuration, so dropping and recreating them here is acceptable.
+  // planning_project_rules is the child side of the foreign key to
+  // planning_tax_units, so dropping it does not touch tax unit rows and does
+  // not violate the enabled foreign key constraints.
+  const projectRuleColumns = database.prepare(`PRAGMA table_info(planning_project_rules)`)
+    .all() as Array<{ name: string; notnull: number }>
+  const taxUnitIdColumn = projectRuleColumns.find((column) => column.name === 'tax_unit_id')
+  if (taxUnitIdColumn?.notnull === 1) {
+    database.exec('DROP TABLE planning_project_rules')
+    database.exec(PLANNING_PROJECT_RULES_SCHEMA)
   }
 
   // v0.1.0 is unreleased; only developers hold a database in the old shape.

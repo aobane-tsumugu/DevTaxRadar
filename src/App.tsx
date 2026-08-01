@@ -1094,7 +1094,7 @@ function Onboarding({
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ kind: 'success' | 'error' | 'info'; message: string } | null>(null)
   const [planningDraft, setPlanningDraft] = useState<PlanningSnapshot>(planning)
-  const [ruleAssignments, setRuleAssignments] = useState<Record<string, { taxUnitId: string; effectiveFrom: string }>>({})
+  const [ruleAssignments, setRuleAssignments] = useState<Record<string, { taxUnitId: string | undefined; effectiveFrom: string }>>({})
   const [selectedHistoryProjects, setSelectedHistoryProjects] = useState<Record<string, boolean>>({})
   const onboardingBodyRef = useRef<HTMLDivElement>(null)
   const rankedProducts = data.products

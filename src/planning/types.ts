@@ -51,14 +51,22 @@ export type TaxUnitRecord = {
   notes?: string
 }
 
+export type ProjectClassification =
+  | 'new-development'
+  | 'maintenance'
+  | 'feature-addition'
+  | 'general-learning'
+  | 'private'
+  | 'unclassified'
+
 export type ProjectRuleRecord = {
   id: string
   projectKey: string
   provider?: 'claude' | 'codex'
   effectiveFrom: string
   effectiveTo?: string
-  taxUnitId: string
-  classification: 'new-development' | 'maintenance' | 'feature-addition' | 'private' | 'unclassified'
+  taxUnitId?: string
+  classification: ProjectClassification
   reason?: string
 }
 
