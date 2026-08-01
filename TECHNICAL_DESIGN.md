@@ -289,7 +289,7 @@ type TaxDecision = {
 
 ```text
 履歴・請求設定（既存）
-  usage_events / provider_month_charges / project_mappings
+  usage_events（セッション単位） / session_references / provider_month_charges
              ↓
 診断・制作物台帳（追加）
   planning_profiles / tax_units / lifecycle_events
@@ -340,7 +340,7 @@ Mutationは既存と同じCSRF・Origin検査を通す。IDは非可逆なロー
 
 自己利用開始と外部公開は別イベントである。`usageMode=mixed`でも一つの日付へ統合しない。公開前でも実作業へ正式採用すれば供用候補になり、公開済みでも本来目的に使用していない場合は事実確認を残す。
 
-同一フォルダを全期間一分類に固定しない。期間付きルールまたは`provider + session_key`の手動割当を優先し、既存`project_mappings`はfallbackとして利用する。再スキャンで行IDが変わるため、セッション割当は`usage_events.id`を参照しない。
+同一フォルダを全期間一分類に固定しない。期間付きルール（`planning_project_rules`）をセッションの発生日時（`usage_events.started_at`）で解決する。一致するルールがないフォルダを自動的にどれかの制作物へ割り当てることはせず、未分類のまま残す。再スキャンで行IDが変わるため、セッション割当は`usage_events.id`を参照しない。
 
 ## 7.3 診断エンジン
 
