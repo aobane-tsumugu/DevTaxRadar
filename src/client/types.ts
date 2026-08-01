@@ -20,6 +20,7 @@ export type Allocation = {
   projectKey?: string
   monthKey?: string
   classification?: ProjectClassification
+  taxUnitId?: string
   session: {
     date: string
     id: string

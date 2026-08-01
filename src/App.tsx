@@ -182,7 +182,15 @@ function App() {
         projectKey: row.projectKey,
         effectiveFrom,
         effectiveTo: existing?.effectiveTo,
-        taxUnitId: existing?.taxUnitId,
+        // `existing` is looked up by the id derived from this row's
+        // (projectKey, month), which only matches a rule that already starts
+        // on that exact day. The rule that actually governs this row's
+        // product may have a different id (e.g. it started earlier and
+        // covers this month by range). Prefer the row's own resolved
+        // taxUnitId -- what dashboard.ts says currently governs this
+        // allocation -- and only fall back to `existing` when the row
+        // itself carries no product (nothing to inherit from).
+        taxUnitId: row.taxUnitId ?? existing?.taxUnitId,
         classification,
         reason: '配賦明細から変更',
       },

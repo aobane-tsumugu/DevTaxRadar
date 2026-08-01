@@ -171,6 +171,7 @@ function allocationForGroup(
     projectKey: group.projectKey,
     monthKey: group.month,
     classification: group.classification,
+    taxUnitId: group.taxUnitId ?? undefined,
     session: {
       date: `${group.firstStartedAt.slice(0, 10)} 〜 ${group.lastEndedAt.slice(0, 10)}`,
       id: `${group.provider === 'codex' ? 'cdx' : 'cld'}-••••-${group.projectKey.slice(-4)}`,

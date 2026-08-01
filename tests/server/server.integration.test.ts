@@ -556,6 +556,21 @@ describe('セッション単位のダッシュボード集計', () => {
     expect(row.monthKey).toMatch(/^\d{4}-\d{2}$/)
   })
 
+  it('配賦明細の行は割り当てられた制作物のtaxUnitIdを持つ', async () => {
+    // Guards the server half of the reclassify-from-evidence contract: the
+    // client only knows which product currently governs an allocation row
+    // because dashboard.ts puts taxUnitId on the row. If a future change to
+    // dashboard.ts drops this field, reclassifying a folder from the
+    // allocation table would silently fall back to detaching its product
+    // (see App.tsx's reclassifyAllocation).
+    const dashboard = await getJson('/api/dashboard')
+    const row = dashboard.allocations.find(
+      (item: { product: string }) => item.product === '統合テスト用アプリ',
+    )
+    expect(row).toBeTruthy()
+    expect(row.taxUnitId).toBe('tax-unit-integration')
+  })
+
   it('月の途中でルールが切り替わるフォルダは、その月に分類の異なる2行を生む', async () => {
     // One folder, two sessions in the same month: one comfortably in the
     // first half, one comfortably in the second half. Times are chosen far
