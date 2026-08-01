@@ -23,6 +23,10 @@ export type UsageSession = {
   confidence: 'high' | 'medium' | 'low'
 }
 
+export type AggregationDiagnostics = {
+  nonUtcTimestamps: number
+}
+
 const confidenceByGrade = { A: 'high', B: 'medium', C: 'low' } as const
 
 /**
@@ -30,10 +34,18 @@ const confidenceByGrade = { A: 'high', B: 'medium', C: 'low' } as const
  * A session that crosses a month boundary stays split, because the monthly
  * fee is allocated per calendar month.
  */
-export function aggregateSessions(events: NormalizedUsage[]): UsageSession[] {
+export function aggregateSessions(
+  events: NormalizedUsage[],
+  diagnostics?: AggregationDiagnostics,
+): UsageSession[] {
   const byKey = new Map<string, UsageSession>()
 
   for (const event of events) {
+    // Zサフィックスでない時刻が来ると文字列比較の順序が狂うため、検出できるようにしている
+    if (diagnostics && !event.observedAt.endsWith('Z')) {
+      diagnostics.nonUtcTimestamps += 1
+    }
+
     const key = `${event.provider}:${event.sessionKey}:${event.projectKey}:${event.month}`
     const current = byKey.get(key)
     const outputTokens = event.outputTokens + event.reasoningTokens

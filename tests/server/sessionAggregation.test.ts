@@ -93,4 +93,19 @@ describe('aggregateSessions', () => {
   it('空配列は空配列を返す', () => {
     expect(aggregateSessions([])).toEqual([])
   })
+
+  it('非UTC形式のタイムスタンプを診断へ計上する', () => {
+    const diagnostics = { nonUtcTimestamps: 0 }
+    aggregateSessions([
+      event({ observedAt: '2026-07-15T10:00:00.000Z' }),
+      event({ observedAt: '2026-07-15T10:00:00.000-05:00' }),
+    ], diagnostics)
+    expect(diagnostics.nonUtcTimestamps).toBe(1)
+  })
+
+  it('診断オブジェクトを渡さなくても動作する', () => {
+    expect(() => aggregateSessions([
+      event({ observedAt: '2026-07-15T10:00:00.000-05:00' }),
+    ])).not.toThrow()
+  })
 })
