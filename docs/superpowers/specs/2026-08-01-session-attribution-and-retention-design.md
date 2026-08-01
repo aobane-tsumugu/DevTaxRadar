@@ -355,6 +355,27 @@ D7 により SECURITY.md の記述を改める必要がある。
 
 あわせて、ハッシュ記録が第三者に対する改ざん防止ではないという限界も明記する。
 
-## 12. 公開前の作業（本設計の外）
+## 12. フェーズ1完了時点の残課題
+
+フェーズ1（2026-08-01完了、21コミット）の各タスクレビューと最終レビューで、修正せず記録に留めた項目。フェーズ2以降で扱う。
+
+**フェーズ2で自然に解消するもの**
+
+- `src/index.css` に、削除されたJSXが参照していたクラスが残っている。ただし `.mapping-list` は生きている `.detected-list` と、`.history-rules` は `.advanced-fields` と、`.rule-fields` は `.cost-edit-row` とセレクタを共有している。名前だけを見て一括削除すると生きたスタイルが壊れる。割当画面を作るときに、実際に使われているセレクタを確認しながら整理する
+- 分類が `new-development` で制作物が未指定のルールは、資産名が「要確認」のまま金額境界カードに現れる。`taxUnitId` を任意にしたことで新たに可能になった状態。割当画面で、資産を形成する分類には制作物の指定を促す
+- 履歴0件の初回利用者への「戻って履歴を走査してください」という案内が、フェーズ1の削除で失われた。I3（空状態の整備）と併せて対応する
+
+**フェーズ3で使う予定のもの**
+
+- `scans.time_zone` は書き込んでいるが読み出していない。保持期間の画面で、スキャン時と現在のタイムゾーンが違う場合に警告する材料として使う
+- `AggregationDiagnostics.nonUtcTimestamps` はAPIレスポンスに含まれるが画面に出ていない。同じ画面で扱う
+
+**当面そのままでよいもの**
+
+- `sessionAggregation` の `model` / `schemaVersion` / `confidence` は、そのセッションの最初のイベントの値で固定される。セッション途中でモデルが変わっても最初の値が表示される。アダプタは `model: ... ?? "unknown"` を返すため、最初のメッセージにモデル情報がなければ以後も `unknown` のまま
+- `reasoningTokens` の加算は、2件目以降のイベントを対象とする経路がテストされていない。1件目の経路は検証済みで、加算式は同一のため論理の誤りではなくコピー由来の乖離だけがリスク
+- `src/server/dashboard.ts` の `displayProject` と `allocationForGroup` で、制作物名の解決ロジックが重複している
+
+## 13. 公開前の作業（本設計の外）
 
 A/B実験関連ファイルを別リポジトリへ分離する。`.gitignore` の否定パターンを削除し、`docs/README_AB_EXPERIMENT.md`、`artifacts/readme-ab-experiment*`、`artifacts/readme-ab-summary.csv`、`scripts/run-readme-ab-experiment.mjs` を公開対象から外す。

@@ -32,7 +32,8 @@ export type DashboardData = {
     source: 'local' | 'demo'
     sessionCount: number
     lastSynced: string
-    allocatedRate: number
+    mappedRate: number
+    classifiedRate: number
   }
   months: Array<{ label: string; current: number; future: number; review: number }>
   allocations: Allocation[]
@@ -82,20 +83,6 @@ export type RuntimeData = {
   }
 }
 
-export type ProjectClassification =
-  | 'new-development'
-  | 'maintenance'
-  | 'feature-addition'
-  | 'private'
-  | 'unclassified'
-
-export type ProjectMapping = {
-  projectKey: string
-  productName: string
-  assetName: string
-  classification: ProjectClassification
-}
-
 export type LocalConfiguration = {
   charges: Record<ProviderKey, number>
   monthlyCharges: Array<{
@@ -104,13 +91,17 @@ export type LocalConfiguration = {
     amountJpy: number
   }>
   unobservedRatio: number
-  mappings: ProjectMapping[]
 }
 
 export type ScanResult = {
   completedAt: string
-  providers: Partial<Record<ProviderKey, {
-    events: number
-    diagnostics?: Record<string, unknown>
-  }>>
+  providers: Partial<
+    Record<
+      ProviderKey,
+      {
+        events: number
+        diagnostics?: Record<string, unknown>
+      }
+    >
+  >
 }

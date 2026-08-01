@@ -64,17 +64,21 @@ await build({
 
 writeFileSync(
   join(releaseRoot, 'package.json'),
-  `${JSON.stringify({
-    name: packageMetadata.name,
-    private: true,
-    version,
-    description: 'Local-only DevTax Radar runtime package',
-    type: 'module',
-    engines: packageMetadata.engines,
-    scripts: {
-      start: 'node runtime/server/index.mjs',
+  `${JSON.stringify(
+    {
+      name: packageMetadata.name,
+      private: true,
+      version,
+      description: 'Local-only DevTax Radar runtime package',
+      type: 'module',
+      engines: packageMetadata.engines,
+      scripts: {
+        start: 'node runtime/server/index.mjs',
+      },
     },
-  }, null, 2)}\n`,
+    null,
+    2,
+  )}\n`,
 )
 
 writeFileSync(
@@ -189,11 +193,7 @@ function inspectReleaseTree(directory: string): void {
 }
 
 function smokeTestBundle(entryPoint: string): void {
-  execFileSync(
-    process.execPath,
-    ['--check', entryPoint],
-    { cwd: releaseRoot, stdio: 'inherit' },
-  )
+  execFileSync(process.execPath, ['--check', entryPoint], { cwd: releaseRoot, stdio: 'inherit' })
 }
 
 function createCrc32Table(): Uint32Array {
@@ -201,9 +201,7 @@ function createCrc32Table(): Uint32Array {
   for (let index = 0; index < 256; index += 1) {
     let value = index
     for (let bit = 0; bit < 8; bit += 1) {
-      value = (value & 1) !== 0
-        ? 0xedb88320 ^ (value >>> 1)
-        : value >>> 1
+      value = (value & 1) !== 0 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
     }
     table[index] = value >>> 0
   }

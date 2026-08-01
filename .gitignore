@@ -6,6 +6,12 @@ coverage/
 .wrangler/
 .wrangler-*.log
 artifacts/
+.superpowers/
+
+# README A/B experiment. Kept locally, published from a separate repository so
+# that this repository stays about the product rather than about its scoring.
+docs/README_AB_EXPERIMENT.md
+scripts/run-readme-ab-experiment.mjs
 
 # Environment and secrets
 .env

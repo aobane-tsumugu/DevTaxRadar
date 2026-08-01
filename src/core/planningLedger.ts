@@ -67,10 +67,9 @@ function contribution(params: {
   const grossAmountJpy = Math.max(0, Math.round(params.gross))
   const businessAmountJpy = Math.round(grossAmountJpy * params.businessRatio)
   const privateAmountJpy = grossAmountJpy - businessAmountJpy
-  const canAllocate = Boolean(params.taxUnitId) && !params.forceUnallocated && params.treatment !== 'general'
-  const allocatedAmountJpy = canAllocate
-    ? Math.round(businessAmountJpy * params.projectRatio)
-    : 0
+  const canAllocate =
+    Boolean(params.taxUnitId) && !params.forceUnallocated && params.treatment !== 'general'
+  const allocatedAmountJpy = canAllocate ? Math.round(businessAmountJpy * params.projectRatio) : 0
   const unallocatedAmountJpy = businessAmountJpy - allocatedAmountJpy
 
   return {
@@ -90,16 +89,26 @@ function contribution(params: {
 function equipmentContribution(item: EquipmentRecord, year: number): CostContribution {
   const warnings: string[] = []
   const acquisitionCost = positiveYen(item.acquisitionCostJpy, `${item.name}の取得価額`, warnings)
-  const missingOpeningBalance = item.convertedFromPrivate && item.openingUnamortizedBalanceJpy === undefined
+  const missingOpeningBalance =
+    item.convertedFromPrivate && item.openingUnamortizedBalanceJpy === undefined
   const base = item.convertedFromPrivate
-    ? positiveYen(item.openingUnamortizedBalanceJpy ?? acquisitionCost, `${item.name}の転用時未償却残高`, warnings)
+    ? positiveYen(
+        item.openingUnamortizedBalanceJpy ?? acquisitionCost,
+        `${item.name}の転用時未償却残高`,
+        warnings,
+      )
     : acquisitionCost
   const businessRatio = clampRatio(item.businessUseRatio, `${item.name}の業務利用割合`, warnings)
-  const projectRatio = clampRatio(item.projectAllocationRatio, `${item.name}のプロジェクト割合`, warnings)
+  const projectRatio = clampRatio(
+    item.projectAllocationRatio,
+    `${item.name}のプロジェクト割合`,
+    warnings,
+  )
 
   if (!item.taxUnitId) warnings.push('配賦先の制作物・改良計画が未登録です。')
   if (!item.evidenceIds.length) warnings.push('購入または転用の証拠が未登録です。')
-  if (missingOpeningBalance) warnings.push('私用からの転用時未償却残高がないため、年額を算定していません。')
+  if (missingOpeningBalance)
+    warnings.push('私用からの転用時未償却残高がないため、年額を算定していません。')
 
   const serviceYear = yearOf(item.businessUseStartedOn)
   if (!item.convertedFromPrivate && acquisitionCost < 100_000 && serviceYear !== undefined) {
@@ -107,7 +116,9 @@ function equipmentContribution(item: EquipmentRecord, year: number): CostContrib
     if (serviceYear === year) {
       warnings.push('取得価額10万円未満で対象年に供用したため、全額必要経費候補です。')
     } else if (serviceYear < year) {
-      warnings.push('取得価額10万円未満ですが、供用開始は対象年より前です。対象年へ重ねて計上しません。')
+      warnings.push(
+        '取得価額10万円未満ですが、供用開始は対象年より前です。対象年へ重ねて計上しません。',
+      )
     } else {
       warnings.push('取得価額10万円未満ですが、対象年には未供用です。')
     }
@@ -165,67 +176,88 @@ function candidateFor(unit: TaxUnitRecord): string {
 /** Build a conservative cost ledger. All uncertain business amounts remain unallocated. */
 export function buildPlanningLedger(snapshot: PlanningSnapshot): PlanningLedger {
   const year = snapshot.profile.taxYear
-  const contributions: CostContribution[] = snapshot.equipment.map((item) => (
-    equipmentContribution(item, year)
-  ))
+  const contributions: CostContribution[] = snapshot.equipment.map((item) =>
+    equipmentContribution(item, year),
+  )
 
   for (const item of snapshot.homeCosts.filter((cost) => cost.month.startsWith(`${year}-`))) {
     const warnings: string[] = []
     const gross = positiveYen(item.amountJpy, `${item.month} ${item.category}の金額`, warnings)
-    const businessRatio = clampRatio(item.businessUseRatio, `${item.month} ${item.category}の業務利用割合`, warnings)
-    const projectRatio = clampRatio(item.projectAllocationRatio, `${item.month} ${item.category}のプロジェクト割合`, warnings)
-    if (!item.basis.trim() || !item.rationale.trim()) warnings.push('按分の計算式または採用理由が未登録です。')
-    if (!item.evidenceIds.length) warnings.push('請求額または按分根拠の証拠が未登録です。')
-    if (!item.taxUnitId && item.treatment !== 'general') warnings.push('配賦先の制作物・改良計画が未登録です。')
-    if (item.treatment === 'general') warnings.push('一般管理費は制作物へ自動配賦せず、未配賦に残しました。')
-
-    contributions.push(contribution({
-      sourceType: 'home',
-      sourceId: item.id,
-      taxUnitId: item.taxUnitId,
-      gross,
-      businessRatio,
-      projectRatio,
-      treatment: item.treatment,
+    const businessRatio = clampRatio(
+      item.businessUseRatio,
+      `${item.month} ${item.category}の業務利用割合`,
       warnings,
-      forceUnallocated: !item.basis.trim() || !item.rationale.trim(),
-    }))
+    )
+    const projectRatio = clampRatio(
+      item.projectAllocationRatio,
+      `${item.month} ${item.category}のプロジェクト割合`,
+      warnings,
+    )
+    if (!item.basis.trim() || !item.rationale.trim())
+      warnings.push('按分の計算式または採用理由が未登録です。')
+    if (!item.evidenceIds.length) warnings.push('請求額または按分根拠の証拠が未登録です。')
+    if (!item.taxUnitId && item.treatment !== 'general')
+      warnings.push('配賦先の制作物・改良計画が未登録です。')
+    if (item.treatment === 'general')
+      warnings.push('一般管理費は制作物へ自動配賦せず、未配賦に残しました。')
+
+    contributions.push(
+      contribution({
+        sourceType: 'home',
+        sourceId: item.id,
+        taxUnitId: item.taxUnitId,
+        gross,
+        businessRatio,
+        projectRatio,
+        treatment: item.treatment,
+        warnings,
+        forceUnallocated: !item.basis.trim() || !item.rationale.trim(),
+      }),
+    )
   }
 
-  for (const item of snapshot.directCosts.filter((cost) => cost.incurredOn.startsWith(`${year}-`))) {
+  for (const item of snapshot.directCosts.filter((cost) =>
+    cost.incurredOn.startsWith(`${year}-`),
+  )) {
     const warnings: string[] = []
     const gross = positiveYen(item.amountJpy, `${item.costType}の金額`, warnings)
-    const allocatable = item.directlyAttributable && item.treatment === 'direct' && Boolean(item.taxUnitId)
+    const allocatable =
+      item.directlyAttributable && item.treatment === 'direct' && Boolean(item.taxUnitId)
     if (!item.directlyAttributable) warnings.push('特定の制作物へ直接対応するか未確認です。')
     if (!item.taxUnitId) warnings.push('配賦先の制作物・改良計画が未登録です。')
     if (!item.evidenceIds.length) warnings.push('支払または対応関係の証拠が未登録です。')
 
-    contributions.push(contribution({
-      sourceType: 'direct',
-      sourceId: item.id,
-      taxUnitId: item.taxUnitId,
-      gross,
-      businessRatio: 1,
-      projectRatio: allocatable ? 1 : 0,
-      treatment: item.treatment,
-      warnings,
-      forceUnallocated: !allocatable,
-    }))
+    contributions.push(
+      contribution({
+        sourceType: 'direct',
+        sourceId: item.id,
+        taxUnitId: item.taxUnitId,
+        gross,
+        businessRatio: 1,
+        projectRatio: allocatable ? 1 : 0,
+        treatment: item.treatment,
+        warnings,
+        forceUnallocated: !allocatable,
+      }),
+    )
   }
 
-  const totals = contributions.reduce<PlanningLedger['totals']>((sum, item) => ({
-    grossAmountJpy: sum.grossAmountJpy + item.grossAmountJpy,
-    businessAmountJpy: sum.businessAmountJpy + item.businessAmountJpy,
-    allocatedAmountJpy: sum.allocatedAmountJpy + item.allocatedAmountJpy,
-    privateAmountJpy: sum.privateAmountJpy + item.privateAmountJpy,
-    unallocatedAmountJpy: sum.unallocatedAmountJpy + item.unallocatedAmountJpy,
-  }), {
-    grossAmountJpy: 0,
-    businessAmountJpy: 0,
-    allocatedAmountJpy: 0,
-    privateAmountJpy: 0,
-    unallocatedAmountJpy: 0,
-  })
+  const totals = contributions.reduce<PlanningLedger['totals']>(
+    (sum, item) => ({
+      grossAmountJpy: sum.grossAmountJpy + item.grossAmountJpy,
+      businessAmountJpy: sum.businessAmountJpy + item.businessAmountJpy,
+      allocatedAmountJpy: sum.allocatedAmountJpy + item.allocatedAmountJpy,
+      privateAmountJpy: sum.privateAmountJpy + item.privateAmountJpy,
+      unallocatedAmountJpy: sum.unallocatedAmountJpy + item.unallocatedAmountJpy,
+    }),
+    {
+      grossAmountJpy: 0,
+      businessAmountJpy: 0,
+      allocatedAmountJpy: 0,
+      privateAmountJpy: 0,
+      unallocatedAmountJpy: 0,
+    },
+  )
 
   const byTaxUnit = snapshot.taxUnits.map((unit) => {
     const related = contributions.filter((item) => item.taxUnitId === unit.id)

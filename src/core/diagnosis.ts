@@ -15,9 +15,9 @@ function hasEvent(
   taxUnitId: string,
   eventType: LifecycleEventType,
 ): boolean {
-  return snapshot.lifecycleEvents.some((event) => (
-    event.taxUnitId === taxUnitId && event.eventType === eventType
-  ))
+  return snapshot.lifecycleEvents.some(
+    (event) => event.taxUnitId === taxUnitId && event.eventType === eventType,
+  )
 }
 
 function lifecyclePosition(unit: TaxUnitRecord): string {
@@ -35,10 +35,7 @@ function lifecyclePosition(unit: TaxUnitRecord): string {
   return `${unit.name}は${labels[unit.lifecycleStatus]}です。`
 }
 
-function addAction(
-  target: ActionItem[],
-  action: ActionItem,
-): void {
+function addAction(target: ActionItem[], action: ActionItem): void {
   if (!target.some((existing) => existing.id === action.id)) target.push(action)
 }
 
@@ -47,13 +44,16 @@ function addAction(
  * It deliberately avoids recommending artificial timing, splitting or spending.
  */
 export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
-  const retrospectiveUnits = snapshot.taxUnits.filter((unit) => (
-    (unit.journeyMode ?? snapshot.profile.journeyMode) === 'retrospective'
-  ))
+  const retrospectiveUnits = snapshot.taxUnits.filter(
+    (unit) => (unit.journeyMode ?? snapshot.profile.journeyMode) === 'retrospective',
+  )
   const earlyUnits = snapshot.taxUnits.length - retrospectiveUnits.length
-  const currentPosition: string[] = snapshot.taxUnits.length === 0
-    ? ['制作物を登録すると、それぞれの現在地に合わせて診断します。']
-    : [`制作物ごとに診断します。早期準備${earlyUnits}件、過去整理${retrospectiveUnits.length}件です。`]
+  const currentPosition: string[] =
+    snapshot.taxUnits.length === 0
+      ? ['制作物を登録すると、それぞれの現在地に合わせて診断します。']
+      : [
+          `制作物ごとに診断します。早期準備${earlyUnits}件、過去整理${retrospectiveUnits.length}件です。`,
+        ]
   const immediateActions: ActionItem[] = []
   const eventTriggeredActions: ActionItem[] = []
   const missingFacts: string[] = []
@@ -92,7 +92,8 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
         id: `reconstruct-history:${unit.id}`,
         priority: 'high',
         title: `${unit.name}の過去の節目を復元する`,
-        reason: 'デプロイ、販売、ファイル、AIセッション等から、履歴上の日時と実際の開始日を分けて残します。',
+        reason:
+          'デプロイ、販売、ファイル、AIセッション等から、履歴上の日時と実際の開始日を分けて残します。',
         trigger: 'now',
         taxUnitId: unit.id,
       })
@@ -140,8 +141,8 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
     }
 
     if (
-      ['prototype', 'developing', 'evaluating', 'improving'].includes(unit.lifecycleStatus)
-      && !unit.completionCriteria?.trim()
+      ['prototype', 'developing', 'evaluating', 'improving'].includes(unit.lifecycleStatus) &&
+      !unit.completionCriteria?.trim()
     ) {
       addAction(immediateActions, {
         id: `completion:${unit.id}`,
@@ -184,7 +185,10 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
       }
     }
 
-    if (unit.unitType === 'improvement-plan' && !hasEvent(snapshot, unit.id, 'improvement-started')) {
+    if (
+      unit.unitType === 'improvement-plan' &&
+      !hasEvent(snapshot, unit.id, 'improvement-started')
+    ) {
       addAction(immediateActions, {
         id: `improvement-start:${unit.id}`,
         priority: 'medium',
@@ -260,7 +264,8 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
     missingFacts.push('自宅関連費の有無と按分根拠')
   } else {
     for (const cost of snapshot.homeCosts) {
-      if (!cost.basis.trim() || !cost.rationale.trim()) missingFacts.push(`${cost.month} ${cost.category}の按分根拠`)
+      if (!cost.basis.trim() || !cost.rationale.trim())
+        missingFacts.push(`${cost.month} ${cost.category}の按分根拠`)
       if (!cost.evidenceIds.length) missingFacts.push(`${cost.month} ${cost.category}の証拠`)
     }
   }
@@ -270,7 +275,8 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
       id: 'register-evidence',
       priority: 'high',
       title: 'Git以外も含めて証拠を登録する',
-      reason: '請求書、カード明細、デプロイ、ファイル、スクリーンショット、作業メモ等を利用できます。',
+      reason:
+        '請求書、カード明細、デプロイ、ファイル、スクリーンショット、作業メモ等を利用できます。',
       trigger: 'now',
     })
     missingFacts.push('根拠資料')
@@ -279,29 +285,42 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
   const readinessChecks = [
     snapshot.taxUnits.length > 0,
     snapshot.taxUnits.length === 0 || snapshot.projectRules.length > 0,
-    snapshot.taxUnits.length > 0 && snapshot.taxUnits.every((unit) => unit.usageMode !== 'undecided'),
-    snapshot.taxUnits.length > 0 && snapshot.taxUnits.every((unit) => (
-      !['prototype', 'developing', 'evaluating', 'improving'].includes(unit.lifecycleStatus)
-      || Boolean(unit.completionCriteria?.trim())
-    )),
-    snapshot.taxUnits.length > 0 && snapshot.taxUnits.every((unit) => {
-      if (!['in-use', 'maintaining', 'improving', 'retired'].includes(unit.lifecycleStatus)) return true
-      const internalReady = !['internal', 'mixed'].includes(unit.usageMode)
-        || hasEvent(snapshot, unit.id, 'internal-use-started')
-      const externalReady = !['external', 'mixed'].includes(unit.usageMode)
-        || hasEvent(snapshot, unit.id, 'external-released')
-      return internalReady && externalReady
-    }),
+    snapshot.taxUnits.length > 0 &&
+      snapshot.taxUnits.every((unit) => unit.usageMode !== 'undecided'),
+    snapshot.taxUnits.length > 0 &&
+      snapshot.taxUnits.every(
+        (unit) =>
+          !['prototype', 'developing', 'evaluating', 'improving'].includes(unit.lifecycleStatus) ||
+          Boolean(unit.completionCriteria?.trim()),
+      ),
+    snapshot.taxUnits.length > 0 &&
+      snapshot.taxUnits.every((unit) => {
+        if (!['in-use', 'maintaining', 'improving', 'retired'].includes(unit.lifecycleStatus))
+          return true
+        const internalReady =
+          !['internal', 'mixed'].includes(unit.usageMode) ||
+          hasEvent(snapshot, unit.id, 'internal-use-started')
+        const externalReady =
+          !['external', 'mixed'].includes(unit.usageMode) ||
+          hasEvent(snapshot, unit.id, 'external-released')
+        return internalReady && externalReady
+      }),
     snapshot.profile.incomeCategory !== 'undecided',
     snapshot.profile.hasBookkeeping,
-    snapshot.equipment.length > 0 && snapshot.equipment.every((item) => (
-      Boolean(item.usefulLifeYears)
-      && item.evidenceIds.length > 0
-      && (!item.convertedFromPrivate || item.openingUnamortizedBalanceJpy !== undefined)
-    )),
-    snapshot.homeCosts.length > 0 && snapshot.homeCosts.every((cost) => (
-      Boolean(cost.basis.trim()) && Boolean(cost.rationale.trim()) && cost.evidenceIds.length > 0
-    )),
+    snapshot.equipment.length > 0 &&
+      snapshot.equipment.every(
+        (item) =>
+          Boolean(item.usefulLifeYears) &&
+          item.evidenceIds.length > 0 &&
+          (!item.convertedFromPrivate || item.openingUnamortizedBalanceJpy !== undefined),
+      ),
+    snapshot.homeCosts.length > 0 &&
+      snapshot.homeCosts.every(
+        (cost) =>
+          Boolean(cost.basis.trim()) &&
+          Boolean(cost.rationale.trim()) &&
+          cost.evidenceIds.length > 0,
+      ),
     snapshot.evidence.length > 0,
   ]
 

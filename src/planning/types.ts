@@ -51,14 +51,22 @@ export type TaxUnitRecord = {
   notes?: string
 }
 
+export type ProjectClassification =
+  | 'new-development'
+  | 'maintenance'
+  | 'feature-addition'
+  | 'general-learning'
+  | 'private'
+  | 'unclassified'
+
 export type ProjectRuleRecord = {
   id: string
   projectKey: string
   provider?: 'claude' | 'codex'
   effectiveFrom: string
   effectiveTo?: string
-  taxUnitId: string
-  classification: 'new-development' | 'maintenance' | 'feature-addition' | 'private' | 'unclassified'
+  taxUnitId?: string
+  classification: ProjectClassification
   reason?: string
 }
 
@@ -104,12 +112,7 @@ export type EquipmentRecord = {
 
 export type HomeCostCategory = 'rent' | 'electricity' | 'internet'
 export type HomeCostMethod =
-  | 'area'
-  | 'area-time'
-  | 'meter'
-  | 'watt-hour'
-  | 'usage-time'
-  | 'fixed-ratio'
+  'area' | 'area-time' | 'meter' | 'watt-hour' | 'usage-time' | 'fixed-ratio'
 export type CostTreatment = 'direct' | 'shared' | 'general'
 
 export type HomeCostRecord = {
@@ -128,13 +131,7 @@ export type HomeCostRecord = {
 }
 
 export type DirectCostType =
-  | 'outsource'
-  | 'material'
-  | 'cloud'
-  | 'domain'
-  | 'license'
-  | 'old-version-balance'
-  | 'other'
+  'outsource' | 'material' | 'cloud' | 'domain' | 'license' | 'old-version-balance' | 'other'
 export type DirectCostRecord = {
   id: string
   taxUnitId?: string
