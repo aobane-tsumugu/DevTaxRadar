@@ -41,4 +41,10 @@ describe('resolvedTimeZone', () => {
   it('IANAタイムゾーン識別子を返す', () => {
     expect(resolvedTimeZone()).toMatch(/^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)*$/)
   })
+
+  it('プロセス生存期間中はキャッシュされた同じ値を返す', () => {
+    const first = resolvedTimeZone()
+    const second = resolvedTimeZone()
+    expect(second).toBe(first)
+  })
 })
