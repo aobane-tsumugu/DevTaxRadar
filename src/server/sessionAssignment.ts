@@ -28,11 +28,12 @@ export function resolveSessionAssignment(
   const day = localDateFromTimestamp(session.startedAt, timeZone)
   if (!day) return unassigned
 
-  const candidates = rules.filter((rule) =>
-    rule.projectKey === session.projectKey &&
-    (!rule.provider || rule.provider === session.provider) &&
-    rule.effectiveFrom <= day &&
-    (!rule.effectiveTo || rule.effectiveTo >= day),
+  const candidates = rules.filter(
+    (rule) =>
+      rule.projectKey === session.projectKey &&
+      (!rule.provider || rule.provider === session.provider) &&
+      rule.effectiveFrom <= day &&
+      (!rule.effectiveTo || rule.effectiveTo >= day),
   )
   if (candidates.length === 0) return unassigned
 

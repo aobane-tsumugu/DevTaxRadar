@@ -43,9 +43,13 @@ describe('resolveSessionAssignment', () => {
     ]
 
     expect(resolveSessionAssignment(session, rules, 'Asia/Tokyo').ruleId).toBe('rule-late')
-    expect(resolveSessionAssignment(
-      { ...session, startedAt: '2026-07-10T03:00:00.000Z' }, rules, 'Asia/Tokyo',
-    ).ruleId).toBe('rule-early')
+    expect(
+      resolveSessionAssignment(
+        { ...session, startedAt: '2026-07-10T03:00:00.000Z' },
+        rules,
+        'Asia/Tokyo',
+      ).ruleId,
+    ).toBe('rule-early')
   })
 
   it('開始日当日と終了日当日を期間に含める', () => {
@@ -85,10 +89,7 @@ describe('resolveSessionAssignment', () => {
   })
 
   it('effectiveFromも同じならid昇順で決定的に選ぶ', () => {
-    const rules = [
-      rule({ id: 'rule-b' }),
-      rule({ id: 'rule-a' }),
-    ]
+    const rules = [rule({ id: 'rule-b' }), rule({ id: 'rule-a' })]
     expect(resolveSessionAssignment(session, rules, 'Asia/Tokyo').ruleId).toBe('rule-a')
   })
 

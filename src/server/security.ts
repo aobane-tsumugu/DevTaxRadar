@@ -12,10 +12,7 @@ function tokenMatches(candidate: string | undefined): boolean {
   return expected.length === received.length && timingSafeEqual(expected, received)
 }
 
-export async function protectMutation(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
+export async function protectMutation(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') {
     return
   }

@@ -1,8 +1,4 @@
-import type {
-  LocalSessionReference,
-  NormalizedUsage,
-  UsageProvider,
-} from '../adapters/types.ts'
+import type { LocalSessionReference, NormalizedUsage, UsageProvider } from '../adapters/types.ts'
 
 export type UsageSession = {
   provider: UsageProvider

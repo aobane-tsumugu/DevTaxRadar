@@ -57,9 +57,7 @@ function visit(path: string): void {
     .toLowerCase()
   const file = relative(root, path).replaceAll('\\', '/')
   const releaseSurface =
-    file.startsWith('dist/') ||
-    file.startsWith('public/') ||
-    file.startsWith('fixtures/')
+    file.startsWith('dist/') || file.startsWith('public/') || file.startsWith('fixtures/')
   if (content.includes(exactHome)) {
     findings.push(`${file}: contains the current user's home path`)
   }
@@ -70,21 +68,20 @@ function visit(path: string): void {
     }
   }
 
-  if (releaseSurface &&
-      /"(prompt|response|sourcecode|absolutePath)"\s*:/.test(content)) {
+  if (releaseSurface && /"(prompt|response|sourcecode|absolutePath)"\s*:/.test(content)) {
     findings.push(`${file}: contains a forbidden raw-content field`)
   }
 
-  if (releaseSurface &&
-      /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i.test(content)) {
+  if (
+    releaseSurface &&
+    /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i.test(content)
+  ) {
     findings.push(`${file}: contains a UUID-like identifier`)
   }
 
-  if (releaseSurface &&
-      /(?:[a-z]:\/users\/[^./\s]+|\/users\/[^./\s]+)\//i.test(content)) {
+  if (releaseSurface && /(?:[a-z]:\/users\/[^./\s]+|\/users\/[^./\s]+)\//i.test(content)) {
     findings.push(`${file}: contains an absolute user-home path`)
   }
-
 }
 
 visit(root)

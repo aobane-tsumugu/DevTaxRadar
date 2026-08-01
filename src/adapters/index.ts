@@ -1,5 +1,5 @@
-export { readClaudeHistory } from "./claude.ts";
-export { readCodexHistory } from "./codex.ts";
+export { readClaudeHistory } from './claude.ts'
+export { readCodexHistory } from './codex.ts'
 export type {
   AdapterConfidence,
   AdapterDiagnostics,
@@ -7,4 +7,4 @@ export type {
   AdapterResult,
   NormalizedUsage,
   UsageProvider,
-} from "./types.ts";
+} from './types.ts'

@@ -1,9 +1,4 @@
-import type {
-  LocalConfiguration,
-  ProviderKey,
-  RuntimeData,
-  ScanResult,
-} from './types'
+import type { LocalConfiguration, ProviderKey, RuntimeData, ScanResult } from './types'
 import type { Diagnosis, PlanningLedger, PlanningSnapshot } from '../planning/types'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -17,7 +12,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`
     try {
-      const payload = await response.json() as { error?: string }
+      const payload = (await response.json()) as { error?: string }
       if (payload.error) detail = payload.error
     } catch {
       // Keep the HTTP status when the response is not JSON.
@@ -35,10 +30,7 @@ export function getConfiguration(): Promise<LocalConfiguration> {
   return requestJson('/api/config')
 }
 
-export function scanHistory(
-  csrfToken: string,
-  providers: ProviderKey[],
-): Promise<ScanResult> {
+export function scanHistory(csrfToken: string, providers: ProviderKey[]): Promise<ScanResult> {
   return requestJson('/api/scan', {
     method: 'POST',
     headers: {

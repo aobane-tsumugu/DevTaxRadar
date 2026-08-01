@@ -112,12 +112,7 @@ export type EquipmentRecord = {
 
 export type HomeCostCategory = 'rent' | 'electricity' | 'internet'
 export type HomeCostMethod =
-  | 'area'
-  | 'area-time'
-  | 'meter'
-  | 'watt-hour'
-  | 'usage-time'
-  | 'fixed-ratio'
+  'area' | 'area-time' | 'meter' | 'watt-hour' | 'usage-time' | 'fixed-ratio'
 export type CostTreatment = 'direct' | 'shared' | 'general'
 
 export type HomeCostRecord = {
@@ -136,13 +131,7 @@ export type HomeCostRecord = {
 }
 
 export type DirectCostType =
-  | 'outsource'
-  | 'material'
-  | 'cloud'
-  | 'domain'
-  | 'license'
-  | 'old-version-balance'
-  | 'other'
+  'outsource' | 'material' | 'cloud' | 'domain' | 'license' | 'old-version-balance' | 'other'
 export type DirectCostRecord = {
   id: string
   taxUnitId?: string

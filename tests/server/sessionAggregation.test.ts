@@ -42,9 +42,7 @@ describe('aggregateSessions', () => {
   })
 
   it('reasoningTokensをoutputTokensへ合算する', () => {
-    const sessions = aggregateSessions([
-      event({ outputTokens: 10, reasoningTokens: 5 }),
-    ])
+    const sessions = aggregateSessions([event({ outputTokens: 10, reasoningTokens: 5 })])
     expect(sessions[0]?.outputTokens).toBe(15)
   })
 
@@ -96,16 +94,19 @@ describe('aggregateSessions', () => {
 
   it('非UTC形式のタイムスタンプを診断へ計上する', () => {
     const diagnostics = { nonUtcTimestamps: 0 }
-    aggregateSessions([
-      event({ observedAt: '2026-07-15T10:00:00.000Z' }),
-      event({ observedAt: '2026-07-15T10:00:00.000-05:00' }),
-    ], diagnostics)
+    aggregateSessions(
+      [
+        event({ observedAt: '2026-07-15T10:00:00.000Z' }),
+        event({ observedAt: '2026-07-15T10:00:00.000-05:00' }),
+      ],
+      diagnostics,
+    )
     expect(diagnostics.nonUtcTimestamps).toBe(1)
   })
 
   it('診断オブジェクトを渡さなくても動作する', () => {
-    expect(() => aggregateSessions([
-      event({ observedAt: '2026-07-15T10:00:00.000-05:00' }),
-    ])).not.toThrow()
+    expect(() =>
+      aggregateSessions([event({ observedAt: '2026-07-15T10:00:00.000-05:00' })]),
+    ).not.toThrow()
   })
 })

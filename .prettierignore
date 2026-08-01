@@ -1,0 +1,13 @@
+dist/
+node_modules/
+coverage/
+artifacts/
+.superpowers/
+.wrangler/
+package-lock.json
+fixtures/
+public/
+
+# Documentation is written and reviewed by hand. Reflowing Japanese prose and
+# realigning tables produces noise without improving anything.
+*.md

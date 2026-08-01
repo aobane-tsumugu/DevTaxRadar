@@ -26,13 +26,16 @@ function displayBillingMonth(month: string): string {
   return `${month.slice(0, 4)}年${Number(month.slice(5))}月`
 }
 
-const classificationView: Record<ProjectClassification, {
-  group: TaxGroup
-  stage: string
-  candidate: string
-  rule: string
-  reason: string
-}> = {
+const classificationView: Record<
+  ProjectClassification,
+  {
+    group: TaxGroup
+    stage: string
+    candidate: string
+    rule: string
+    reason: string
+  }
+> = {
   'new-development': {
     group: 'future',
     stage: '新規開発',
@@ -128,8 +131,11 @@ function groupKey(group: ProjectMonthGroup): string {
   // could let a taxUnitId containing ':' merge two distinct classification
   // groups into one row. JSON.stringify keeps each field distinguishable.
   return JSON.stringify([
-    group.provider, group.month, group.projectKey,
-    group.taxUnitId ?? '', group.classification,
+    group.provider,
+    group.month,
+    group.projectKey,
+    group.taxUnitId ?? '',
+    group.classification,
   ])
 }
 
@@ -143,8 +149,8 @@ function allocationForGroup(
   // fall back to the unclassified view rather than crashing /api/dashboard.
   const view = classificationView[group.classification] ?? classificationView.unclassified
   const taxUnit = group.taxUnitId ? taxUnitById.get(group.taxUnitId) : undefined
-  const product = taxUnit?.name
-    ?? safeLocalLabel(group.projectLabel, `Project ${group.projectKey.slice(-6)}`)
+  const product =
+    taxUnit?.name ?? safeLocalLabel(group.projectLabel, `Project ${group.projectKey.slice(-6)}`)
   return {
     id: groupKey(group),
     month: displayBillingMonth(group.month),
@@ -168,8 +174,8 @@ function allocationForGroup(
       folder: safeLocalLabel(group.projectLabel, '名称未取得'),
       branch: '取得対象外',
       model: group.model ?? 'unknown',
-      tokens: group.inputTokens + group.outputTokens
-        + group.cacheReadTokens + group.cacheWriteTokens,
+      tokens:
+        group.inputTokens + group.outputTokens + group.cacheReadTokens + group.cacheWriteTokens,
       classification: taxUnit ? `期間ルール → ${taxUnit.name}` : '未分類',
       manualEdit: `${group.sessions}セッション / ${group.messageCount}メッセージ`,
     },
@@ -194,15 +200,11 @@ function unobservedAllocation(
     group: 'review',
     taxCandidate: '未分類',
     confidence: 'C',
-    rule: isAdjustment
-      ? 'Provider月額との合計不変条件'
-      : 'ローカル履歴で捕捉できない利用を留保',
+    rule: isAdjustment ? 'Provider月額との合計不変条件' : 'ローカル履歴で捕捉できない利用を留保',
     reason: isAdjustment
       ? '各配賦額の1円未満を切り捨てた差額です。'
       : 'Webチャット等、Claude Code／Codex履歴に含まれない利用分です。',
-    missing: isAdjustment
-      ? 'なし'
-      : '実際の未取得利用割合を月ごとに確認してください。',
+    missing: isAdjustment ? 'なし' : '実際の未取得利用割合を月ごとに確認してください。',
     session: {
       date: month,
       id: isAdjustment ? 'rounding' : 'unobserved',
@@ -231,9 +233,7 @@ export function buildDashboard(): DashboardData {
   const classifiedSessions = assigned.filter(
     (session) => session.assignment.classification !== 'unclassified',
   ).length
-  const mappedSessions = assigned.filter(
-    (session) => session.assignment.ruleId !== null,
-  ).length
+  const mappedSessions = assigned.filter((session) => session.assignment.ruleId !== null).length
 
   const groups = new Map<string, ProjectMonthGroup>()
   for (const session of assigned) {
@@ -242,8 +242,11 @@ export function buildDashboard(): DashboardData {
     // with ':' here would risk merging two distinct classification groups
     // into one during this very aggregation step.
     const key = JSON.stringify([
-      session.provider, session.month, session.projectKey,
-      session.assignment.taxUnitId ?? '', session.assignment.classification,
+      session.provider,
+      session.month,
+      session.projectKey,
+      session.assignment.taxUnitId ?? '',
+      session.assignment.classification,
     ])
     const current = groups.get(key)
     if (!current) {
@@ -291,10 +294,7 @@ export function buildDashboard(): DashboardData {
       charge.amountJpy,
     ]),
   )
-  const providerMonthKeys = new Set([
-    ...byProviderMonth.keys(),
-    ...monthlyChargeByKey.keys(),
-  ])
+  const providerMonthKeys = new Set([...byProviderMonth.keys(), ...monthlyChargeByKey.keys()])
 
   const inputs = [...providerMonthKeys].sort().map((key) => {
     const [provider, month] = key.split(':') as [UsageProvider, string]
@@ -310,9 +310,10 @@ export function buildDashboard(): DashboardData {
         id: groupKey(group),
         productId: group.projectKey,
         taxUnitId: group.taxUnitId ?? undefined,
-        bucket: group.classification === 'private' || group.classification === 'general-learning'
-          ? 'private' as const
-          : 'product' as const,
+        bucket:
+          group.classification === 'private' || group.classification === 'general-learning'
+            ? ('private' as const)
+            : ('product' as const),
         usageWeight: calculateWeightedTokenUsage({
           inputTokens: group.inputTokens,
           cachedInputTokens: group.cacheReadTokens,
@@ -347,31 +348,46 @@ export function buildDashboard(): DashboardData {
     const monthAllocations = allocations.filter((row) => row.month === label)
     return {
       label,
-      current: monthAllocations.reduce((sum, row) => sum + (row.group === 'current' ? row.amount : 0), 0),
-      future: monthAllocations.reduce((sum, row) => sum + (row.group === 'future' ? row.amount : 0), 0),
-      review: monthAllocations.reduce((sum, row) => sum + (row.group === 'review' ? row.amount : 0), 0),
+      current: monthAllocations.reduce(
+        (sum, row) => sum + (row.group === 'current' ? row.amount : 0),
+        0,
+      ),
+      future: monthAllocations.reduce(
+        (sum, row) => sum + (row.group === 'future' ? row.amount : 0),
+        0,
+      ),
+      review: monthAllocations.reduce(
+        (sum, row) => sum + (row.group === 'review' ? row.amount : 0),
+        0,
+      ),
     }
   })
 
   // Built from the raw session rows (pre-classification), not from `groups`:
   // a folder must appear exactly once in the product list regardless of how
   // many classifications its sessions carry across a month.
-  const projectSummaries = new Map<string, {
-    name: string
-    folder: string
-    sessions: number
-    projectKey: string
-    firstObservedAt?: string
-    lastObservedAt?: string
-    firstObservedMonth: string
-    lastObservedMonth: string
-    providers: Array<'Claude Code' | 'Codex'>
-  }>()
+  const projectSummaries = new Map<
+    string,
+    {
+      name: string
+      folder: string
+      sessions: number
+      projectKey: string
+      firstObservedAt?: string
+      lastObservedAt?: string
+      firstObservedMonth: string
+      lastObservedMonth: string
+      providers: Array<'Claude Code' | 'Codex'>
+    }
+  >()
   for (const session of assigned) {
     const current = projectSummaries.get(session.projectKey)
     projectSummaries.set(session.projectKey, {
       name: displayProject(
-        session.projectKey, session.projectLabel, session.assignment.taxUnitId, taxUnitById,
+        session.projectKey,
+        session.projectLabel,
+        session.assignment.taxUnitId,
+        taxUnitById,
       ),
       folder: safeLocalLabel(session.projectLabel, `Project ${session.projectKey.slice(-6)}`),
       sessions: (current?.sessions ?? 0) + 1,
@@ -385,19 +401,24 @@ export function buildDashboard(): DashboardData {
         .at(-1),
       firstObservedMonth: [current?.firstObservedMonth, session.month].filter(Boolean).sort()[0]!,
       lastObservedMonth: [current?.lastObservedMonth, session.month].filter(Boolean).sort().at(-1)!,
-      providers: [...new Set([
-        ...(current?.providers ?? []),
-        session.provider === 'claude' ? 'Claude Code' as const : 'Codex' as const,
-      ])],
+      providers: [
+        ...new Set([
+          ...(current?.providers ?? []),
+          session.provider === 'claude' ? ('Claude Code' as const) : ('Codex' as const),
+        ]),
+      ],
     })
   }
 
-  const futureByAsset = new Map<string, {
-    product: string
-    name: string
-    candidate: string
-    total: number
-  }>()
+  const futureByAsset = new Map<
+    string,
+    {
+      product: string
+      name: string
+      candidate: string
+      total: number
+    }
+  >()
   for (const row of allocations.filter((item) => item.group === 'future')) {
     const key = JSON.stringify([row.product, row.asset, row.taxCandidate])
     const current = futureByAsset.get(key)
@@ -411,9 +432,7 @@ export function buildDashboard(): DashboardData {
 
   const assets = [...futureByAsset.values()].map((asset) => ({
     product: asset.product,
-    name: asset.candidate === '資本的支出'
-      ? `${asset.name}（改良計画）`
-      : asset.name,
+    name: asset.candidate === '資本的支出' ? `${asset.name}（改良計画）` : asset.name,
     candidate: asset.candidate,
     total: asset.total,
     aiCost: asset.total,
@@ -431,17 +450,20 @@ export function buildDashboard(): DashboardData {
         amount: asset.total,
         threshold: 200_000,
         thresholdLabel: '修繕・改良の20万円形式基準（別判定）',
-        status: asset.total < 200_000
-          ? `${(200_000 - asset.total).toLocaleString()}円手前・作業実態も確認`
-          : '20万円以上：改良計画の範囲と作業実態を確認',
+        status:
+          asset.total < 200_000
+            ? `${(200_000 - asset.total).toLocaleString()}円手前・作業実態も確認`
+            : '20万円以上：改良計画の範囲と作業実態を確認',
         tone: 'review' as const,
       }
     }
 
     const underImmediateExpenseBoundary = asset.total < 100_000
     const underThreeYearPoolBoundary = asset.total < 200_000
-    const threshold = underImmediateExpenseBoundary ? 100_000
-      : underThreeYearPoolBoundary ? 100_000
+    const threshold = underImmediateExpenseBoundary
+      ? 100_000
+      : underThreeYearPoolBoundary
+        ? 100_000
         : 200_000
     const thresholdLabel = threshold === 100_000 ? '10万円境界' : '20万円境界'
     const status = underImmediateExpenseBoundary
@@ -458,8 +480,10 @@ export function buildDashboard(): DashboardData {
       thresholdLabel,
       status,
       tone: underImmediateExpenseBoundary
-        ? asset.total >= 80_000 ? 'near' as const : 'safe' as const
-        : 'review' as const,
+        ? asset.total >= 80_000
+          ? ('near' as const)
+          : ('safe' as const)
+        : ('review' as const),
     }
   })
 
@@ -469,11 +493,13 @@ export function buildDashboard(): DashboardData {
     meta: {
       source: 'local',
       sessionCount: overview.providers.reduce((sum, row) => sum + row.sessions, 0),
-      lastSynced: typeof lastScan?.completedAt === 'string'
-        ? new Date(lastScan.completedAt).toLocaleString('ja-JP')
-        : '未走査',
-      mappedRate: sessions.length === 0 ? 0 : Math.round(mappedSessions / sessions.length * 100),
-      classifiedRate: sessions.length === 0 ? 0 : Math.round(classifiedSessions / sessions.length * 100),
+      lastSynced:
+        typeof lastScan?.completedAt === 'string'
+          ? new Date(lastScan.completedAt).toLocaleString('ja-JP')
+          : '未走査',
+      mappedRate: sessions.length === 0 ? 0 : Math.round((mappedSessions / sessions.length) * 100),
+      classifiedRate:
+        sessions.length === 0 ? 0 : Math.round((classifiedSessions / sessions.length) * 100),
     },
     months,
     allocations,

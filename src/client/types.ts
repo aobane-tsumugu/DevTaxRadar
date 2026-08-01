@@ -95,8 +95,13 @@ export type LocalConfiguration = {
 
 export type ScanResult = {
   completedAt: string
-  providers: Partial<Record<ProviderKey, {
-    events: number
-    diagnostics?: Record<string, unknown>
-  }>>
+  providers: Partial<
+    Record<
+      ProviderKey,
+      {
+        events: number
+        diagnostics?: Record<string, unknown>
+      }
+    >
+  >
 }

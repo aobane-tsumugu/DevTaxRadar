@@ -241,14 +241,19 @@ export function getDatabase(): DatabaseSync {
   `)
 
   const taxUnitColumns = new Set(
-    (database.prepare(`PRAGMA table_info(planning_tax_units)`).all() as Array<{ name: string }>)
-      .map((column) => column.name),
+    (
+      database.prepare(`PRAGMA table_info(planning_tax_units)`).all() as Array<{ name: string }>
+    ).map((column) => column.name),
   )
   if (!taxUnitColumns.has('journey_mode')) {
-    database.exec(`ALTER TABLE planning_tax_units ADD COLUMN journey_mode TEXT NOT NULL DEFAULT 'early'`)
+    database.exec(
+      `ALTER TABLE planning_tax_units ADD COLUMN journey_mode TEXT NOT NULL DEFAULT 'early'`,
+    )
   }
   if (!taxUnitColumns.has('monetization_status')) {
-    database.exec(`ALTER TABLE planning_tax_units ADD COLUMN monetization_status TEXT NOT NULL DEFAULT 'planned'`)
+    database.exec(
+      `ALTER TABLE planning_tax_units ADD COLUMN monetization_status TEXT NOT NULL DEFAULT 'planned'`,
+    )
   }
 
   // v0.1.0 is unreleased; only developers hold a database where tax_unit_id
@@ -257,7 +262,8 @@ export function getDatabase(): DatabaseSync {
   // planning_project_rules is the child side of the foreign key to
   // planning_tax_units, so dropping it does not touch tax unit rows and does
   // not violate the enabled foreign key constraints.
-  const projectRuleColumns = database.prepare(`PRAGMA table_info(planning_project_rules)`)
+  const projectRuleColumns = database
+    .prepare(`PRAGMA table_info(planning_project_rules)`)
     .all() as Array<{ name: string; notnull: number }>
   const taxUnitIdColumn = projectRuleColumns.find((column) => column.name === 'tax_unit_id')
   if (taxUnitIdColumn?.notnull === 1) {
@@ -268,8 +274,9 @@ export function getDatabase(): DatabaseSync {
   // v0.1.0 is unreleased; only developers hold a database in the old shape.
   // Detect it at startup and rebuild rather than migrating message rows.
   const usageColumns = new Set(
-    (database.prepare(`PRAGMA table_info(usage_events)`).all() as Array<{ name: string }>)
-      .map((column) => column.name),
+    (database.prepare(`PRAGMA table_info(usage_events)`).all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
   )
   if (usageColumns.size > 0 && !usageColumns.has('started_at')) {
     database.exec('DROP TABLE usage_events')
@@ -277,8 +284,9 @@ export function getDatabase(): DatabaseSync {
   }
 
   const scanColumns = new Set(
-    (database.prepare(`PRAGMA table_info(scans)`).all() as Array<{ name: string }>)
-      .map((column) => column.name),
+    (database.prepare(`PRAGMA table_info(scans)`).all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
   )
   if (!scanColumns.has('time_zone')) {
     database.exec('ALTER TABLE scans ADD COLUMN time_zone TEXT')
@@ -288,9 +296,9 @@ export function getDatabase(): DatabaseSync {
   // display label typed against a folder, not a confirmed tax unit, so only
   // the classification is carried over. tax_unit_id is left NULL; assigning
   // a folder to a product now happens on the assignment screen (phase 2).
-  const legacyMappings = database.prepare(
-    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_mappings'`,
-  ).get() as { name?: string } | undefined
+  const legacyMappings = database
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_mappings'`)
+    .get() as { name?: string } | undefined
   if (legacyMappings?.name) {
     database.exec(`
       INSERT OR IGNORE INTO planning_project_rules(
@@ -358,16 +366,26 @@ export function replaceProviderSessions(
     db.prepare('DELETE FROM session_references WHERE provider = ?').run(provider)
     for (const item of sessions) {
       insertSession.run(
-        item.provider, item.sessionKey, item.projectKey, item.month,
-        item.startedAt, item.endedAt, item.messageCount,
-        item.projectLabel ?? null, item.model ?? null,
-        item.inputTokens, item.outputTokens,
-        item.cacheReadTokens, item.cacheWriteTokens,
-        item.schemaVersion, item.confidence,
+        item.provider,
+        item.sessionKey,
+        item.projectKey,
+        item.month,
+        item.startedAt,
+        item.endedAt,
+        item.messageCount,
+        item.projectLabel ?? null,
+        item.model ?? null,
+        item.inputTokens,
+        item.outputTokens,
+        item.cacheReadTokens,
+        item.cacheWriteTokens,
+        item.schemaVersion,
+        item.confidence,
       )
       if (item.localReference) {
         insertReference.run(
-          item.provider, item.sessionKey,
+          item.provider,
+          item.sessionKey,
           item.localReference.nativeSessionId,
           item.localReference.sourcePath,
           item.localReference.workingDirectory,
@@ -376,12 +394,14 @@ export function replaceProviderSessions(
       }
     }
     db.exec('COMMIT')
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE scans
       SET completed_at = ?, files_seen = ?, events_written = ?,
           malformed_lines = ?, status = 'complete'
       WHERE id = ?
-    `).run(
+    `,
+    ).run(
       new Date().toISOString(),
       diagnostics.filesSeen,
       sessions.length,
@@ -390,16 +410,20 @@ export function replaceProviderSessions(
     )
   } catch (error) {
     db.exec('ROLLBACK')
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE scans SET completed_at = ?, status = 'failed' WHERE id = ?
-    `).run(new Date().toISOString(), scanId)
+    `,
+    ).run(new Date().toISOString(), scanId)
     throw error
   }
 }
 
 export function getUsageOverview(): UsageOverview {
   const db = getDatabase()
-  const providers = db.prepare(`
+  const providers = db
+    .prepare(
+      `
     SELECT provider, month,
            COUNT(*) AS sessions,
            COUNT(DISTINCT project_key) AS projects,
@@ -412,16 +436,22 @@ export function getUsageOverview(): UsageOverview {
     FROM usage_events
     GROUP BY provider, month
     ORDER BY month, provider
-  `).all() as UsageOverview['providers']
+  `,
+    )
+    .all() as UsageOverview['providers']
 
-  const recentScans = db.prepare(`
+  const recentScans = db
+    .prepare(
+      `
     SELECT provider, started_at AS startedAt, completed_at AS completedAt,
            files_seen AS filesSeen, events_written AS eventsWritten,
            malformed_lines AS malformedLines, status
     FROM scans
     ORDER BY id DESC
     LIMIT 10
-  `).all() as UsageOverview['recentScans']
+  `,
+    )
+    .all() as UsageOverview['recentScans']
 
   return { providers, recentScans }
 }
@@ -443,7 +473,9 @@ export type UsageSessionRow = {
 }
 
 export function getUsageSessions(): UsageSessionRow[] {
-  return getDatabase().prepare(`
+  return getDatabase()
+    .prepare(
+      `
     SELECT provider, session_key AS sessionKey, project_key AS projectKey,
            month, started_at AS startedAt, ended_at AS endedAt,
            message_count AS messageCount, project_label AS projectLabel, model,
@@ -451,7 +483,9 @@ export function getUsageSessions(): UsageSessionRow[] {
            cache_read_tokens AS cacheReadTokens, cache_write_tokens AS cacheWriteTokens
     FROM usage_events
     ORDER BY month, provider, project_key, started_at, session_key
-  `).all() as UsageSessionRow[]
+  `,
+    )
+    .all() as UsageSessionRow[]
 }
 
 export type SessionReferenceRow = {
@@ -465,29 +499,45 @@ export function getSessionReference(
   provider: UsageProvider,
   sessionKey: string,
 ): SessionReferenceRow | undefined {
-  return getDatabase().prepare(`
+  return getDatabase()
+    .prepare(
+      `
     SELECT native_session_id AS nativeSessionId, source_path AS sourcePath,
            working_directory AS workingDirectory, captured_at AS capturedAt
     FROM session_references WHERE provider = ? AND session_key = ?
-  `).get(provider, sessionKey) as SessionReferenceRow | undefined
+  `,
+    )
+    .get(provider, sessionKey) as SessionReferenceRow | undefined
 }
 
 export function getConfiguration(): LocalConfiguration {
   const db = getDatabase()
   const charges = Object.fromEntries(
-    (db.prepare('SELECT provider, monthly_fee_jpy AS amount FROM provider_settings').all() as Array<{
-      provider: string
-      amount: number
-    }>).map((row) => [row.provider, row.amount]),
+    (
+      db
+        .prepare('SELECT provider, monthly_fee_jpy AS amount FROM provider_settings')
+        .all() as Array<{
+        provider: string
+        amount: number
+      }>
+    ).map((row) => [row.provider, row.amount]),
   )
-  const ratioRow = db.prepare(`
+  const ratioRow = db
+    .prepare(
+      `
     SELECT value FROM app_settings WHERE key = 'unobserved_ratio'
-  `).get() as { value?: string } | undefined
-  const monthlyCharges = db.prepare(`
+  `,
+    )
+    .get() as { value?: string } | undefined
+  const monthlyCharges = db
+    .prepare(
+      `
     SELECT provider, month, amount_jpy AS amountJpy
     FROM provider_month_charges
     ORDER BY month, provider
-  `).all() as LocalConfiguration['monthlyCharges']
+  `,
+    )
+    .all() as LocalConfiguration['monthlyCharges']
 
   return {
     charges: {
@@ -513,10 +563,12 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
   try {
     updateCharge.run(configuration.charges.claude, 'claude')
     updateCharge.run(configuration.charges.codex, 'codex')
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO app_settings(key, value) VALUES ('unobserved_ratio', ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(String(configuration.unobservedRatio))
+    `,
+    ).run(String(configuration.unobservedRatio))
     db.exec('DELETE FROM provider_month_charges')
     for (const charge of configuration.monthlyCharges) {
       insertMonthlyCharge.run(charge.provider, charge.month, charge.amountJpy)
