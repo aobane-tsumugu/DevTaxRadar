@@ -22,13 +22,6 @@ type UsageOverview = {
   recentScans: Array<Record<string, string | number | null>>
 }
 
-export type ProjectMapping = {
-  projectKey: string
-  productName: string
-  assetName: string
-  classification: 'new-development' | 'maintenance' | 'feature-addition' | 'private' | 'unclassified'
-}
-
 export type LocalConfiguration = {
   charges: { claude: number; codex: number }
   monthlyCharges: Array<{
@@ -37,7 +30,6 @@ export type LocalConfiguration = {
     amountJpy: number
   }>
   unobservedRatio: number
-  mappings: ProjectMapping[]
 }
 
 const USAGE_EVENTS_SCHEMA = `
@@ -128,13 +120,6 @@ export function getDatabase(): DatabaseSync {
       month TEXT NOT NULL,
       amount_jpy INTEGER NOT NULL,
       PRIMARY KEY(provider, month)
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS project_mappings (
-      project_key TEXT PRIMARY KEY,
-      product_name TEXT NOT NULL,
-      asset_name TEXT NOT NULL,
-      classification TEXT NOT NULL
     ) STRICT;
 
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -297,6 +282,26 @@ export function getDatabase(): DatabaseSync {
   )
   if (!scanColumns.has('time_zone')) {
     database.exec('ALTER TABLE scans ADD COLUMN time_zone TEXT')
+  }
+
+  // Legacy config-driven classification. project_mappings.product_name was a
+  // display label typed against a folder, not a confirmed tax unit, so only
+  // the classification is carried over. tax_unit_id is left NULL; assigning
+  // a folder to a product now happens on the assignment screen (phase 2).
+  const legacyMappings = database.prepare(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_mappings'`,
+  ).get() as { name?: string } | undefined
+  if (legacyMappings?.name) {
+    database.exec(`
+      INSERT OR IGNORE INTO planning_project_rules(
+        id, project_key, provider, effective_from, effective_to,
+        tax_unit_id, classification, reason
+      )
+      SELECT 'migrated-' || project_key, project_key, NULL, '1970-01-01', NULL,
+             NULL, classification, '旧設定から移行'
+      FROM project_mappings
+    `)
+    database.exec('DROP TABLE project_mappings')
   }
 
   return database
@@ -478,12 +483,6 @@ export function getConfiguration(): LocalConfiguration {
   const ratioRow = db.prepare(`
     SELECT value FROM app_settings WHERE key = 'unobserved_ratio'
   `).get() as { value?: string } | undefined
-  const mappings = db.prepare(`
-    SELECT project_key AS projectKey, product_name AS productName,
-           asset_name AS assetName, classification
-    FROM project_mappings
-    ORDER BY product_name, project_key
-  `).all() as ProjectMapping[]
   const monthlyCharges = db.prepare(`
     SELECT provider, month, amount_jpy AS amountJpy
     FROM provider_month_charges
@@ -497,7 +496,6 @@ export function getConfiguration(): LocalConfiguration {
     },
     monthlyCharges,
     unobservedRatio: Number(ratioRow?.value ?? 0.1),
-    mappings,
   }
 }
 
@@ -505,14 +503,6 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
   const db = getDatabase()
   const updateCharge = db.prepare(`
     UPDATE provider_settings SET monthly_fee_jpy = ? WHERE provider = ?
-  `)
-  const upsertMapping = db.prepare(`
-    INSERT INTO project_mappings(project_key, product_name, asset_name, classification)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(project_key) DO UPDATE SET
-      product_name = excluded.product_name,
-      asset_name = excluded.asset_name,
-      classification = excluded.classification
   `)
   const insertMonthlyCharge = db.prepare(`
     INSERT INTO provider_month_charges(provider, month, amount_jpy)
@@ -530,15 +520,6 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
     db.exec('DELETE FROM provider_month_charges')
     for (const charge of configuration.monthlyCharges) {
       insertMonthlyCharge.run(charge.provider, charge.month, charge.amountJpy)
-    }
-    db.exec('DELETE FROM project_mappings')
-    for (const mapping of configuration.mappings) {
-      upsertMapping.run(
-        mapping.projectKey,
-        mapping.productName,
-        mapping.assetName,
-        mapping.classification,
-      )
     }
     db.exec('COMMIT')
   } catch (error) {

@@ -271,6 +271,45 @@ describe("session storage", () => {
     `).run()).not.toThrow();
   });
 
+  it("旧project_mappingsをplanning_project_rulesへ移行し、テーブル自体を削除する", () => {
+    // v0.1.0以前のレガシースキーマ: project_key単位の分類だけを持つproject_mappings。
+    // product_nameは制作物ではなく、フォルダに付けた表示名にすぎないため移行しない。
+    const databasePath = join(sessionDirectory, "devtax-radar.db");
+    const raw = new DatabaseSync(databasePath);
+    raw.exec(`
+      CREATE TABLE project_mappings (
+        project_key TEXT PRIMARY KEY,
+        product_name TEXT NOT NULL,
+        asset_name TEXT NOT NULL,
+        classification TEXT NOT NULL
+      ) STRICT;
+    `);
+    raw.prepare(`
+      INSERT INTO project_mappings(project_key, product_name, asset_name, classification)
+      VALUES ('project_legacy_mapping_0001', '旧プロダクト名', '旧資産名', 'maintenance')
+    `).run();
+    raw.close();
+
+    // dbは既にimport済み（beforeEach）。getDatabase()が旧テーブルを検出して移行し、削除する。
+    const firstStart = db.getDatabase();
+
+    const tableExists = firstStart.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_mappings'`,
+    ).get();
+    expect(tableExists).toBeUndefined();
+
+    const migratedRule = firstStart.prepare(`
+      SELECT project_key AS projectKey, tax_unit_id AS taxUnitId, classification, reason
+      FROM planning_project_rules WHERE project_key = 'project_legacy_mapping_0001'
+    `).get() as { projectKey: string; taxUnitId: string | null; classification: string; reason: string | null } | undefined;
+    expect(migratedRule).toEqual({
+      projectKey: "project_legacy_mapping_0001",
+      taxUnitId: null,
+      classification: "maintenance",
+      reason: "旧設定から移行",
+    });
+  });
+
   it("再スキャンで消えたセッションの参照が残らない", () => {
     db.replaceProviderSessions("claude", [
       session({

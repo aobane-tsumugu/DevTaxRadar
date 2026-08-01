@@ -214,20 +214,6 @@ describe("local server boundary", () => {
         },
       ],
       unobservedRatio: 0.1,
-      mappings: [
-        {
-          projectKey,
-          productName: "Product A",
-          assetName: "A-v1",
-          classification: "new-development",
-        },
-        {
-          projectKey: productB!.projectKey,
-          productName: "Product A",
-          assetName: "A-v1",
-          classification: "feature-addition",
-        },
-      ],
     };
     const saveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: "POST",
@@ -244,20 +230,16 @@ describe("local server boundary", () => {
     const storedConfiguration = await fetch(
       `http://127.0.0.1:${port}/api/config`,
     ).then(async (response) => await response.json()) as typeof configuration;
-    expect(storedConfiguration).toMatchObject({
+    expect(storedConfiguration).toEqual({
       charges: configuration.charges,
       monthlyCharges: configuration.monthlyCharges,
       unobservedRatio: configuration.unobservedRatio,
     });
-    expect(storedConfiguration.mappings).toEqual(
-      expect.arrayContaining(configuration.mappings),
-    );
 
-    // Task 7: buildDashboard no longer reads configuration.mappings for
-    // classification or product naming (that legacy path is dead; Task 8
-    // removes it). Register planning project rules covering the same two
-    // synthetic sessions so the dashboard groups them the way this test
-    // expects.
+    // Task 8 removed configuration.mappings entirely: classification and
+    // product naming come only from planning project rules now. Register
+    // rules covering the same two synthetic sessions so the dashboard groups
+    // them the way this test expects.
     const planningSnapshot: PlanningSnapshot = {
       version: 1,
       profile: {
@@ -451,7 +433,6 @@ describe("local server boundary", () => {
     const clearedConfiguration = {
       ...configuration,
       monthlyCharges: [],
-      mappings: [],
     };
     const clearResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: "POST",
@@ -630,7 +611,6 @@ describe("セッション単位のダッシュボード集計", () => {
       charges: { claude: 0, codex: 0 },
       monthlyCharges: [{ provider: "claude", month: "2026-08", amountJpy: 100_000 }],
       unobservedRatio: 0.1,
-      mappings: [],
     });
 
     savePlanningSnapshot({

@@ -168,4 +168,36 @@ describe('planning HTTP API', () => {
     const badExport = await fetch(`http://127.0.0.1:${testPort}/api/export?format=csv`)
     expect(badExport.status).toBe(400)
   }, 20_000)
+
+  it('設定APIはmappingsを受け付けない', async () => {
+    const testPort = await port()
+    const data = mkdtempSync(join(tmpdir(), 'devtax-planning-api-'))
+    directories.push(data)
+    const child = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
+      cwd: resolve('.'),
+      stdio: 'ignore',
+      env: { ...process.env, PORT: String(testPort), DEVTAX_RADAR_DATA_DIR: data },
+    })
+    children.push(child)
+    const { csrfToken } = await runtime(testPort)
+
+    const response = await fetch(`http://127.0.0.1:${testPort}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${testPort}`,
+        'x-devtax-csrf': csrfToken,
+      },
+      body: JSON.stringify({
+        charges: { claude: 30000, codex: 20000 },
+        monthlyCharges: [],
+        unobservedRatio: 0.1,
+        mappings: [{
+          projectKey: 'project_should_be_rejected',
+          productName: 'x', assetName: 'y', classification: 'private',
+        }],
+      }),
+    })
+    expect(response.status).toBe(400)
+  }, 20_000)
 })

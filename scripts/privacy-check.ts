@@ -7,6 +7,12 @@ const ignoredDirectories = new Set([
   '.git',
   'coverage',
   'node_modules',
+  // Agent session logs and task reports (briefs, reports, review diffs).
+  // Entirely gitignored and never touched by `npm run build`, so nothing
+  // here can reach a shipped artifact. Report files legitimately quote
+  // absolute repo paths (that's the documentation convention), which would
+  // otherwise trip the exactHome check below with no privacy benefit.
+  '.superpowers',
 ])
 const textExtensions = new Set([
   '.css',

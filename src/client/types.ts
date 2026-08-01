@@ -91,13 +91,6 @@ export type ProjectClassification =
   | 'private'
   | 'unclassified'
 
-export type ProjectMapping = {
-  projectKey: string
-  productName: string
-  assetName: string
-  classification: ProjectClassification
-}
-
 export type LocalConfiguration = {
   charges: Record<ProviderKey, number>
   monthlyCharges: Array<{
@@ -106,7 +99,6 @@ export type LocalConfiguration = {
     amountJpy: number
   }>
   unobservedRatio: number
-  mappings: ProjectMapping[]
 }
 
 export type ScanResult = {

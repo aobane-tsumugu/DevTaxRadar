@@ -116,19 +116,7 @@ const configurationSchema = z.object({
     amountJpy: z.number().int().nonnegative(),
   })).max(240).default([]),
   unobservedRatio: z.number().min(0).max(0.95),
-  mappings: z.array(z.object({
-    projectKey: z.string().min(8).max(100),
-    productName: z.string().trim().min(1).max(120),
-    assetName: z.string().trim().min(1).max(120),
-    classification: z.enum([
-      'new-development',
-      'maintenance',
-      'feature-addition',
-      'private',
-      'unclassified',
-    ]),
-  })).max(1_000),
-}).superRefine((configuration, context) => {
+}).strict().superRefine((configuration, context) => {
   const chargeKeys = new Set<string>()
   configuration.monthlyCharges.forEach((charge, index) => {
     const key = `${charge.provider}:${charge.month}`
@@ -140,18 +128,6 @@ const configurationSchema = z.object({
       })
     }
     chargeKeys.add(key)
-  })
-
-  const projectKeys = new Set<string>()
-  configuration.mappings.forEach((mapping, index) => {
-    if (projectKeys.has(mapping.projectKey)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['mappings', index, 'projectKey'],
-        message: '同じプロジェクトの設定が重複しています。',
-      })
-    }
-    projectKeys.add(mapping.projectKey)
   })
 })
 

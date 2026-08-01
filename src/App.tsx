@@ -22,8 +22,6 @@ import {
 } from './client/api'
 import type {
   LocalConfiguration,
-  ProjectClassification,
-  ProjectMapping,
   ProviderKey,
   RuntimeData,
   ScanResult,
@@ -1006,57 +1004,6 @@ function PanelHeading({
   )
 }
 
-function MappingEditor({
-  item,
-  index,
-  mapping,
-  onChange,
-}: {
-  item: DashboardData['products'][number]
-  index: number
-  mapping: ProjectMapping | undefined
-  onChange: (index: number, patch: Partial<ProjectMapping>) => void
-}) {
-  return (
-    <div className="mapping-row">
-      <span className="folder-icon">⌑</span>
-      <span><strong>{item.folder}</strong><small>{item.sessions}件の利用記録</small></span>
-      <div className="mapping-fields">
-        <label>
-          <span>作っているもの</span>
-          <input
-            value={mapping?.productName ?? ''}
-            onChange={(event) => onChange(index, { productName: event.target.value })}
-          />
-        </label>
-        <label>
-          <span>今回まとめる開発・改良</span>
-          <input
-            value={mapping?.assetName ?? ''}
-            onChange={(event) => onChange(index, { assetName: event.target.value })}
-          />
-        </label>
-        <label>
-          <span>この期間にしたこと</span>
-          <select
-            value={mapping?.classification ?? 'unclassified'}
-            onChange={(event) => onChange(index, {
-              classification: event.target.value as ProjectClassification,
-            })}
-          >
-            <option value="new-development">新しく作った</option>
-            <option value="maintenance">保守・バグ修正</option>
-            <option value="feature-addition">機能を大きく追加した</option>
-            <option value="private">趣味・私用</option>
-            <option value="unclassified">あとで確認</option>
-          </select>
-        </label>
-      </div>
-      <i className={`product-color color-${index}`} />
-    </div>
-  )
-}
-
 function Onboarding({
   step,
   data,
@@ -1086,7 +1033,6 @@ function Onboarding({
   const isDemoData = data.meta.source === 'demo'
   const apiUnavailable = !runtime
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(['claude', 'codex'])
-  const [mappings, setMappings] = useState<ProjectMapping[]>([])
   const [claudeCharge, setClaudeCharge] = useState(30000)
   const [codexCharge, setCodexCharge] = useState(30000)
   const [monthlyCharges, setMonthlyCharges] = useState<LocalConfiguration['monthlyCharges']>([])
@@ -1094,7 +1040,6 @@ function Onboarding({
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ kind: 'success' | 'error' | 'info'; message: string } | null>(null)
   const [planningDraft, setPlanningDraft] = useState<PlanningSnapshot>(planning)
-  const [ruleAssignments, setRuleAssignments] = useState<Record<string, { taxUnitId: string | undefined; effectiveFrom: string }>>({})
   const [selectedHistoryProjects, setSelectedHistoryProjects] = useState<Record<string, boolean>>({})
   const onboardingBodyRef = useRef<HTMLDivElement>(null)
   const rankedProducts = data.products
@@ -1107,30 +1052,7 @@ function Onboarding({
   const historyRangeText = observedHistoryMonths.length > 0
     ? `${observedHistoryMonths[0]}月～${observedHistoryMonths.at(-1)}月`
     : '利用時期を確認中'
-  const primaryProducts = rankedProducts.slice(0, 12)
-  const remainingProducts = rankedProducts.slice(12)
-  const planningWithCurrentRules = useMemo<PlanningSnapshot>(() => ({
-    ...planningDraft,
-    projectRules: mappings
-      .filter((mapping) => !mapping.projectKey.startsWith('demo-'))
-      .map((mapping, index) => {
-        const assignment = ruleAssignments[mapping.projectKey]
-        const taxUnitId = assignment?.taxUnitId || planningDraft.taxUnits[0]?.id || ''
-        const developmentStartedOn = planningDraft.lifecycleEvents.find((event) => (
-          event.taxUnitId === taxUnitId && event.eventType === 'development-started'
-        ))?.occurredOn
-        return {
-          id: planningDraft.projectRules.find((rule) => rule.projectKey === mapping.projectKey)?.id ?? `rule-${index}-${mapping.projectKey.slice(-8)}`,
-          projectKey: mapping.projectKey,
-          effectiveFrom: assignment?.effectiveFrom || developmentStartedOn || `${planningDraft.profile.taxYear}-01-01`,
-          taxUnitId,
-          classification: mapping.classification,
-          reason: 'オンボーディングで登録した期間付き分類',
-        }
-      })
-      .filter((rule) => rule.taxUnitId),
-  }), [mappings, planningDraft, ruleAssignments])
-  const draftDiagnosis = useMemo(() => diagnosePlanning(planningWithCurrentRules), [planningWithCurrentRules])
+  const draftDiagnosis = useMemo(() => diagnosePlanning(planningDraft), [planningDraft])
 
   useEffect(() => {
     onboardingBodyRef.current?.scrollTo({ top: 0 })
@@ -1142,19 +1064,6 @@ function Onboarding({
       (['claude', 'codex'] as ProviderKey[]).filter((provider) => runtime.providers[provider].detected),
     )
   }, [runtime])
-
-  useEffect(() => {
-    const saved = new Map(configuration?.mappings.map((mapping) => [mapping.projectKey, mapping]))
-    setMappings(data.products.map((product) => {
-      const existing = product.projectKey ? saved.get(product.projectKey) : undefined
-      return existing ?? {
-        projectKey: product.projectKey ?? `demo-${product.name.padEnd(8, '-')}`,
-        productName: product.name,
-        assetName: `${product.name}-v1`,
-        classification: 'unclassified',
-      }
-    }))
-  }, [configuration, data.products])
 
   useEffect(() => {
     if (!configuration) return
@@ -1191,17 +1100,7 @@ function Onboarding({
       ? planning
       : { ...planning, taxUnits: [fallbackUnit] }
     setPlanningDraft(next)
-    setRuleAssignments(Object.fromEntries(next.projectRules.map((rule) => [
-      rule.projectKey,
-      { taxUnitId: rule.taxUnitId, effectiveFrom: rule.effectiveFrom },
-    ])))
   }, [data.products, planning])
-
-  function updateMapping(index: number, patch: Partial<ProjectMapping>) {
-    setMappings((current) => current.map((mapping, mappingIndex) => (
-      mappingIndex === index ? { ...mapping, ...patch } : mapping
-    )))
-  }
 
   function toggleProvider(provider: ProviderKey) {
     setSelectedProviders((current) => current.includes(provider)
@@ -1235,13 +1134,11 @@ function Onboarding({
     }
 
     const units = [...planningDraft.taxUnits]
-    const assignments: Record<string, { taxUnitId: string; effectiveFrom: string }> = {}
     selected.forEach((product, index) => {
       const existing = units.find((unit) => unit.name.trim().toLowerCase() === product.name.trim().toLowerCase())
-      const unitId = existing?.id ?? `tax-unit-history-${Date.now()}-${index}`
       if (!existing) {
         units.push({
-          id: unitId,
+          id: `tax-unit-history-${Date.now()}-${index}`,
           name: product.name,
           unitType: 'new-software',
           usageMode: 'undecided',
@@ -1253,21 +1150,9 @@ function Onboarding({
           notes: 'ローカルAI履歴から名称候補を作成。用途・状態・実際の開始日は利用者確認が必要。',
         })
       }
-      assignments[product.projectKey!] = {
-        taxUnitId: unitId,
-        effectiveFrom: product.firstObservedAt?.slice(0, 10)
-          || (product.firstObservedMonth ? `${product.firstObservedMonth}-01` : undefined)
-          || planningDraft.profile.activityStartedOn
-          || `${planningDraft.profile.taxYear}-01-01`,
-      }
     })
 
     setPlanningDraft((current) => ({ ...current, taxUnits: units }))
-    setRuleAssignments((current) => ({ ...current, ...assignments }))
-    setMappings((current) => current.map((mapping) => {
-      const product = selected.find((candidate) => candidate.projectKey === mapping.projectKey)
-      return product ? { ...mapping, productName: product.name, assetName: mapping.assetName || `${product.name}-v1` } : mapping
-    }))
     setSelectedHistoryProjects({})
     setNotice({ kind: 'success', message: `${selected.length}件を履歴から入力しました。用途・状態・実際の開始日を確認してください。` })
   }
@@ -1362,9 +1247,8 @@ function Onboarding({
       return
     }
     if (step === 2) {
-      const invalid = mappings.some((mapping) => !mapping.productName.trim() || !mapping.assetName.trim())
-      if (invalid || planningDraft.taxUnits.some((unit) => !unit.name.trim())) {
-        setNotice({ kind: 'error', message: 'プロダクト名と、作っているものの名前を入力してください。' })
+      if (planningDraft.taxUnits.some((unit) => !unit.name.trim())) {
+        setNotice({ kind: 'error', message: '作っているものの名前を入力してください。' })
         return
       }
       onStep(3)
@@ -1395,9 +1279,8 @@ function Onboarding({
         },
         monthlyCharges,
         unobservedRatio: Math.min(95, Math.max(0, unobservedPercent)) / 100,
-        mappings: mappings.filter((mapping) => !mapping.projectKey.startsWith('demo-')),
       })
-      await onSavePlanning(planningWithCurrentRules)
+      await onSavePlanning(planningDraft)
       setNotice({ kind: 'success', message: '設定を保存し、ダッシュボードを再集計しました。' })
       window.setTimeout(onClose, 650)
     } catch (error) {
@@ -1415,7 +1298,7 @@ function Onboarding({
     }
     setBusy(true)
     try {
-      await onSavePlanning(planningWithCurrentRules)
+      await onSavePlanning(planningDraft)
       setNotice({ kind: 'success', message: 'ここまでの入力を保存しました。次回は続きから確認できます。' })
     } catch (error) {
       setNotice({ kind: 'error', message: `保存できませんでした。ローカルサーバーを確認して、もう一度お試しください。詳細：${error instanceof Error ? error.message : '不明なエラー'}` })
@@ -1582,35 +1465,6 @@ function Onboarding({
                 ))}
               </div>
               <button className="secondary-button add-record" onClick={() => setPlanningDraft((current) => ({ ...current, taxUnits: [...current.taxUnits, { id: `tax-unit-${Date.now()}`, name: '', unitType: 'new-software', usageMode: 'undecided', revenueModel: 'undecided', lifecycleStatus: 'developing', journeyMode: 'early', monetizationStatus: 'none', sameAsExternalVersion: 'undecided' }] }))}>＋ 別の開発をもう1件追加</button>
-              <details className="history-rules">
-                <summary>AI履歴を作っているものへ結び付ける</summary>
-                <p>上で複数登録した場合は、各作業フォルダがどの開発に当たるか「結び付けるもの」で選びます。</p>
-              <div className="mapping-list">
-                {primaryProducts.map(({ product: item, index }) => (
-                  <div key={item.projectKey ?? item.name}>
-                    <MappingEditor item={item} index={index} mapping={mappings[index]} onChange={updateMapping} />
-                    {item.projectKey && <div className="rule-fields"><label><span>結び付けるもの</span><select value={ruleAssignments[item.projectKey]?.taxUnitId ?? planningDraft.taxUnits[0]?.id ?? ''} onChange={(event) => setRuleAssignments((current) => ({ ...current, [item.projectKey!]: { taxUnitId: event.target.value, effectiveFrom: current[item.projectKey!]?.effectiveFrom || lifecycleDate(event.target.value, 'development-started') || `${planningDraft.profile.taxYear}-01-01` } }))}>{planningDraft.taxUnits.map((unit) => <option value={unit.id} key={unit.id}>{unit.name || '名前未入力'}</option>)}</select></label><label><span>この分類を始める日</span><input type="date" value={ruleAssignments[item.projectKey]?.effectiveFrom || lifecycleDate(ruleAssignments[item.projectKey]?.taxUnitId ?? planningDraft.taxUnits[0]?.id ?? '', 'development-started') || `${planningDraft.profile.taxYear}-01-01`} onChange={(event) => setRuleAssignments((current) => ({ ...current, [item.projectKey!]: { taxUnitId: current[item.projectKey!]?.taxUnitId ?? planningDraft.taxUnits[0]?.id ?? '', effectiveFrom: event.target.value } }))} /></label></div>}
-                  </div>
-                ))}
-                {remainingProducts.length > 0 && (
-                  <details className="remaining-projects">
-                    <summary>残り{remainingProducts.length}件を表示（初期状態は未分類）</summary>
-                    {remainingProducts.map(({ product: item, index }) => (
-                      <MappingEditor
-                        item={item}
-                        index={index}
-                        mapping={mappings[index]}
-                        onChange={updateMapping}
-                        key={item.projectKey ?? item.name}
-                      />
-                    ))}
-                  </details>
-                )}
-              </div>
-              {data.products.length === 0 && (
-                <div className="empty-setup">プロジェクトがまだありません。戻って履歴を走査してください。</div>
-              )}
-              </details>
               <div className="setup-insight"><span>✓</span><p><strong>ここまで分かりました</strong><br />作っているものは{planningDraft.taxUnits.length}件です。自分利用{planningDraft.taxUnits.filter((unit) => unit.usageMode === 'internal' || unit.usageMode === 'mixed').length}件、外部提供{planningDraft.taxUnits.filter((unit) => unit.usageMode === 'external' || unit.usageMode === 'mixed').length}件として整理します。</p></div>
             </>
           )}
