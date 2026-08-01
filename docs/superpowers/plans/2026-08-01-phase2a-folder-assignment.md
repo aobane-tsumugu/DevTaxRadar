@@ -2204,13 +2204,13 @@ Expected: FAIL。`projectKey` が undefined。
 </td>
 ```
 
-`onReclassify` を `App` に置く。
+`onReclassify` を `App` に置く。ルールIDの導出は `shared.tsx` へ移した `ruleId` を使う。割当画面と明細画面が同じルールを同じIDで指す必要があり、式を2箇所に書くと片方だけ変えたときに1つのルールが黙って2つに割れる。
 
 ```tsx
 async function reclassifyAllocation(row: Allocation, classification: ProjectClassification) {
   if (!row.projectKey || !row.monthKey) return
   const effectiveFrom = `${row.monthKey}-01`
-  const id = `rule-${row.projectKey.slice(-12)}-${effectiveFrom}`
+  const id = ruleId(row.projectKey, effectiveFrom)
   const existing = planning.projectRules.find((rule) => rule.id === id)
   const others = planning.projectRules.filter((rule) => rule.id !== id)
 
