@@ -213,6 +213,64 @@ describe("session storage", () => {
     restarted.getDatabase().close();
   });
 
+  it("planning_project_rulesのtax_unit_id NOT NULLを検出して作り直し、planning_tax_unitsを失わない", () => {
+    // v0.1.0以前のレガシースキーマ: tax_unit_idがNOT NULLのplanning_project_rulesと、
+    // それが実際に参照するplanning_tax_unitsの行を1件ずつ用意する。
+    // 外部キー制約が有効な状態でplanning_project_rules（子テーブル）をDROPしても、
+    // planning_tax_units（親テーブル）の行は失われないことを確認する。
+    const databasePath = join(sessionDirectory, "devtax-radar.db");
+    const raw = new DatabaseSync(databasePath);
+    raw.exec(`
+      CREATE TABLE planning_tax_units (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        unit_type TEXT NOT NULL,
+        usage_mode TEXT NOT NULL,
+        revenue_model TEXT NOT NULL,
+        lifecycle_status TEXT NOT NULL,
+        journey_mode TEXT NOT NULL DEFAULT 'early',
+        monetization_status TEXT NOT NULL DEFAULT 'planned',
+        completion_criteria TEXT,
+        predecessor_id TEXT,
+        same_as_external_version TEXT,
+        notes TEXT
+      ) STRICT;
+      CREATE TABLE planning_project_rules (
+        id TEXT PRIMARY KEY,
+        project_key TEXT NOT NULL,
+        provider TEXT,
+        effective_from TEXT NOT NULL,
+        effective_to TEXT,
+        tax_unit_id TEXT NOT NULL REFERENCES planning_tax_units(id),
+        classification TEXT NOT NULL,
+        reason TEXT
+      ) STRICT;
+    `);
+    raw.prepare(`
+      INSERT INTO planning_tax_units(id, name, unit_type, usage_mode, revenue_model, lifecycle_status)
+      VALUES ('unit-legacy', 'レガシー制作物', 'new-software', 'internal', 'undecided', 'idea')
+    `).run();
+    raw.prepare(`
+      INSERT INTO planning_project_rules(id, project_key, effective_from, tax_unit_id, classification)
+      VALUES ('rule-legacy', 'project_legacy_0001', '2026-01-01', 'unit-legacy', 'new-development')
+    `).run();
+    raw.close();
+
+    // dbは既にimport済み（beforeEach）。getDatabase()が旧スキーマを検出して作り直す。
+    const firstStart = db.getDatabase();
+    const projectRuleColumns = firstStart.prepare(`PRAGMA table_info(planning_project_rules)`)
+      .all() as Array<{ name: string; notnull: number }>;
+    const taxUnitIdColumn = projectRuleColumns.find((column) => column.name === "tax_unit_id");
+    expect(taxUnitIdColumn?.notnull).toBe(0);
+    expect(
+      (firstStart.prepare(`SELECT COUNT(*) AS n FROM planning_tax_units`).get() as { n: number }).n,
+    ).toBe(1);
+    expect(() => firstStart.prepare(`
+      INSERT INTO planning_project_rules(id, project_key, effective_from, tax_unit_id, classification)
+      VALUES ('rule-private', 'project_private_0001', '2026-01-01', NULL, 'private')
+    `).run()).not.toThrow();
+  });
+
   it("再スキャンで消えたセッションの参照が残らない", () => {
     db.replaceProviderSessions("claude", [
       session({
