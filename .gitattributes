@@ -1,0 +1,13 @@
+# Keep line endings LF everywhere, including in the working tree on Windows.
+# Without this, Git checks files out as CRLF and Prettier's endOfLine: "lf"
+# reports every file as unformatted, so `npm run format:check` fails locally
+# while passing in CI.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.pdf binary
