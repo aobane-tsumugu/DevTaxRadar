@@ -284,6 +284,33 @@ describe('planning HTTP API', () => {
     expect(response.status).toBe(400)
   }, 20_000)
 
+  it('重複するルールIDを拒否する', async () => {
+    const config = await startServer()
+    const response = await put(
+      '/api/planning/rules',
+      {
+        rules: [
+          {
+            id: 'rule-api-dup',
+            projectKey: 'project_rules_api_0003',
+            effectiveFrom: '2026-01-01',
+            classification: 'new-development',
+          },
+          {
+            id: 'rule-api-dup',
+            projectKey: 'project_rules_api_0004',
+            effectiveFrom: '2026-02-01',
+            classification: 'maintenance',
+          },
+        ],
+      },
+      config,
+    )
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { message?: string }
+    expect(body.message).toContain('同じIDのルールが重複しています')
+  }, 20_000)
+
   it('設定APIはmappingsを受け付けない', async () => {
     const testPort = await port()
     const data = mkdtempSync(join(tmpdir(), 'devtax-planning-api-'))

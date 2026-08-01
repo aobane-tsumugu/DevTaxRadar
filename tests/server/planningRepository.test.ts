@@ -277,4 +277,57 @@ describe('planning repository', () => {
       db.close()
     }
   })
+
+  it('トランザクション失敗時に元のルールが残る', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'devtax-planning-'))
+    directories.push(directory)
+    process.env.DEVTAX_RADAR_DATA_DIR = directory
+    const repository = await import('../../src/server/planningRepository.js')
+    const database = await import('../../src/server/database.js')
+    const db = database.getDatabase()
+
+    try {
+      const snapshot = {
+        ...emptyPlanningSnapshot(2026),
+        projectRules: [
+          {
+            id: 'rule-rollback-1',
+            projectKey: 'project_rollback_0001',
+            effectiveFrom: '2026-01-01',
+            classification: 'new-development' as const,
+          },
+          {
+            id: 'rule-rollback-2',
+            projectKey: 'project_rollback_0002',
+            effectiveFrom: '2026-02-01',
+            classification: 'maintenance' as const,
+          },
+        ],
+      }
+
+      repository.savePlanningSnapshot(snapshot, db)
+      expect(repository.getPlanningSnapshot(db).projectRules).toHaveLength(2)
+
+      const invalidRules = [
+        ...snapshot.projectRules,
+        {
+          id: 'rule-rollback-1',
+          projectKey: 'project_rollback_dup',
+          effectiveFrom: '2026-03-01',
+          classification: 'feature-addition' as const,
+        },
+      ]
+
+      expect(() => repository.replaceProjectRules(invalidRules, db)).toThrow(
+        '同じIDのルールが重複しています',
+      )
+
+      const after = repository.getPlanningSnapshot(db)
+      expect(after.projectRules).toHaveLength(2)
+      expect(after.projectRules[0]?.id).toBe('rule-rollback-1')
+      expect(after.projectRules[1]?.id).toBe('rule-rollback-2')
+    } finally {
+      db.close()
+    }
+  })
 })

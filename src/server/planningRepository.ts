@@ -82,6 +82,13 @@ export const projectRulesSchema = z.object({
   rules: z.array(projectRuleSchema).max(5_000),
 })
 
+export class PlanningValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PlanningValidationError'
+  }
+}
+
 const lifecycleEventSchema = z.object({
   id: identifier,
   taxUnitId: identifier,
@@ -659,12 +666,17 @@ export function replaceProjectRules(
       (row) => row.id,
     ),
   )
+  const seenIds = new Set<string>()
   for (const rule of rules) {
+    if (seenIds.has(rule.id)) {
+      throw new PlanningValidationError(`同じIDのルールが重複しています: ${rule.id}`)
+    }
+    seenIds.add(rule.id)
     if (rule.taxUnitId && !unitIds.has(rule.taxUnitId)) {
-      throw new Error(`未登録の制作物を指すルールです: ${rule.id}`)
+      throw new PlanningValidationError(`未登録の制作物を指すルールです: ${rule.id}`)
     }
     if (rule.effectiveTo && rule.effectiveTo < rule.effectiveFrom) {
-      throw new Error(`終了日が開始日より前のルールです: ${rule.id}`)
+      throw new PlanningValidationError(`終了日が開始日より前のルールです: ${rule.id}`)
     }
   }
 
