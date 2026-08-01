@@ -531,7 +531,7 @@ function SummaryPage({
           <PanelHeading
             title="費用の行き先"
             subtitle="AIサービスごとに配賦した月額の積み上げ"
-            trailing={<span className="confidence">分類済み {data.meta.classifiedRate}%</span>}
+            trailing={<span className="confidence">対応付け済み {data.meta.mappedRate}% ・ 分類済み {data.meta.classifiedRate}%</span>}
           />
           <div className="chart-legend" aria-hidden="true">
             <span><i className="dot coral" />今年の費用</span>
