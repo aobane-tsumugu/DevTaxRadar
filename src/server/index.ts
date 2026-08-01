@@ -7,9 +7,8 @@ import { z } from 'zod'
 import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
 import {
   getConfiguration,
-  replaceProviderEvents,
+  replaceProviderSessions,
   saveConfiguration,
-  type StoredUsageEvent,
 } from './database.js'
 import { buildDashboard } from './dashboard.js'
 import {
@@ -17,6 +16,7 @@ import {
   getIdentifierSalt,
 } from './paths.js'
 import { csrfToken, protectMutation } from './security.js'
+import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
 
 const host = '127.0.0.1'
 const port = Number(process.env.PORT ?? 4317)
@@ -191,37 +191,27 @@ app.post('/api/scan', async (request, reply) => {
       ? await readClaudeHistory(paths.claude, {
           identifierSalt,
           includeLocalProjectLabel: true,
+          includeLocalReferences: true,
         })
       : await readCodexHistory(paths.codex, {
           identifierSalt,
           includeLocalProjectLabel: true,
+          includeLocalReferences: true,
         })
-    const events: StoredUsageEvent[] = result.events.map((event) => ({
-      provider: event.provider,
-      month: event.month,
-      sessionKey: event.sessionKey,
-      projectKey: event.projectKey,
-      projectLabel: event.projectLabel,
-      model: event.model,
-      inputTokens: event.inputTokens,
-      outputTokens: event.outputTokens + event.reasoningTokens,
-      cacheReadTokens: event.cacheReadTokens,
-      cacheWriteTokens: event.cacheWriteTokens,
-      schemaVersion: event.schemaVersion,
-      confidence: event.confidence === 'A'
-        ? 'high'
-        : event.confidence === 'B'
-          ? 'medium'
-          : 'low',
-    }))
 
-    replaceProviderEvents(provider, events, {
+    const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
+    const sessions = aggregateSessions(result.events, aggregationDiagnostics)
+
+    replaceProviderSessions(provider, sessions, {
       filesSeen: result.diagnostics.filesDiscovered,
       malformedLines: result.diagnostics.malformedJsonLines,
     })
     results[provider] = {
-      events: events.length,
-      diagnostics: result.diagnostics,
+      events: sessions.length,
+      diagnostics: {
+        ...result.diagnostics,
+        nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
+      },
     }
   }
 

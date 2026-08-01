@@ -1,23 +1,10 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { resolvedTimeZone } from '../adapters/localTime.js'
+import type { UsageProvider } from '../adapters/types.js'
 import { getAppDataDirectory } from './paths.js'
-
-export type StoredUsageEvent = {
-  provider: 'claude' | 'codex'
-  month: string
-  sessionKey: string
-  projectKey: string
-  projectLabel?: string
-  model?: string
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  observedAt?: string
-  schemaVersion: string
-  confidence: 'high' | 'medium' | 'low'
-}
+import type { UsageSession } from './sessionAggregation.js'
 
 let database: DatabaseSync | undefined
 
@@ -33,21 +20,6 @@ type UsageOverview = {
     cacheWriteTokens: number
   }>
   recentScans: Array<Record<string, string | number | null>>
-}
-
-export type ProjectUsageRow = {
-  provider: 'claude' | 'codex'
-  month: string
-  projectKey: string
-  projectLabel: string | null
-  model: string | null
-  sessions: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  firstObservedAt?: string | null
-  lastObservedAt?: string | null
 }
 
 export type ProjectMapping = {
@@ -67,6 +39,30 @@ export type LocalConfiguration = {
   unobservedRatio: number
   mappings: ProjectMapping[]
 }
+
+const USAGE_EVENTS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS usage_events (
+    id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    month TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    message_count INTEGER NOT NULL,
+    project_label TEXT,
+    model TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    schema_version TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    UNIQUE(provider, session_key, project_key, month)
+  ) STRICT;
+  CREATE INDEX IF NOT EXISTS usage_events_month_provider ON usage_events(month, provider);
+  CREATE INDEX IF NOT EXISTS usage_events_project ON usage_events(project_key);
+`
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -90,31 +86,21 @@ export function getDatabase(): DatabaseSync {
       files_seen INTEGER NOT NULL DEFAULT 0,
       events_written INTEGER NOT NULL DEFAULT 0,
       malformed_lines INTEGER NOT NULL DEFAULT 0,
+      time_zone TEXT,
       status TEXT NOT NULL
     ) STRICT;
 
-    CREATE TABLE IF NOT EXISTS usage_events (
-      id INTEGER PRIMARY KEY,
-      provider TEXT NOT NULL,
-      month TEXT NOT NULL,
-      session_key TEXT NOT NULL,
-      project_key TEXT NOT NULL,
-      project_label TEXT,
-      model TEXT,
-      input_tokens INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-      observed_at TEXT,
-      schema_version TEXT NOT NULL,
-      confidence TEXT NOT NULL,
-      UNIQUE(provider, session_key, month, project_key, observed_at)
-    ) STRICT;
+    ${USAGE_EVENTS_SCHEMA}
 
-    CREATE INDEX IF NOT EXISTS usage_events_month_provider
-      ON usage_events(month, provider);
-    CREATE INDEX IF NOT EXISTS usage_events_project
-      ON usage_events(project_key);
+    CREATE TABLE IF NOT EXISTS session_references (
+      provider TEXT NOT NULL,
+      session_key TEXT NOT NULL,
+      native_session_id TEXT NOT NULL,
+      source_path TEXT NOT NULL,
+      working_directory TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      PRIMARY KEY(provider, session_key)
+    ) STRICT;
 
     CREATE TABLE IF NOT EXISTS provider_settings (
       provider TEXT PRIMARY KEY,
@@ -276,48 +262,95 @@ export function getDatabase(): DatabaseSync {
     database.exec(`ALTER TABLE planning_tax_units ADD COLUMN monetization_status TEXT NOT NULL DEFAULT 'planned'`)
   }
 
+  // v0.1.0 is unreleased; only developers hold a database in the old shape.
+  // Detect it at startup and rebuild rather than migrating message rows.
+  const usageColumns = new Set(
+    (database.prepare(`PRAGMA table_info(usage_events)`).all() as Array<{ name: string }>)
+      .map((column) => column.name),
+  )
+  if (usageColumns.size > 0 && !usageColumns.has('started_at')) {
+    database.exec('DROP TABLE usage_events')
+    database.exec(USAGE_EVENTS_SCHEMA)
+  }
+
+  const scanColumns = new Set(
+    (database.prepare(`PRAGMA table_info(scans)`).all() as Array<{ name: string }>)
+      .map((column) => column.name),
+  )
+  if (!scanColumns.has('time_zone')) {
+    database.exec('ALTER TABLE scans ADD COLUMN time_zone TEXT')
+  }
+
   return database
 }
 
-export function replaceProviderEvents(
-  provider: StoredUsageEvent['provider'],
-  events: StoredUsageEvent[],
+export function replaceProviderSessions(
+  provider: UsageProvider,
+  sessions: UsageSession[],
   diagnostics: { filesSeen: number; malformedLines: number },
 ): void {
   const db = getDatabase()
   const insertScan = db.prepare(`
-    INSERT INTO scans(provider, started_at, status)
-    VALUES (?, ?, 'running')
+    INSERT INTO scans(provider, started_at, time_zone, status)
+    VALUES (?, ?, ?, 'running')
   `)
-  const scanResult = insertScan.run(provider, new Date().toISOString())
+  const scanResult = insertScan.run(provider, new Date().toISOString(), resolvedTimeZone())
   const scanId = Number(scanResult.lastInsertRowid)
-  const insertEvent = db.prepare(`
-    INSERT OR REPLACE INTO usage_events(
-      provider, month, session_key, project_key, project_label, model,
-      input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-      observed_at, schema_version, confidence
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+
+  const insertSession = db.prepare(`
+    INSERT INTO usage_events(
+      provider, session_key, project_key, month, started_at, ended_at,
+      message_count, project_label, model, input_tokens, output_tokens,
+      cache_read_tokens, cache_write_tokens, schema_version, confidence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider, session_key, project_key, month) DO UPDATE SET
+      started_at = excluded.started_at,
+      ended_at = excluded.ended_at,
+      message_count = excluded.message_count,
+      project_label = excluded.project_label,
+      model = excluded.model,
+      input_tokens = excluded.input_tokens,
+      output_tokens = excluded.output_tokens,
+      cache_read_tokens = excluded.cache_read_tokens,
+      cache_write_tokens = excluded.cache_write_tokens,
+      schema_version = excluded.schema_version,
+      confidence = excluded.confidence
   `)
+  const insertReference = db.prepare(`
+    INSERT INTO session_references(
+      provider, session_key, native_session_id, source_path,
+      working_directory, captured_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider, session_key) DO UPDATE SET
+      native_session_id = excluded.native_session_id,
+      source_path = excluded.source_path,
+      working_directory = excluded.working_directory,
+      captured_at = excluded.captured_at
+  `)
+  const capturedAt = new Date().toISOString()
 
   try {
     db.exec('BEGIN IMMEDIATE')
     db.prepare('DELETE FROM usage_events WHERE provider = ?').run(provider)
-    for (const event of events) {
-      insertEvent.run(
-        event.provider,
-        event.month,
-        event.sessionKey,
-        event.projectKey,
-        event.projectLabel ?? null,
-        event.model ?? null,
-        event.inputTokens,
-        event.outputTokens,
-        event.cacheReadTokens,
-        event.cacheWriteTokens,
-        event.observedAt ?? null,
-        event.schemaVersion,
-        event.confidence,
+    db.prepare('DELETE FROM session_references WHERE provider = ?').run(provider)
+    for (const item of sessions) {
+      insertSession.run(
+        item.provider, item.sessionKey, item.projectKey, item.month,
+        item.startedAt, item.endedAt, item.messageCount,
+        item.projectLabel ?? null, item.model ?? null,
+        item.inputTokens, item.outputTokens,
+        item.cacheReadTokens, item.cacheWriteTokens,
+        item.schemaVersion, item.confidence,
       )
+      if (item.localReference) {
+        insertReference.run(
+          item.provider, item.sessionKey,
+          item.localReference.nativeSessionId,
+          item.localReference.sourcePath,
+          item.localReference.workingDirectory,
+          capturedAt,
+        )
+      }
     }
     db.exec('COMMIT')
     db.prepare(`
@@ -328,7 +361,7 @@ export function replaceProviderEvents(
     `).run(
       new Date().toISOString(),
       diagnostics.filesSeen,
-      events.length,
+      sessions.length,
       diagnostics.malformedLines,
       scanId,
     )
@@ -344,17 +377,15 @@ export function replaceProviderEvents(
 export function getUsageOverview(): UsageOverview {
   const db = getDatabase()
   const providers = db.prepare(`
-    SELECT
-      provider,
-      month,
-      COUNT(DISTINCT session_key) AS sessions,
-      COUNT(DISTINCT project_key) AS projects,
-      SUM(input_tokens) AS inputTokens,
-      SUM(output_tokens) AS outputTokens,
-      SUM(cache_read_tokens) AS cacheReadTokens,
-      SUM(cache_write_tokens) AS cacheWriteTokens,
-      MIN(observed_at) AS firstObservedAt,
-      MAX(observed_at) AS lastObservedAt
+    SELECT provider, month,
+           COUNT(*) AS sessions,
+           COUNT(DISTINCT project_key) AS projects,
+           SUM(input_tokens) AS inputTokens,
+           SUM(output_tokens) AS outputTokens,
+           SUM(cache_read_tokens) AS cacheReadTokens,
+           SUM(cache_write_tokens) AS cacheWriteTokens,
+           MIN(started_at) AS firstObservedAt,
+           MAX(ended_at) AS lastObservedAt
     FROM usage_events
     GROUP BY provider, month
     ORDER BY month, provider
@@ -372,23 +403,50 @@ export function getUsageOverview(): UsageOverview {
   return { providers, recentScans }
 }
 
-export function getProjectUsage(): ProjectUsageRow[] {
+export type UsageSessionRow = {
+  provider: UsageProvider
+  sessionKey: string
+  projectKey: string
+  month: string
+  startedAt: string
+  endedAt: string
+  messageCount: number
+  projectLabel: string | null
+  model: string | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+}
+
+export function getUsageSessions(): UsageSessionRow[] {
   return getDatabase().prepare(`
-    SELECT
-      provider,
-      month,
-      project_key AS projectKey,
-      MAX(project_label) AS projectLabel,
-      MAX(model) AS model,
-      COUNT(DISTINCT session_key) AS sessions,
-      SUM(input_tokens) AS inputTokens,
-      SUM(output_tokens) AS outputTokens,
-      SUM(cache_read_tokens) AS cacheReadTokens,
-      SUM(cache_write_tokens) AS cacheWriteTokens
+    SELECT provider, session_key AS sessionKey, project_key AS projectKey,
+           month, started_at AS startedAt, ended_at AS endedAt,
+           message_count AS messageCount, project_label AS projectLabel, model,
+           input_tokens AS inputTokens, output_tokens AS outputTokens,
+           cache_read_tokens AS cacheReadTokens, cache_write_tokens AS cacheWriteTokens
     FROM usage_events
-    GROUP BY provider, month, project_key
-    ORDER BY month, provider, project_key
-  `).all() as ProjectUsageRow[]
+    ORDER BY month, provider, project_key, started_at
+  `).all() as UsageSessionRow[]
+}
+
+export type SessionReferenceRow = {
+  nativeSessionId: string
+  sourcePath: string
+  workingDirectory: string
+  capturedAt: string
+}
+
+export function getSessionReference(
+  provider: UsageProvider,
+  sessionKey: string,
+): SessionReferenceRow | undefined {
+  return getDatabase().prepare(`
+    SELECT native_session_id AS nativeSessionId, source_path AS sourcePath,
+           working_directory AS workingDirectory, captured_at AS capturedAt
+    FROM session_references WHERE provider = ? AND session_key = ?
+  `).get(provider, sessionKey) as SessionReferenceRow | undefined
 }
 
 export function getConfiguration(): LocalConfiguration {

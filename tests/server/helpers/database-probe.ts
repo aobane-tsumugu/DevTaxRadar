@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import {
   getUsageOverview,
-  replaceProviderEvents,
+  replaceProviderSessions,
 } from "../../../src/server/database.ts";
 
 const dataDirectory = process.env.DEVTAX_RADAR_DATA_DIR;
@@ -11,7 +11,7 @@ if (!dataDirectory) {
   throw new Error("DEVTAX_RADAR_DATA_DIR is required");
 }
 
-replaceProviderEvents(
+replaceProviderSessions(
   "claude",
   [
     {
@@ -19,6 +19,9 @@ replaceProviderEvents(
       month: "2026-04",
       sessionKey: "hashed-session-a",
       projectKey: "hashed-project-a",
+      startedAt: "2026-04-10T10:00:00.000Z",
+      endedAt: "2026-04-10T11:00:00.000Z",
+      messageCount: 2,
       model: "synthetic-model",
       inputTokens: 100,
       outputTokens: 20,
