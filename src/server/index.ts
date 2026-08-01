@@ -71,6 +71,25 @@ app.put('/api/planning', async (request, reply) => {
   return { saved: true }
 })
 
+app.put('/api/planning/rules', async (request, reply) => {
+  const { projectRulesSchema, replaceProjectRules } = await import('./planningRepository.js')
+  const parsed = projectRulesSchema.safeParse(request.body)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+  try {
+    replaceProjectRules(parsed.data.rules)
+  } catch (error) {
+    await reply.code(400).send({
+      error: 'invalid_request',
+      message: error instanceof Error ? error.message : '保存できませんでした。',
+    })
+    return
+  }
+  return { saved: true }
+})
+
 app.get('/api/diagnosis', async () => {
   const [{ diagnosePlanning }, { getPlanningSnapshot }] = await Promise.all([
     import('../core/index.js'),

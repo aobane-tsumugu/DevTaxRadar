@@ -5,7 +5,12 @@ import type {
   ScanResult,
   FolderSummary,
 } from './types'
-import type { Diagnosis, PlanningLedger, PlanningSnapshot } from '../planning/types'
+import type {
+  Diagnosis,
+  PlanningLedger,
+  PlanningSnapshot,
+  ProjectRuleRecord,
+} from '../planning/types'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -76,6 +81,20 @@ export function savePlanning(
       'X-DevTax-CSRF': csrfToken,
     },
     body: JSON.stringify(planning),
+  })
+}
+
+export function savePlanningRules(
+  csrfToken: string,
+  rules: ProjectRuleRecord[],
+): Promise<{ saved: true }> {
+  return requestJson('/api/planning/rules', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevTax-CSRF': csrfToken,
+    },
+    body: JSON.stringify({ rules }),
   })
 }
 
