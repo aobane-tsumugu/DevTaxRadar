@@ -17,7 +17,7 @@
 - ファイルはUTF-8で書く。Windows環境で文字化けする文字を使わない
 - UI文言とテスト名は日本語で書く。既存コードの書き方に合わせる
 - テストは合成fixtureと一時ディレクトリだけを使う。実ユーザーの `~/.claude` `~/.codex` を読むテストを書かない
-- 各タスクの完了時に `npm run typecheck` と `npm test` が通ること
+- 各タスクの完了時に、そのタスクが追加・変更したテストが通ること。`npm run typecheck` と全テストの通過は Task 8 完了時点で満たす。型の段階的移行のため、中間タスクでは他ファイルに型エラーが残ることを許容する。どのタスクのどの手順で一時的なエラーが残るかは、各タスクの手順に明記してある
 - 生のセッションID、絶対パス、作業ディレクトリは `session_references` テーブルにだけ置く。`usage_events` と API レスポンスへ混ぜない
 
 ---
@@ -1092,7 +1092,9 @@ separate table that export paths never touch."
 
 ---
 
-## Task 5: セッション割当の解決
+## Task 6: セッション割当の解決
+
+> 実行順の注意: この課題は「ルールの制作物を任意にする」課題（この文書では Task 6 として記述）より **後** に実行する。`taxUnitId` が任意でないと本タスクのテストが型エラーになるためである。実行順は 1, 2, 3, 4, 「ルールの任意化」, 「セッション割当の解決」, 7, 8 とする。
 
 `resolveMonthlyProjectMapping` は「月全体を1つのルールが覆う場合だけ採用」する。外れた月は丸ごと未分類へ落ちる。セッションの発生日時で解決すれば、月の途中の切替も表現できる。
 
@@ -1292,8 +1294,6 @@ export function resolveSessionAssignment(
 
 Run: `npx vitest run tests/server/sessionAssignment.test.ts`
 Expected: PASS（12件）
-
-`taxUnitId: undefined` を渡すテストは Task 6 で `ProjectRuleRecord` を任意化するまで型エラーになる。Task 6 を先に実行してもよい。順番を入れ替える場合は、Task 6 の Step 1 から始めること。
 
 - [ ] **Step 5: 旧テストを削除する**
 
