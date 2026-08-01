@@ -97,6 +97,12 @@ export function summarizeFolders(
         provider: rule.provider,
         sessionCount: ruleUsage.get(rule.id) ?? 0,
       }))
+      .sort((left, right) => {
+        if (left.effectiveFrom !== right.effectiveFrom) {
+          return left.effectiveFrom < right.effectiveFrom ? -1 : 1
+        }
+        return left.ruleId < right.ruleId ? -1 : 1
+      })
   }
 
   return [...byProject.values()].sort((left, right) => {

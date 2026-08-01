@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { FolderSummary, ProviderKey } from '../types'
+import type { FolderAssignment, FolderSummary, ProviderKey } from '../types'
 import type {
   PlanningSnapshot,
   ProjectClassification,
@@ -72,24 +72,23 @@ export default function FolderAssignmentPage({
 
   const unassignedFolders = folders.filter((folder) => folder.unassignedSessionCount > 0).length
 
-  async function assign(
+  async function assignRule(
     folder: FolderSummary,
-    patch: { taxUnitId?: string; classification?: ProjectClassification },
+    target: FolderAssignment | undefined,
+    patch: { taxUnitId?: string; classification?: ProjectClassification; effectiveFrom?: string },
   ) {
-    const existing = folder.assignments[0]
-    const effectiveFrom = existing?.effectiveFrom ?? folder.firstUsedOn
+    const effectiveFrom = patch.effectiveFrom ?? target?.effectiveFrom ?? folder.firstUsedOn
     const next: ProjectRuleRecord = {
-      id: existing?.ruleId ?? ruleId(folder.projectKey, effectiveFrom),
+      id: target?.ruleId ?? ruleId(folder.projectKey, effectiveFrom),
       projectKey: folder.projectKey,
       effectiveFrom,
-      effectiveTo: existing?.effectiveTo,
-      provider: existing?.provider,
+      effectiveTo: target?.effectiveTo,
+      provider: target?.provider,
       taxUnitId:
-        patch.taxUnitId === NO_TAX_UNIT ? undefined : (patch.taxUnitId ?? existing?.taxUnitId),
-      classification: patch.classification ?? existing?.classification ?? 'unclassified',
+        patch.taxUnitId === NO_TAX_UNIT ? undefined : (patch.taxUnitId ?? target?.taxUnitId),
+      classification: patch.classification ?? target?.classification ?? 'unclassified',
       reason: '割当画面で登録',
     }
-
     const others = planning.projectRules.filter((rule) => rule.id !== next.id)
     await onSaveRules([...others, next])
   }
@@ -222,41 +221,47 @@ export default function FolderAssignmentPage({
                     {folder.providers.map((provider) => PROVIDER_LABELS[provider]).join('・')}
                   </small>
                 </div>
-                <div className="assignment-fields">
-                  <label>
-                    <span>制作物</span>
-                    <select
-                      value={folder.assignments[0]?.taxUnitId ?? NO_TAX_UNIT}
-                      disabled={busy}
-                      onChange={(event) => assign(folder, { taxUnitId: event.target.value })}
-                    >
-                      <option value={NO_TAX_UNIT}>指定しない</option>
-                      {planning.taxUnits.map((unit) => (
-                        <option key={unit.id} value={unit.id}>
-                          {unit.name || '名前未入力'}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>この期間にしたこと</span>
-                    <select
-                      value={folder.assignments[0]?.classification ?? 'unclassified'}
-                      disabled={busy}
-                      onChange={(event) =>
-                        assign(folder, {
-                          classification: event.target.value as ProjectClassification,
-                        })
-                      }
-                    >
-                      {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                {folder.assignments.length <= 1 && (
+                  <div className="assignment-fields">
+                    <label>
+                      <span>制作物</span>
+                      <select
+                        value={folder.assignments[0]?.taxUnitId ?? NO_TAX_UNIT}
+                        disabled={busy}
+                        onChange={(event) =>
+                          assignRule(folder, folder.assignments[0], {
+                            taxUnitId: event.target.value,
+                          })
+                        }
+                      >
+                        <option value={NO_TAX_UNIT}>指定しない</option>
+                        {planning.taxUnits.map((unit) => (
+                          <option key={unit.id} value={unit.id}>
+                            {unit.name || '名前未入力'}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>この期間にしたこと</span>
+                      <select
+                        value={folder.assignments[0]?.classification ?? 'unclassified'}
+                        disabled={busy}
+                        onChange={(event) =>
+                          assignRule(folder, folder.assignments[0], {
+                            classification: event.target.value as ProjectClassification,
+                          })
+                        }
+                      >
+                        {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
                 <div className="assignment-row-actions">
                   <button
                     type="button"
@@ -272,20 +277,53 @@ export default function FolderAssignmentPage({
                     </span>
                   )}
                 </div>
-                {folder.assignments.length > 1 && (
+                {folder.assignments.length > 1 ? (
                   <ul className="assignment-periods">
                     {folder.assignments.map((assignment) => (
                       <li key={assignment.ruleId}>
-                        <span>
-                          {assignment.effectiveFrom}〜{assignment.effectiveTo ?? ''}
+                        <span className="period-range">
+                          {assignment.effectiveFrom}〜{assignment.effectiveTo ?? '（継続中）'}
                         </span>
-                        <span>{assignment.taxUnitName ?? '制作物なし'}</span>
-                        <span>{CLASSIFICATION_LABELS[assignment.classification]}</span>
+                        <label>
+                          <span>制作物</span>
+                          <select
+                            value={assignment.taxUnitId ?? NO_TAX_UNIT}
+                            disabled={busy}
+                            onChange={(event) =>
+                              assignRule(folder, assignment, { taxUnitId: event.target.value })
+                            }
+                          >
+                            <option value={NO_TAX_UNIT}>指定しない</option>
+                            {planning.taxUnits.map((unit) => (
+                              <option key={unit.id} value={unit.id}>
+                                {unit.name || '名前未入力'}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>この期間にしたこと</span>
+                          <select
+                            value={assignment.classification}
+                            disabled={busy}
+                            onChange={(event) =>
+                              assignRule(folder, assignment, {
+                                classification: event.target.value as ProjectClassification,
+                              })
+                            }
+                          >
+                            {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                         <small>{assignment.sessionCount}セッション</small>
                       </li>
                     ))}
                   </ul>
-                )}
+                ) : null}
               </li>
             ))}
           </ul>

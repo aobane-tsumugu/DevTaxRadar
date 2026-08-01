@@ -170,6 +170,61 @@ describe('summarizeFolders', () => {
     ])
   })
 
+  it('ルールを effectiveFrom の逆順で渡しても、assignments は昇順で返す', () => {
+    const folders = summarizeFolders(
+      [session()],
+      planning([
+        // 保存側はルールをID末尾へ追記するため、配列の並び順は effectiveFrom の
+        // 順序と一致しない。summarizeFolders 側で必ず並べ替えることを確認する。
+        {
+          id: 'rule-late',
+          projectKey: 'project_a',
+          effectiveFrom: '2026-07-15',
+          taxUnitId: 'unit-a',
+          classification: 'maintenance',
+        },
+        {
+          id: 'rule-early',
+          projectKey: 'project_a',
+          effectiveFrom: '2026-07-01',
+          effectiveTo: '2026-07-14',
+          taxUnitId: 'unit-a',
+          classification: 'new-development',
+        },
+      ]),
+      'Asia/Tokyo',
+    )
+
+    expect(folders[0]?.assignments.map((item) => item.ruleId)).toEqual(['rule-early', 'rule-late'])
+  })
+
+  it('effectiveFrom が同じルールは ruleId の昇順で並べる', () => {
+    const folders = summarizeFolders(
+      [session()],
+      planning([
+        {
+          id: 'rule-b',
+          projectKey: 'project_a',
+          effectiveFrom: '2026-07-01',
+          taxUnitId: 'unit-a',
+          classification: 'maintenance',
+          provider: 'codex',
+        },
+        {
+          id: 'rule-a',
+          projectKey: 'project_a',
+          effectiveFrom: '2026-07-01',
+          taxUnitId: 'unit-a',
+          classification: 'new-development',
+          provider: 'claude',
+        },
+      ]),
+      'Asia/Tokyo',
+    )
+
+    expect(folders[0]?.assignments.map((item) => item.ruleId)).toEqual(['rule-a', 'rule-b'])
+  })
+
   it('制作物を指定しないルールは分類だけを返す', () => {
     const folders = summarizeFolders(
       [session()],
