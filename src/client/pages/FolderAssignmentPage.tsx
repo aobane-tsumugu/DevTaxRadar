@@ -27,6 +27,18 @@ function ruleId(projectKey: string, effectiveFrom: string): string {
   return `rule-${projectKey.slice(-12)}-${effectiveFrom}`
 }
 
+// The "まとめて設定..." placeholder option already uses the empty string, so
+// "指定しない" (no product) needs a distinct sentinel value.
+const NO_TAX_UNIT = '__none__'
+
+function shiftDay(date: string, days: number): string {
+  const [year, month, day] = date.split('-').map(Number)
+  const shifted = new Date(Date.UTC(year!, month! - 1, day! + days))
+  return shifted.toISOString().slice(0, 10)
+}
+const nextDay = (date: string) => shiftDay(date, 1)
+const previousDay = (date: string) => shiftDay(date, -1)
+
 export default function FolderAssignmentPage({
   folders,
   planning,
@@ -41,6 +53,8 @@ export default function FolderAssignmentPage({
   const [query, setQuery] = useState('')
   const [unassignedOnly, setUnassignedOnly] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('usage')
+  const [selected, setSelected] = useState<Record<string, boolean>>({})
+  const selectedKeys = Object.keys(selected).filter((key) => selected[key])
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -70,14 +84,69 @@ export default function FolderAssignmentPage({
       effectiveFrom,
       effectiveTo: existing?.effectiveTo,
       provider: existing?.provider,
-      taxUnitId: patch.taxUnitId ?? existing?.taxUnitId,
+      taxUnitId:
+        patch.taxUnitId === NO_TAX_UNIT ? undefined : (patch.taxUnitId ?? existing?.taxUnitId),
       classification: patch.classification ?? existing?.classification ?? 'unclassified',
       reason: '割当画面で登録',
     }
-    if (patch.taxUnitId === '') next.taxUnitId = undefined
 
     const others = planning.projectRules.filter((rule) => rule.id !== next.id)
     await onSaveRules([...others, next])
+  }
+
+  async function assignSelected(patch: {
+    taxUnitId?: string
+    classification?: ProjectClassification
+  }) {
+    const targets = folders.filter((folder) => selected[folder.projectKey])
+    if (targets.length === 0) return
+
+    const nextById = new Map(planning.projectRules.map((rule) => [rule.id, rule]))
+    for (const folder of targets) {
+      const existing = folder.assignments[0]
+      const effectiveFrom = existing?.effectiveFrom ?? folder.firstUsedOn
+      const id = existing?.ruleId ?? ruleId(folder.projectKey, effectiveFrom)
+      nextById.set(id, {
+        id,
+        projectKey: folder.projectKey,
+        effectiveFrom,
+        effectiveTo: existing?.effectiveTo,
+        provider: existing?.provider,
+        taxUnitId:
+          patch.taxUnitId === NO_TAX_UNIT ? undefined : (patch.taxUnitId ?? existing?.taxUnitId),
+        classification: patch.classification ?? existing?.classification ?? 'unclassified',
+        reason: '割当画面で一括登録',
+      })
+    }
+
+    await onSaveRules([...nextById.values()])
+    setSelected({})
+  }
+
+  async function splitPeriod(folder: FolderSummary) {
+    const last = folder.assignments.at(-1)
+    const from = last?.effectiveTo
+      ? nextDay(last.effectiveTo)
+      : new Date().toISOString().slice(0, 10)
+    const id = ruleId(folder.projectKey, from)
+    if (planning.projectRules.some((rule) => rule.id === id)) return
+
+    const updated = planning.projectRules.map((rule) =>
+      rule.id === last?.ruleId && !rule.effectiveTo
+        ? { ...rule, effectiveTo: previousDay(from) }
+        : rule,
+    )
+    await onSaveRules([
+      ...updated,
+      {
+        id,
+        projectKey: folder.projectKey,
+        effectiveFrom: from,
+        taxUnitId: last?.taxUnitId,
+        classification: 'unclassified',
+        reason: '割当画面で期間を分割',
+      },
+    ])
   }
 
   return (
@@ -134,6 +203,18 @@ export default function FolderAssignmentPage({
           <ul className="assignment-list">
             {visible.map((folder) => (
               <li key={folder.projectKey}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(selected[folder.projectKey])}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setSelected((current) => ({
+                      ...current,
+                      [folder.projectKey]: event.target.checked,
+                    }))
+                  }
+                  aria-label={`${folder.label}を選択`}
+                />
                 <div className="assignment-folder">
                   <strong>{folder.label}</strong>
                   <small>
@@ -145,11 +226,11 @@ export default function FolderAssignmentPage({
                   <label>
                     <span>制作物</span>
                     <select
-                      value={folder.assignments[0]?.taxUnitId ?? ''}
+                      value={folder.assignments[0]?.taxUnitId ?? NO_TAX_UNIT}
                       disabled={busy}
                       onChange={(event) => assign(folder, { taxUnitId: event.target.value })}
                     >
-                      <option value="">指定しない</option>
+                      <option value={NO_TAX_UNIT}>指定しない</option>
                       {planning.taxUnits.map((unit) => (
                         <option key={unit.id} value={unit.id}>
                           {unit.name || '名前未入力'}
@@ -176,16 +257,82 @@ export default function FolderAssignmentPage({
                     </select>
                   </label>
                 </div>
-                {folder.unassignedSessionCount > 0 && (
-                  <span className="assignment-status warning">
-                    未割当 {folder.unassignedSessionCount}件
-                  </span>
+                <div className="assignment-row-actions">
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => splitPeriod(folder)}
+                  >
+                    期間を分ける
+                  </button>
+                  {folder.unassignedSessionCount > 0 && (
+                    <span className="assignment-status warning">
+                      未割当 {folder.unassignedSessionCount}件
+                    </span>
+                  )}
+                </div>
+                {folder.assignments.length > 1 && (
+                  <ul className="assignment-periods">
+                    {folder.assignments.map((assignment) => (
+                      <li key={assignment.ruleId}>
+                        <span>
+                          {assignment.effectiveFrom}〜{assignment.effectiveTo ?? ''}
+                        </span>
+                        <span>{assignment.taxUnitName ?? '制作物なし'}</span>
+                        <span>{CLASSIFICATION_LABELS[assignment.classification]}</span>
+                        <small>{assignment.sessionCount}セッション</small>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {selectedKeys.length > 0 && (
+        <div className="assignment-bulk" role="status">
+          <strong>{selectedKeys.length}件を選択中</strong>
+          <label>
+            <span>制作物</span>
+            <select
+              value=""
+              disabled={busy}
+              onChange={(event) => assignSelected({ taxUnitId: event.target.value })}
+            >
+              <option value="">まとめて設定...</option>
+              <option value={NO_TAX_UNIT}>指定しない</option>
+              {planning.taxUnits.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.name || '名前未入力'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>作業内容</span>
+            <select
+              value=""
+              disabled={busy}
+              onChange={(event) =>
+                assignSelected({ classification: event.target.value as ProjectClassification })
+              }
+            >
+              <option value="">まとめて設定...</option>
+              {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="text-button" disabled={busy} onClick={() => setSelected({})}>
+            選択を解除
+          </button>
+        </div>
+      )}
     </>
   )
 }

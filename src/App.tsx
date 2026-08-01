@@ -446,6 +446,8 @@ function App() {
           onClose={() => {
             setOnboarding(false)
             setOnboardingStep(0)
+          }}
+          onSaved={() => {
             if (unassignedFolderCount > 0) setPage('folders')
           }}
         />

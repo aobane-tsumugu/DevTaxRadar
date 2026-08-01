@@ -31,6 +31,7 @@ function Onboarding({
   onSave,
   onSavePlanning,
   onClose,
+  onSaved,
 }: {
   step: number
   data: DashboardData
@@ -44,6 +45,7 @@ function Onboarding({
   onSave: (configuration: LocalConfiguration) => Promise<void>
   onSavePlanning: (planning: PlanningSnapshot) => Promise<void>
   onClose: () => void
+  onSaved?: () => void
 }) {
   const steps = ['履歴', '対象年', '制作物', '費用', '診断']
   const isDemoData = data.meta.source === 'demo'
@@ -363,6 +365,7 @@ function Onboarding({
       })
       await onSavePlanning(planningDraft)
       setNotice({ kind: 'success', message: '設定を保存し、ダッシュボードを再集計しました。' })
+      onSaved?.()
       window.setTimeout(onClose, 650)
     } catch (error) {
       setNotice({
