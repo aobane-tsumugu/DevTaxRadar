@@ -1,5 +1,6 @@
 import {
   allocateSubscriptions,
+  assertAllocationInvariant,
   calculateWeightedTokenUsage,
   type AllocationLine,
   type BillingMonth,
@@ -122,10 +123,14 @@ type ProjectMonthGroup = {
 }
 
 function groupKey(group: ProjectMonthGroup): string {
-  return [
+  // taxUnitId is a user-entered identifier (src/server/planningRepository.ts's
+  // `identifier` schema permits any character), so joining fields with ':'
+  // could let a taxUnitId containing ':' merge two distinct classification
+  // groups into one row. JSON.stringify keeps each field distinguishable.
+  return JSON.stringify([
     group.provider, group.month, group.projectKey,
     group.taxUnitId ?? '', group.classification,
-  ].join(':')
+  ])
 }
 
 function allocationForGroup(
@@ -133,7 +138,10 @@ function allocationForGroup(
   line: AllocationLine,
   taxUnitById: Map<string, TaxUnitRecord>,
 ): Allocation {
-  const view = classificationView[group.classification]
+  // getPlanningSnapshot() returns DB rows, so an unexpected classification
+  // value (e.g. an older DB row from before an enum change) must not throw --
+  // fall back to the unclassified view rather than crashing /api/dashboard.
+  const view = classificationView[group.classification] ?? classificationView.unclassified
   const taxUnit = group.taxUnitId ? taxUnitById.get(group.taxUnitId) : undefined
   const product = taxUnit?.name
     ?? safeLocalLabel(group.projectLabel, `Project ${group.projectKey.slice(-6)}`)
@@ -229,10 +237,14 @@ export function buildDashboard(): DashboardData {
 
   const groups = new Map<string, ProjectMonthGroup>()
   for (const session of assigned) {
-    const key = [
+    // Same JSON.stringify encoding as groupKey() below: taxUnitId is a
+    // user-entered identifier that may contain any character, so joining
+    // with ':' here would risk merging two distinct classification groups
+    // into one during this very aggregation step.
+    const key = JSON.stringify([
       session.provider, session.month, session.projectKey,
       session.assignment.taxUnitId ?? '', session.assignment.classification,
-    ].join(':')
+    ])
     const current = groups.get(key)
     if (!current) {
       groups.set(key, {
@@ -313,6 +325,10 @@ export function buildDashboard(): DashboardData {
 
   const allocations: Allocation[] = []
   for (const result of allocateSubscriptions(inputs)) {
+    // The sum-equals-fee property is the product's core promise: turn a
+    // future regression into a loud error instead of a silently wrong tax
+    // figure shown to the user.
+    assertAllocationInvariant(result)
     for (const line of result.lines) {
       if (line.kind === 'rounding-adjustment' && line.allocatedAmountJpy === 0) continue
       if (line.kind === 'unobserved' || line.kind === 'rounding-adjustment') {

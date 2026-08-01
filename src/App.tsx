@@ -1431,7 +1431,7 @@ function Onboarding({
                       </label>
                     ))}
                   </div>
-                  {rankedProducts.length > 12 && <p className="candidate-note">まず利用量の多い12件を表示しています。残りは下の履歴結び付け欄で確認できます。</p>}
+                  {rankedProducts.length > 12 && <p className="candidate-note">まず利用量の多い12件を表示しています。残りは下の「別の開発をもう1件追加」から手動で入力してください。</p>}
                   <button type="button" className="primary-button candidate-import-button" onClick={addHistoryCandidates}>選んだ候補を入力</button>
                 </details>
               )}

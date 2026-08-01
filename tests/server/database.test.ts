@@ -322,6 +322,17 @@ describe("session storage", () => {
         localReference: { nativeSessionId: "native-b", sourcePath: "/b.jsonl", workingDirectory: "/work/b" },
       }),
     ], diagnostics);
+    // A second provider's reference: replaceProviderSessions("claude", ...)
+    // below must scope its DELETE to provider = 'claude', or this codex
+    // reference would be silently wiped too.
+    db.replaceProviderSessions("codex", [
+      session({
+        provider: "codex",
+        sessionKey: "session_c",
+        projectKey: "project_c",
+        localReference: { nativeSessionId: "native-c", sourcePath: "/c.jsonl", workingDirectory: "/work/c" },
+      }),
+    ], diagnostics);
 
     db.replaceProviderSessions("claude", [
       session({
@@ -332,5 +343,6 @@ describe("session storage", () => {
 
     expect(db.getSessionReference("claude", "session_a")).toMatchObject({ nativeSessionId: "native-a" });
     expect(db.getSessionReference("claude", "session_b")).toBeUndefined();
+    expect(db.getSessionReference("codex", "session_c")).toMatchObject({ nativeSessionId: "native-c" });
   });
 });

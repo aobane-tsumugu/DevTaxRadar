@@ -450,7 +450,7 @@ export function getUsageSessions(): UsageSessionRow[] {
            input_tokens AS inputTokens, output_tokens AS outputTokens,
            cache_read_tokens AS cacheReadTokens, cache_write_tokens AS cacheWriteTokens
     FROM usage_events
-    ORDER BY month, provider, project_key, started_at
+    ORDER BY month, provider, project_key, started_at, session_key
   `).all() as UsageSessionRow[]
 }
 
