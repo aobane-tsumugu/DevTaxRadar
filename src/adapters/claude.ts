@@ -4,11 +4,11 @@ import { localProjectLabel, privateKey } from "./identifiers.ts";
 import {
   childRecord,
   discoverJsonlFiles,
-  monthFromTimestamp,
   nonNegativeInteger,
   readJsonlObjects,
   stringValue,
 } from "./jsonl.ts";
+import { localMonthFromTimestamp } from "./localTime.ts";
 import {
   createDiagnostics,
   type AdapterOptions,
@@ -29,7 +29,7 @@ export async function readClaudeHistory(
 
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
     for await (const row of readJsonlObjects(filePath, diagnostics)) {
-      const event = normalizeClaudeRow(row, options, seenMessages, diagnostics);
+      const event = normalizeClaudeRow(row, filePath, options, seenMessages, diagnostics);
       if (event) events.push(event);
     }
   }
@@ -39,6 +39,7 @@ export async function readClaudeHistory(
 
 function normalizeClaudeRow(
   row: Record<string, unknown>,
+  filePath: string,
   options: AdapterOptions,
   seenMessages: Set<string>,
   diagnostics: AdapterResult["diagnostics"],
@@ -50,13 +51,13 @@ function normalizeClaudeRow(
     return undefined;
   }
 
-  const timestamp = row.timestamp;
-  const month = monthFromTimestamp(timestamp);
+  const timestamp = stringValue(row.timestamp);
+  const month = localMonthFromTimestamp(timestamp);
   const cwd = stringValue(row.cwd);
   const sessionId = stringValue(row.sessionId) ?? stringValue(row.session_id);
   const messageId = stringValue(message.id);
 
-  if (!month || !cwd || !sessionId || !messageId) {
+  if (!timestamp || !month || !cwd || !sessionId || !messageId) {
     diagnostics.invalidRecords += 1;
     return undefined;
   }
@@ -71,10 +72,14 @@ function normalizeClaudeRow(
   return {
     provider: "claude",
     month,
+    observedAt: timestamp,
     sessionKey: privateKey("session", sessionId, options.identifierSalt),
     projectKey: privateKey("project", cwd, options.identifierSalt),
     projectLabel: options.includeLocalProjectLabel
       ? localProjectLabel(cwd)
+      : undefined,
+    localReference: options.includeLocalReferences
+      ? { nativeSessionId: sessionId, sourcePath: filePath, workingDirectory: cwd }
       : undefined,
     model: stringValue(message.model) ?? "unknown",
     inputTokens: nonNegativeInteger(usage.input_tokens),

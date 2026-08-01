@@ -1,12 +1,20 @@
 export type UsageProvider = "claude" | "codex";
 export type AdapterConfidence = "A" | "B" | "C";
 
+export type LocalSessionReference = {
+  nativeSessionId: string;
+  sourcePath: string;
+  workingDirectory: string;
+};
+
 export type NormalizedUsage = {
   provider: UsageProvider;
   month: string;
+  observedAt: string;
   sessionKey: string;
   projectKey: string;
   projectLabel?: string;
+  localReference?: LocalSessionReference;
   model: string;
   inputTokens: number;
   cacheReadTokens: number;
@@ -48,6 +56,11 @@ export type AdapterOptions = {
    * Keep false for fixtures, exports, logs, and any cloud-facing process.
    */
   includeLocalProjectLabel?: boolean;
+  /**
+   * Local UI only. Exposes the provider session ID, the transcript path and
+   * the working directory so the app can offer resume. Never leaves this PC.
+   */
+  includeLocalReferences?: boolean;
 };
 
 export function createDiagnostics(): AdapterDiagnostics {

@@ -34,4 +34,28 @@ describe("Claude Code local history adapter", () => {
     expect(serialized).not.toContain("synthetic-claude-session-1");
     expect(serialized).not.toContain("SYNTHETIC_PRIVATE_PROMPT_MUST_NOT_ESCAPE");
   });
+
+  it("observedAtに元のタイムスタンプを保持する", async () => {
+    const root = resolve("fixtures/claude");
+    const result = await readClaudeHistory(root, { identifierSalt: SALT });
+    expect(result.events[0]?.observedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("opt-inしない限り生の識別子を返さない", async () => {
+    const root = resolve("fixtures/claude");
+    const result = await readClaudeHistory(root, { identifierSalt: SALT });
+    expect(result.events[0]?.localReference).toBeUndefined();
+  });
+
+  it("opt-inすると生のセッションIDと作業フォルダを返す", async () => {
+    const root = resolve("fixtures/claude");
+    const result = await readClaudeHistory(root, {
+      identifierSalt: SALT,
+      includeLocalReferences: true,
+    });
+    const reference = result.events[0]?.localReference;
+    expect(reference?.nativeSessionId).toBeTruthy();
+    expect(reference?.sourcePath).toContain(".jsonl");
+    expect(reference?.workingDirectory).toBeTruthy();
+  });
 });

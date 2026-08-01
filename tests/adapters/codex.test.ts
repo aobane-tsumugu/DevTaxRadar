@@ -51,4 +51,28 @@ describe("Codex local history adapter", () => {
       differentInstall.events[0]?.sessionKey,
     );
   });
+
+  it("observedAtに元のタイムスタンプを保持する", async () => {
+    const root = resolve("fixtures/codex");
+    const result = await readCodexHistory(root, { identifierSalt: SALT });
+    expect(result.events[0]?.observedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("opt-inしない限り生の識別子を返さない", async () => {
+    const root = resolve("fixtures/codex");
+    const result = await readCodexHistory(root, { identifierSalt: SALT });
+    expect(result.events[0]?.localReference).toBeUndefined();
+  });
+
+  it("opt-inすると生のセッションIDと作業フォルダを返す", async () => {
+    const root = resolve("fixtures/codex");
+    const result = await readCodexHistory(root, {
+      identifierSalt: SALT,
+      includeLocalReferences: true,
+    });
+    const reference = result.events[0]?.localReference;
+    expect(reference?.nativeSessionId).toBeTruthy();
+    expect(reference?.sourcePath).toContain(".jsonl");
+    expect(reference?.workingDirectory).toBeTruthy();
+  });
 });

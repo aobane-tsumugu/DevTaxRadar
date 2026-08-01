@@ -4,11 +4,11 @@ import { localProjectLabel, privateKey } from "./identifiers.ts";
 import {
   childRecord,
   discoverJsonlFiles,
-  monthFromTimestamp,
   nonNegativeInteger,
   readJsonlObjects,
   stringValue,
 } from "./jsonl.ts";
+import { localMonthFromTimestamp } from "./localTime.ts";
 import {
   createDiagnostics,
   type AdapterOptions,
@@ -25,6 +25,7 @@ type CodexSession = {
   cwd?: string;
   model?: string;
   usage?: Record<string, unknown>;
+  sourcePath: string;
 };
 
 export async function readCodexHistory(
@@ -35,7 +36,7 @@ export async function readCodexHistory(
   const events: NormalizedUsage[] = [];
 
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
-    const session: CodexSession = {};
+    const session: CodexSession = { sourcePath: filePath };
 
     for await (const row of readJsonlObjects(filePath, diagnostics)) {
       if (consumeSessionMetadata(row, session) || consumeModel(row, session)) {
@@ -111,8 +112,8 @@ function normalizeCodexSession(
   options: AdapterOptions,
   diagnostics: AdapterResult["diagnostics"],
 ): NormalizedUsage | undefined {
-  const month = monthFromTimestamp(session.timestamp);
-  if (!session.sessionId || !session.cwd || !month || !session.usage) {
+  const month = localMonthFromTimestamp(session.timestamp);
+  if (!session.sessionId || !session.cwd || !month || !session.usage || !session.timestamp) {
     diagnostics.invalidRecords += 1;
     return undefined;
   }
@@ -120,10 +121,18 @@ function normalizeCodexSession(
   return {
     provider: "codex",
     month,
+    observedAt: session.timestamp,
     sessionKey: privateKey("session", session.sessionId, options.identifierSalt),
     projectKey: privateKey("project", session.cwd, options.identifierSalt),
     projectLabel: options.includeLocalProjectLabel
       ? localProjectLabel(session.cwd)
+      : undefined,
+    localReference: options.includeLocalReferences
+      ? {
+          nativeSessionId: session.sessionId,
+          sourcePath: session.sourcePath,
+          workingDirectory: session.cwd,
+        }
       : undefined,
     model: session.model ?? "unknown",
     inputTokens: nonNegativeInteger(session.usage.input_tokens),
