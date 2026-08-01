@@ -547,6 +547,15 @@ describe('セッション単位のダッシュボード集計', () => {
     ).toBe(true)
   })
 
+  it('配賦明細の行が元のフォルダと月を持つ', async () => {
+    const dashboard = await getJson('/api/dashboard')
+    const row = dashboard.allocations.find(
+      (item: { stage: string }) => item.stage !== '未取得' && item.stage !== '1円未満調整',
+    )
+    expect(row.projectKey).toBeTruthy()
+    expect(row.monthKey).toMatch(/^\d{4}-\d{2}$/)
+  })
+
   it('月の途中でルールが切り替わるフォルダは、その月に分類の異なる2行を生む', async () => {
     // One folder, two sessions in the same month: one comfortably in the
     // first half, one comfortably in the second half. Times are chosen far

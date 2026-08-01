@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react'
 import type { TaxGroup } from '../types'
-import type { HomeCostRecord, PlanningSnapshot, TaxUnitRecord } from '../../planning/types'
+import type {
+  HomeCostRecord,
+  PlanningSnapshot,
+  ProjectClassification,
+  TaxUnitRecord,
+} from '../../planning/types'
 
 export const yen = new Intl.NumberFormat('ja-JP', {
   style: 'currency',
@@ -18,6 +23,15 @@ export const GROUP_CLASS: Record<TaxGroup, string> = {
   current: 'coral',
   future: 'indigo',
   review: 'amber',
+}
+
+export const CLASSIFICATION_LABELS: Record<ProjectClassification, string> = {
+  'new-development': '新しく作った',
+  maintenance: '保守・バグ修正',
+  'feature-addition': '機能を大きく追加した',
+  'general-learning': '一般的な学習',
+  private: '趣味・私用',
+  unclassified: 'あとで確認',
 }
 
 export const incomeCategoryLabel = (value: PlanningSnapshot['profile']['incomeCategory']) =>

@@ -12,18 +12,9 @@ import type {
   ProjectRuleRecord,
 } from '../../planning/types'
 import { getSessionDetail, getSessions } from '../api'
-import { PanelHeading } from './shared'
+import { CLASSIFICATION_LABELS, PanelHeading } from './shared'
 
 type SortKey = 'usage' | 'recent' | 'name'
-
-const CLASSIFICATION_LABELS: Record<ProjectClassification, string> = {
-  'new-development': '新しく作った',
-  maintenance: '保守・バグ修正',
-  'feature-addition': '機能を大きく追加した',
-  'general-learning': '一般的な学習',
-  private: '趣味・私用',
-  unclassified: 'あとで確認',
-}
 
 const PROVIDER_LABELS: Record<ProviderKey, string> = {
   claude: 'Claude Code',

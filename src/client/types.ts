@@ -17,6 +17,9 @@ export type Allocation = {
   rule: string
   reason: string
   missing: string
+  projectKey?: string
+  monthKey?: string
+  classification?: ProjectClassification
   session: {
     date: string
     id: string

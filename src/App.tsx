@@ -33,11 +33,13 @@ import type {
   Diagnosis,
   PlanningLedger,
   PlanningSnapshot,
+  ProjectClassification,
   ProjectRuleRecord,
 } from './planning/types'
 import Onboarding from './client/pages/Onboarding'
 import FolderAssignmentPage from './client/pages/FolderAssignmentPage'
 import {
+  CLASSIFICATION_LABELS,
   categoryLabel,
   GROUP_CLASS,
   GROUP_LABELS,
@@ -160,6 +162,30 @@ function App() {
     } finally {
       setRulesBusy(false)
     }
+  }
+
+  async function reclassifyAllocation(
+    row: Allocation,
+    classification: ProjectClassification,
+  ): Promise<void> {
+    if (!row.projectKey || !row.monthKey) return
+    const effectiveFrom = `${row.monthKey}-01`
+    const id = `rule-${row.projectKey.slice(-12)}-${effectiveFrom}`
+    const existing = planning.projectRules.find((rule) => rule.id === id)
+    const others = planning.projectRules.filter((rule) => rule.id !== id)
+
+    await storeRules([
+      ...others,
+      {
+        id,
+        projectKey: row.projectKey,
+        effectiveFrom,
+        effectiveTo: existing?.effectiveTo,
+        taxUnitId: existing?.taxUnitId,
+        classification,
+        reason: '配賦明細から変更',
+      },
+    ])
   }
 
   const allocations = useMemo(() => {
@@ -416,6 +442,8 @@ function App() {
               allocations={allocations}
               selected={selectedAllocation}
               onSelect={setSelectedAllocation}
+              busy={rulesBusy}
+              onReclassify={reclassifyAllocation}
             />
           ) : page === 'folders' ? (
             <FolderAssignmentPage
@@ -751,6 +779,8 @@ function EvidencePage({
   allocations,
   selected,
   onSelect,
+  busy,
+  onReclassify,
 }: {
   data: DashboardData
   planning: PlanningSnapshot
@@ -759,6 +789,8 @@ function EvidencePage({
   allocations: Allocation[]
   selected: Allocation | null
   onSelect: (row: Allocation | null) => void
+  busy: boolean
+  onReclassify: (row: Allocation, classification: ProjectClassification) => Promise<void>
 }) {
   const active = selected ?? allocations[0] ?? null
   const asset = data.assets.find((item) => item.name === active?.asset) ?? data.assets[0]
@@ -845,7 +877,27 @@ function EvidencePage({
                     <strong>{yen.format(row.amount)}</strong>
                   </td>
                   <td>
-                    <span className={`tax-chip ${GROUP_CLASS[row.group]}`}>{row.taxCandidate}</span>
+                    {row.projectKey && row.monthKey ? (
+                      <select
+                        value={row.classification ?? 'unclassified'}
+                        disabled={busy}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) =>
+                          onReclassify(row, event.target.value as ProjectClassification)
+                        }
+                        aria-label={`${row.month} ${row.product}の分類を変更`}
+                      >
+                        {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className={`tax-chip ${GROUP_CLASS[row.group]}`}>
+                        {row.taxCandidate}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
