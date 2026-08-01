@@ -676,4 +676,55 @@ describe("セッション単位のダッシュボード集計", () => {
     const augustClaudeTotal = augustClaudeRows.reduce((sum, row) => sum + row.amount, 0);
     expect(augustClaudeTotal).toBe(100_000);
   });
+
+  it("生のセッションID・絶対パス・作業ディレクトリはどのAPIレスポンスにも現れない", async () => {
+    const rawNativeSessionId = "RAW-SESSION-ID-SHOULD-NOT-LEAK";
+    const rawSourcePath = "C:/RAW-PATH-SHOULD-NOT-LEAK/transcript.jsonl";
+    const rawWorkingDirectory = "C:/RAW-CWD-SHOULD-NOT-LEAK";
+
+    replaceProviderSessions("claude", [{
+      provider: "claude",
+      sessionKey: "session_privacy_guard",
+      projectKey: "project_privacy_guard",
+      month: "2026-09",
+      startedAt: "2026-09-05T10:00:00.000Z",
+      endedAt: "2026-09-05T11:00:00.000Z",
+      messageCount: 1,
+      inputTokens: 500,
+      outputTokens: 50,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      schemaVersion: "test-v1",
+      confidence: "medium",
+      localReference: {
+        nativeSessionId: rawNativeSessionId,
+        sourcePath: rawSourcePath,
+        workingDirectory: rawWorkingDirectory,
+      },
+    }], { filesSeen: 1, malformedLines: 0 });
+
+    // Prove the seeded reference actually reached session_references --
+    // otherwise the "does not leak" assertions below would pass vacuously.
+    const stored = databaseModule.getSessionReference("claude", "session_privacy_guard");
+    expect(stored).toMatchObject({
+      nativeSessionId: rawNativeSessionId,
+      sourcePath: rawSourcePath,
+      workingDirectory: rawWorkingDirectory,
+    });
+
+    const dashboardBody = JSON.stringify(await getJson("/api/dashboard"));
+    const ledgerBody = JSON.stringify(await getJson("/api/ledger"));
+    const diagnosisBody = JSON.stringify(await getJson("/api/diagnosis"));
+    const exportBody = JSON.stringify(
+      await fetch(`http://127.0.0.1:${testPort}/api/export?format=markdown`)
+        .then((response) => response.text()),
+    );
+
+    for (const raw of [rawNativeSessionId, rawSourcePath, rawWorkingDirectory]) {
+      expect(dashboardBody).not.toContain(raw);
+      expect(ledgerBody).not.toContain(raw);
+      expect(diagnosisBody).not.toContain(raw);
+      expect(exportBody).not.toContain(raw);
+    }
+  });
 });
