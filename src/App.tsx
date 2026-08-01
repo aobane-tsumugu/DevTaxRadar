@@ -140,7 +140,7 @@ function App() {
       configuration.charges.claude > 0 ||
       configuration.charges.codex > 0 ||
       configuration.monthlyCharges.some((charge) => charge.amountJpy > 0)
-    if (!hasAnyCharge || data.meta.classifiedRate === 0) {
+    if (!hasAnyCharge || data.meta.sessionCount === 0) {
       autoOnboardingShown.current = true
       setOnboardingStep(data.meta.sessionCount > 0 ? 1 : 0)
       setOnboarding(true)
