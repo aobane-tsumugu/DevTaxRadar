@@ -1,10 +1,17 @@
 import { useMemo, useState } from 'react'
-import type { FolderAssignment, FolderSummary, ProviderKey } from '../types'
+import type {
+  FolderAssignment,
+  FolderSummary,
+  ProviderKey,
+  SessionDetail,
+  SessionSummary,
+} from '../types'
 import type {
   PlanningSnapshot,
   ProjectClassification,
   ProjectRuleRecord,
 } from '../../planning/types'
+import { getSessionDetail, getSessions } from '../api'
 import { PanelHeading } from './shared'
 
 type SortKey = 'usage' | 'recent' | 'name'
@@ -55,6 +62,28 @@ export default function FolderAssignmentPage({
   const [sortKey, setSortKey] = useState<SortKey>('usage')
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const selectedKeys = Object.keys(selected).filter((key) => selected[key])
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<Record<string, SessionSummary[]>>({})
+  const [details, setDetails] = useState<Record<string, SessionDetail>>({})
+
+  async function toggleFolder(projectKey: string) {
+    if (expanded === projectKey) {
+      setExpanded(null)
+      return
+    }
+    setExpanded(projectKey)
+    if (!sessions[projectKey]) {
+      const result = await getSessions(projectKey)
+      setSessions((current) => ({ ...current, [projectKey]: result.sessions }))
+    }
+  }
+
+  async function loadDetail(provider: ProviderKey, sessionKey: string) {
+    const key = `${provider}:${sessionKey}`
+    if (details[key]) return
+    const detail = await getSessionDetail(provider, sessionKey)
+    setDetails((current) => ({ ...current, [key]: detail }))
+  }
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -324,6 +353,81 @@ export default function FolderAssignmentPage({
                     ))}
                   </ul>
                 ) : null}
+                <button
+                  className="text-button assignment-expand"
+                  onClick={() => toggleFolder(folder.projectKey)}
+                  aria-expanded={expanded === folder.projectKey}
+                >
+                  {expanded === folder.projectKey ? 'セッションを閉じる' : 'セッションを見る'}
+                </button>
+                {expanded === folder.projectKey && (
+                  <div className="assignment-sessions">
+                    {(sessions[folder.projectKey] ?? []).map((session) => {
+                      const key = `${session.provider}:${session.sessionKey}`
+                      const detail = details[key]
+                      return (
+                        <article key={key}>
+                          <div className="session-head">
+                            <strong>{session.startedAt.slice(0, 10)}</strong>
+                            <span>{PROVIDER_LABELS[session.provider]}</span>
+                            <span>{session.messageCount}メッセージ</span>
+                            <span>{session.model ?? 'モデル不明'}</span>
+                            {!detail && (
+                              <button
+                                className="text-button"
+                                onClick={() => loadDetail(session.provider, session.sessionKey)}
+                              >
+                                内容を確認
+                              </button>
+                            )}
+                          </div>
+                          {detail && (
+                            <div className="session-detail">
+                              {detail.available === false ? (
+                                <p className="session-missing">
+                                  この履歴の参照情報がありません。再度スキャンすると復元されます。
+                                </p>
+                              ) : detail.transcriptExists === false ? (
+                                <p className="session-missing">
+                                  元の履歴は削除済みです。集計値だけが残っています。
+                                </p>
+                              ) : (
+                                <p className="session-preview">
+                                  {detail.preview ?? '内容を取得できませんでした。'}
+                                </p>
+                              )}
+                              {detail.resume && (
+                                <div className="session-resume">
+                                  <code>{detail.resume.command}</code>
+                                  <button
+                                    className="text-button"
+                                    onClick={() =>
+                                      navigator.clipboard?.writeText(detail.resume!.command)
+                                    }
+                                  >
+                                    コピー
+                                  </button>
+                                  {detail.resume.changeDirectoryOmittedReason === 'not-found' && (
+                                    <small>作業フォルダが見つかりません</small>
+                                  )}
+                                  {detail.resume.changeDirectoryOmittedReason ===
+                                    'unquotable-path' && (
+                                    <small>
+                                      作業フォルダのパスに引用符が含まれるため、移動コマンドを省いています
+                                    </small>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </article>
+                      )
+                    })}
+                    {(sessions[folder.projectKey] ?? []).length === 0 && (
+                      <p className="assignment-empty">セッションを読み込んでいます…</p>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

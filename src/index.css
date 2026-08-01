@@ -3357,6 +3357,68 @@ th.number {
   align-self: center;
   margin-left: auto;
 }
+.assignment-expand {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.assignment-sessions {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  display: grid;
+  gap: 10px;
+}
+.assignment-sessions article {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+}
+.session-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.session-head strong {
+  color: inherit;
+  font-size: 14px;
+}
+.session-preview {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.session-missing {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.session-resume {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.session-resume code {
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--navy);
+  color: var(--paper);
+  font-size: 12px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.session-resume small {
+  color: var(--amber);
+}
 
 @media (max-width: 880px) {
   .assignment-list li {
