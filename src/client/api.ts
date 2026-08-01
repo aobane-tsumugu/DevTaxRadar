@@ -1,4 +1,10 @@
-import type { LocalConfiguration, ProviderKey, RuntimeData, ScanResult } from './types'
+import type {
+  LocalConfiguration,
+  ProviderKey,
+  RuntimeData,
+  ScanResult,
+  FolderSummary,
+} from './types'
 import type { Diagnosis, PlanningLedger, PlanningSnapshot } from '../planning/types'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -87,4 +93,8 @@ export async function getPlanningExport(format: 'markdown' | 'csv' = 'markdown')
   })
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
   return response.blob()
+}
+
+export function getFolders(): Promise<{ folders: FolderSummary[] }> {
+  return requestJson('/api/folders')
 }

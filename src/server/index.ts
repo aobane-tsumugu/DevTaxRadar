@@ -45,6 +45,11 @@ app.get('/api/dashboard', async () => {
   return buildDashboard()
 })
 
+app.get('/api/folders', async () => {
+  const { buildFolderSummaries } = await import('./folders.js')
+  return { folders: buildFolderSummaries() }
+})
+
 app.get('/api/config', async () => getConfiguration())
 
 app.get('/api/planning', async () => {

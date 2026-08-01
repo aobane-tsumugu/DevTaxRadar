@@ -1,3 +1,5 @@
+import type { ProjectClassification } from '../planning/types.js'
+
 export type TaxGroup = 'current' | 'future' | 'review'
 
 export type Allocation = {
@@ -104,4 +106,27 @@ export type ScanResult = {
       }
     >
   >
+}
+
+export type FolderAssignment = {
+  ruleId: string
+  taxUnitId?: string
+  taxUnitName?: string
+  classification: ProjectClassification
+  effectiveFrom: string
+  effectiveTo?: string
+  provider?: ProviderKey
+  sessionCount: number
+}
+
+export type FolderSummary = {
+  projectKey: string
+  label: string
+  sessionCount: number
+  messageCount: number
+  firstUsedOn: string
+  lastUsedOn: string
+  providers: ProviderKey[]
+  assignments: FolderAssignment[]
+  unassignedSessionCount: number
 }
