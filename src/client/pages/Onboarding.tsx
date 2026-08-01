@@ -25,6 +25,7 @@ function Onboarding({
   runtimeLoading,
   configuration,
   planning,
+  unassignedFolderCount,
   onStep,
   onScan,
   onSave,
@@ -37,6 +38,7 @@ function Onboarding({
   runtimeLoading: boolean
   configuration: LocalConfiguration | null
   planning: PlanningSnapshot
+  unassignedFolderCount: number
   onStep: (step: number) => void
   onScan: (providers: ProviderKey[]) => Promise<ScanResult>
   onSave: (configuration: LocalConfiguration) => Promise<void>
@@ -1655,6 +1657,17 @@ function Onboarding({
                   表示される処理は候補です。金額を増やすための追加開発や、税務だけを目的に公開日を動かす提案は行いません。実際の使い方と記録を一致させてください。
                 </p>
               </details>
+              {unassignedFolderCount > 0 && (
+                <div className="setup-insight">
+                  <span>▤</span>
+                  <p>
+                    <strong>まだ割り当てていないフォルダが{unassignedFolderCount}件あります</strong>
+                    <br />
+                    保存したあと「フォルダの割当」画面で、どの制作物の作業だったかを決められます。
+                    割り当てるまで、その利用分は「対象外・要確認」に残ります。
+                  </p>
+                </div>
+              )}
             </>
           )}
           {notice && (

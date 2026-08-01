@@ -12,17 +12,31 @@ import {
 import {
   getDiagnosis,
   getConfiguration,
+  getFolders,
   getLedger,
   getPlanning,
   getPlanningExport,
   getRuntime,
   savePlanning,
+  savePlanningRules,
   saveConfiguration,
   scanHistory,
 } from './client/api'
-import type { LocalConfiguration, ProviderKey, RuntimeData, ScanResult } from './client/types'
-import type { Diagnosis, PlanningLedger, PlanningSnapshot } from './planning/types'
+import type {
+  FolderSummary,
+  LocalConfiguration,
+  ProviderKey,
+  RuntimeData,
+  ScanResult,
+} from './client/types'
+import type {
+  Diagnosis,
+  PlanningLedger,
+  PlanningSnapshot,
+  ProjectRuleRecord,
+} from './planning/types'
 import Onboarding from './client/pages/Onboarding'
+import FolderAssignmentPage from './client/pages/FolderAssignmentPage'
 import {
   categoryLabel,
   GROUP_CLASS,
@@ -35,7 +49,7 @@ import {
 } from './client/pages/shared'
 import './index.css'
 
-type Page = 'summary' | 'evidence' | 'guide'
+type Page = 'summary' | 'evidence' | 'folders' | 'guide'
 type Provider = 'すべて' | 'Claude Code' | 'Codex'
 
 function App() {
@@ -51,6 +65,8 @@ function App() {
   const [planning, setPlanningState] = useState<PlanningSnapshot>(demoPlanning)
   const [diagnosis, setDiagnosis] = useState<Diagnosis>(demoDiagnosis)
   const [ledger, setLedger] = useState<PlanningLedger>(demoLedger)
+  const [folders, setFolders] = useState<FolderSummary[]>([])
+  const [rulesBusy, setRulesBusy] = useState(false)
   const [runtimeLoading, setRuntimeLoading] = useState(true)
   const autoOnboardingShown = useRef(false)
 
@@ -60,12 +76,13 @@ function App() {
       setRuntimeLoading(false)
       return
     }
-    Promise.all([getRuntime(), getConfiguration(), getPlanning(), getDiagnosis()])
-      .then(async ([nextRuntime, nextConfiguration, nextPlanning, nextDiagnosis]) => {
+    Promise.all([getRuntime(), getConfiguration(), getPlanning(), getDiagnosis(), getFolders()])
+      .then(async ([nextRuntime, nextConfiguration, nextPlanning, nextDiagnosis, nextFolders]) => {
         setRuntime(nextRuntime)
         setConfiguration(nextConfiguration)
         setPlanningState(nextPlanning)
         setDiagnosis(nextDiagnosis)
+        setFolders(nextFolders.folders)
         setLedger(await getLedger(nextPlanning.profile.taxYear))
       })
       .catch(() => {
@@ -92,12 +109,14 @@ function App() {
     const activeRuntime = runtime ?? (await getRuntime())
     if (!runtime) setRuntime(activeRuntime)
     const result = await scanHistory(activeRuntime.csrfToken, providers)
-    const [nextDashboard, nextConfiguration] = await Promise.all([
+    const [nextDashboard, nextConfiguration, nextFolders] = await Promise.all([
       getDashboardData(),
       getConfiguration(),
+      getFolders(),
     ])
     setData(nextDashboard)
     setConfiguration(nextConfiguration)
+    setFolders(nextFolders.folders)
     return result
   }
 
@@ -122,6 +141,25 @@ function App() {
     setDiagnosis(nextDiagnosis)
     setLedger(nextLedger)
     setData(nextDashboard)
+  }
+
+  async function storeRules(rules: ProjectRuleRecord[]): Promise<void> {
+    setRulesBusy(true)
+    try {
+      const activeRuntime = runtime ?? (await getRuntime())
+      if (!runtime) setRuntime(activeRuntime)
+      await savePlanningRules(activeRuntime.csrfToken, rules)
+      const [nextFolders, nextPlanning, nextDashboard] = await Promise.all([
+        getFolders(),
+        getPlanning(),
+        getDashboardData(),
+      ])
+      setFolders(nextFolders.folders)
+      setPlanningState(nextPlanning)
+      setData(nextDashboard)
+    } finally {
+      setRulesBusy(false)
+    }
   }
 
   const allocations = useMemo(() => {
@@ -162,6 +200,7 @@ function App() {
       : representativeTotals
 
   const products = ['すべて', ...new Set(data.allocations.map((row) => row.product))]
+  const unassignedFolderCount = folders.filter((folder) => folder.unassignedSessionCount > 0).length
   const filteredMonths = data.months.map((month) => {
     if (provider === 'すべて' && product === 'すべて') return month
     const rows = allocations.filter((row) => row.month === month.label)
@@ -201,6 +240,16 @@ function App() {
             <span aria-hidden="true">≡</span>
             <span>
               なぜそうなる？<small>配賦と根拠ログ</small>
+            </span>
+          </button>
+          <button
+            className={page === 'folders' ? 'nav-item active' : 'nav-item'}
+            onClick={() => setPage('folders')}
+          >
+            <span aria-hidden="true">▤</span>
+            <span>
+              フォルダの割当
+              <small>履歴と制作物を結ぶ</small>
             </span>
           </button>
           <button
@@ -297,24 +346,30 @@ function App() {
                   ? '年間の見通し'
                   : page === 'evidence'
                     ? '数字の根拠'
-                    : 'やさしい税務ガイド'}
+                    : page === 'folders'
+                      ? '履歴と制作物の対応'
+                      : 'やさしい税務ガイド'}
               </span>
               <h1>
                 {page === 'summary'
                   ? '今年どうなる？'
                   : page === 'evidence'
                     ? 'なぜそうなる？'
-                    : '税務の言葉を知る'}
+                    : page === 'folders'
+                      ? 'フォルダの割当'
+                      : '税務の言葉を知る'}
               </h1>
               <p>
                 {page === 'summary'
                   ? '定額のClaude Code／Codexを利用実態で配賦し、今年の費用と将来へ残る原価を見通します。'
                   : page === 'evidence'
                     ? '月額料金からAIサービス・月・作っているものまで、数字の由来を辿れます。'
-                    : '取得価額や資本的支出を、1文の結論と具体例から確認できます。'}
+                    : page === 'folders'
+                      ? 'AI履歴の作業フォルダを、制作物と作業内容へ結び付けます。ここで割り当てた内容が配賦額の分類になります。'
+                      : '取得価額や資本的支出を、1文の結論と具体例から確認できます。'}
               </p>
             </div>
-            {page !== 'guide' && (
+            {(page === 'summary' || page === 'evidence') && (
               <div className="filters" aria-label="表示フィルター">
                 <label>
                   <span>AIサービス</span>
@@ -362,6 +417,13 @@ function App() {
               selected={selectedAllocation}
               onSelect={setSelectedAllocation}
             />
+          ) : page === 'folders' ? (
+            <FolderAssignmentPage
+              folders={folders}
+              planning={planning}
+              busy={rulesBusy}
+              onSaveRules={storeRules}
+            />
           ) : (
             <TaxGuidePage />
           )}
@@ -376,6 +438,7 @@ function App() {
           runtimeLoading={runtimeLoading}
           configuration={configuration}
           planning={planning}
+          unassignedFolderCount={unassignedFolderCount}
           onStep={setOnboardingStep}
           onScan={runScan}
           onSave={storeConfiguration}
@@ -383,6 +446,7 @@ function App() {
           onClose={() => {
             setOnboarding(false)
             setOnboardingStep(0)
+            if (unassignedFolderCount > 0) setPage('folders')
           }}
         />
       )}

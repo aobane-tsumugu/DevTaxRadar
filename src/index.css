@@ -3187,3 +3187,115 @@ th.number {
     display: none;
   }
 }
+
+.assignment-toolbar {
+  margin: 0 0 14px;
+  padding: 14px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+}
+.assignment-counts {
+  display: grid;
+  gap: 3px;
+  margin-right: auto;
+}
+.assignment-counts strong {
+  font-size: 16px;
+}
+.assignment-warning {
+  color: var(--amber);
+  font-size: 13px;
+}
+.assignment-toolbar label {
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.assignment-toolbar input[type='text'],
+.assignment-toolbar input:not([type]),
+.assignment-toolbar select {
+  min-width: 170px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-size: 14px;
+}
+.assignment-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+.assignment-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 9px;
+}
+.assignment-list li {
+  padding: 13px 15px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.assignment-folder {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.assignment-folder strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assignment-folder small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.assignment-fields {
+  display: flex;
+  gap: 10px;
+}
+.assignment-fields label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.assignment-fields select {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.assignment-status.warning {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.assignment-empty {
+  padding: 26px 4px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 880px) {
+  .assignment-list li {
+    grid-template-columns: 1fr;
+  }
+  .assignment-fields {
+    flex-wrap: wrap;
+  }
+}
