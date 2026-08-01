@@ -278,7 +278,7 @@ describe('planning repository', () => {
     }
   })
 
-  it('トランザクション失敗時に元のルールが残る', async () => {
+  it('INSERTで失敗してもDELETEが巻き戻り、保存済みのルールが残る', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'devtax-planning-'))
     directories.push(directory)
     process.env.DEVTAX_RADAR_DATA_DIR = directory
@@ -308,19 +308,22 @@ describe('planning repository', () => {
       repository.savePlanningSnapshot(snapshot, db)
       expect(repository.getPlanningSnapshot(db).projectRules).toHaveLength(2)
 
-      const invalidRules = [
-        ...snapshot.projectRules,
+      const brokenRules = [
         {
-          id: 'rule-rollback-1',
-          projectKey: 'project_rollback_dup',
-          effectiveFrom: '2026-03-01',
-          classification: 'feature-addition' as const,
+          id: 'rule-ok',
+          projectKey: 'project_ok_0001',
+          effectiveFrom: '2026-01-01',
+          classification: 'new-development' as const,
         },
-      ]
+        {
+          id: 'rule-broken',
+          projectKey: null,
+          effectiveFrom: '2026-01-01',
+          classification: 'new-development' as const,
+        },
+      ] as unknown as Array<import('../../src/planning/types.js').ProjectRuleRecord>
 
-      expect(() => repository.replaceProjectRules(invalidRules, db)).toThrow(
-        '同じIDのルールが重複しています',
-      )
+      expect(() => repository.replaceProjectRules(brokenRules, db)).toThrow()
 
       const after = repository.getPlanningSnapshot(db)
       expect(after.projectRules).toHaveLength(2)
