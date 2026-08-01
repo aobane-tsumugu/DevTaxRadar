@@ -586,4 +586,114 @@ describe("セッション単位のダッシュボード集計", () => {
       (row: { product: string }) => row.product === "統合テスト用アプリ",
     )).toBe(true);
   });
+
+  it("月の途中でルールが切り替わるフォルダは、その月に分類の異なる2行を生む", async () => {
+    // One folder, two sessions in the same month: one comfortably in the
+    // first half, one comfortably in the second half. Times are chosen far
+    // from both the day boundary and the rule-effective-date boundary so the
+    // assertion holds regardless of the host's local time zone (resolveSessionAssignment
+    // judges rules by the session's *local* date).
+    replaceProviderSessions("claude", [
+      {
+        provider: "claude",
+        sessionKey: "session_midmonth_first_half",
+        projectKey: "project_integration_midmonth",
+        month: "2026-08",
+        startedAt: "2026-08-03T10:00:00.000Z",
+        endedAt: "2026-08-03T11:00:00.000Z",
+        messageCount: 2,
+        inputTokens: 1000,
+        outputTokens: 100,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        schemaVersion: "test-v1",
+        confidence: "medium",
+      },
+      {
+        provider: "claude",
+        sessionKey: "session_midmonth_second_half",
+        projectKey: "project_integration_midmonth",
+        month: "2026-08",
+        startedAt: "2026-08-25T10:00:00.000Z",
+        endedAt: "2026-08-25T11:00:00.000Z",
+        messageCount: 2,
+        inputTokens: 1000,
+        outputTokens: 100,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        schemaVersion: "test-v1",
+        confidence: "medium",
+      },
+    ], { filesSeen: 1, malformedLines: 0 });
+
+    databaseModule.saveConfiguration({
+      charges: { claude: 0, codex: 0 },
+      monthlyCharges: [{ provider: "claude", month: "2026-08", amountJpy: 100_000 }],
+      unobservedRatio: 0.1,
+      mappings: [],
+    });
+
+    savePlanningSnapshot({
+      ...emptyPlanningSnapshot(2026),
+      taxUnits: [{
+        id: "tax-unit-midmonth",
+        name: "月またぎ検証用アプリ",
+        unitType: "new-software",
+        usageMode: "external",
+        revenueModel: "sales",
+        lifecycleStatus: "developing",
+      }],
+      projectRules: [
+        {
+          id: "rule-midmonth-first-half",
+          projectKey: "project_integration_midmonth",
+          effectiveFrom: "2026-08-01",
+          effectiveTo: "2026-08-14",
+          taxUnitId: "tax-unit-midmonth",
+          classification: "new-development",
+        },
+        {
+          id: "rule-midmonth-second-half",
+          projectKey: "project_integration_midmonth",
+          effectiveFrom: "2026-08-15",
+          taxUnitId: "tax-unit-midmonth",
+          classification: "maintenance",
+        },
+      ],
+    });
+
+    const dashboard = await getJson("/api/dashboard") as {
+      allocations: Array<{
+        provider: string;
+        month: string;
+        product: string;
+        stage: string;
+        taxCandidate: string;
+        amount: number;
+      }>;
+    };
+
+    const augustClaudeRows = dashboard.allocations.filter(
+      (row) => row.provider === "Claude Code" && row.month === "2026年8月",
+    );
+    const midMonthRows = augustClaudeRows.filter(
+      (row) => row.product === "月またぎ検証用アプリ",
+    );
+
+    // The same folder, split across the rule boundary, must appear as two
+    // distinct rows for the month -- not collapse into one (un)classified row.
+    const stages = midMonthRows.map((row) => row.stage);
+    const taxCandidates = midMonthRows.map((row) => row.taxCandidate);
+    expect(midMonthRows).toHaveLength(2);
+    expect(stages).toContain("新規開発");
+    expect(stages).toContain("保守");
+    expect(taxCandidates).toContain("取得価額");
+    expect(taxCandidates).toContain("通常経費");
+
+    // The allocation invariant must hold across the split: everything billed
+    // for claude in 2026-08 (the two classified rows plus any unobserved/
+    // rounding rows) sums to exactly the configured monthly fee.
+    const augustClaudeTotal = augustClaudeRows.reduce((sum, row) => sum + row.amount, 0);
+    expect(augustClaudeTotal).toBe(100_000);
+  });
 });
