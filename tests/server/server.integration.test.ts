@@ -717,4 +717,61 @@ describe('セッション単位のダッシュボード集計', () => {
       expect(exportBody).not.toContain(raw)
     }
   })
+
+  it('セッション一覧に生の識別子が出ない', async () => {
+    // Query the project seeded by the privacy-guard test just above, which is
+    // the one with a live session_references row containing the raw markers
+    // (project_integration_a's session was already wiped by later
+    // replaceProviderSessions('claude', ...) calls, which replace every
+    // claude row on each call -- querying it here would pass vacuously on an
+    // empty list and prove nothing).
+    const response = await getJson(
+      `/api/sessions?projectKey=${encodeURIComponent('project_privacy_guard')}`,
+    )
+    expect(response.sessions).toHaveLength(1)
+    const serialized = JSON.stringify(response)
+    expect(serialized).not.toContain('RAW-SESSION-ID-SHOULD-NOT-LEAK')
+    expect(serialized).not.toContain('RAW-PATH-SHOULD-NOT-LEAK')
+    expect(serialized).not.toContain('RAW-CWD-SHOULD-NOT-LEAK')
+  })
+
+  it('GET /api/folders はフォルダ一覧の形で返す', async () => {
+    const response = await getJson('/api/folders')
+    expect(Array.isArray(response.folders)).toBe(true)
+    expect(response.folders[0]).toEqual(
+      expect.objectContaining({
+        projectKey: expect.any(String),
+        label: expect.any(String),
+        sessionCount: expect.any(Number),
+      }),
+    )
+  })
+
+  it('GET /api/sessions はセッション一覧の形で返す', async () => {
+    // replaceProviderSessions replaces all claude rows on every call, so by
+    // this point only the session seeded by the privacy-guard test above
+    // (the most recent replaceProviderSessions('claude', ...) call) survives.
+    const response = await getJson(
+      `/api/sessions?projectKey=${encodeURIComponent('project_privacy_guard')}`,
+    )
+    expect(Array.isArray(response.sessions)).toBe(true)
+    expect(response.sessions[0]).toEqual(
+      expect.objectContaining({
+        provider: 'claude',
+        sessionKey: 'session_privacy_guard',
+      }),
+    )
+  })
+
+  it('GET /api/sessions/detail はセッション詳細の形で返す', async () => {
+    const response = await getJson(
+      `/api/sessions/detail?provider=claude&sessionKey=${encodeURIComponent('session_privacy_guard')}`,
+    )
+    expect(response).toEqual(
+      expect.objectContaining({
+        available: true,
+        transcriptExists: false,
+      }),
+    )
+  })
 })

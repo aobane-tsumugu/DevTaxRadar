@@ -488,6 +488,20 @@ export function getUsageSessions(): UsageSessionRow[] {
     .all() as UsageSessionRow[]
 }
 
+export function getSessionsForProject(projectKey: string): UsageSessionRow[] {
+  return getDatabase()
+    .prepare(
+      `SELECT provider, session_key AS sessionKey, project_key AS projectKey,
+              month, started_at AS startedAt, ended_at AS endedAt,
+              message_count AS messageCount, project_label AS projectLabel, model,
+              input_tokens AS inputTokens, output_tokens AS outputTokens,
+              cache_read_tokens AS cacheReadTokens, cache_write_tokens AS cacheWriteTokens
+       FROM usage_events WHERE project_key = ?
+       ORDER BY started_at DESC, session_key`,
+    )
+    .all(projectKey) as UsageSessionRow[]
+}
+
 export type SessionReferenceRow = {
   nativeSessionId: string
   sourcePath: string

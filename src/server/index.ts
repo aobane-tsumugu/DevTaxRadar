@@ -50,6 +50,67 @@ app.get('/api/folders', async () => {
   return { folders: buildFolderSummaries() }
 })
 
+app.get('/api/sessions', async (request, reply) => {
+  const parsed = z.object({ projectKey: z.string().min(1).max(120) }).safeParse(request.query)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+  const { getSessionsForProject } = await import('./database.js')
+  const sessions = getSessionsForProject(parsed.data.projectKey).map((session) => ({
+    provider: session.provider,
+    sessionKey: session.sessionKey,
+    month: session.month,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    messageCount: session.messageCount,
+    model: session.model,
+    weightedTokens:
+      session.inputTokens +
+      session.outputTokens +
+      session.cacheReadTokens +
+      session.cacheWriteTokens,
+  }))
+  return { sessions }
+})
+
+app.get('/api/sessions/detail', async (request, reply) => {
+  const parsed = z
+    .object({
+      provider: z.enum(['claude', 'codex']),
+      sessionKey: z.string().min(1).max(120),
+    })
+    .safeParse(request.query)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+
+  const [{ getSessionReference }, { buildResumeCommand, readSessionPreview }] = await Promise.all([
+    import('./database.js'),
+    import('./sessionPreview.js'),
+  ])
+  const reference = getSessionReference(parsed.data.provider, parsed.data.sessionKey)
+  if (!reference) {
+    return { available: false }
+  }
+
+  const transcriptExists = existsSync(reference.sourcePath)
+  return {
+    available: true,
+    transcriptExists,
+    preview: transcriptExists
+      ? await readSessionPreview(reference.sourcePath, parsed.data.provider)
+      : undefined,
+    resume: buildResumeCommand(
+      parsed.data.provider,
+      reference.nativeSessionId,
+      reference.workingDirectory,
+      existsSync(reference.workingDirectory),
+    ),
+  }
+})
+
 app.get('/api/config', async () => getConfiguration())
 
 app.get('/api/planning', async () => {

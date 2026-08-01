@@ -4,6 +4,8 @@ import type {
   RuntimeData,
   ScanResult,
   FolderSummary,
+  SessionSummary,
+  SessionDetail,
 } from './types'
 import type {
   Diagnosis,
@@ -116,4 +118,17 @@ export async function getPlanningExport(format: 'markdown' | 'csv' = 'markdown')
 
 export function getFolders(): Promise<{ folders: FolderSummary[] }> {
   return requestJson('/api/folders')
+}
+
+export function getSessions(projectKey: string): Promise<{ sessions: SessionSummary[] }> {
+  return requestJson(`/api/sessions?projectKey=${encodeURIComponent(projectKey)}`)
+}
+
+export function getSessionDetail(
+  provider: ProviderKey,
+  sessionKey: string,
+): Promise<SessionDetail> {
+  return requestJson(
+    `/api/sessions/detail?provider=${provider}&sessionKey=${encodeURIComponent(sessionKey)}`,
+  )
 }

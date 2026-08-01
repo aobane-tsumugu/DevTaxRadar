@@ -130,3 +130,26 @@ export type FolderSummary = {
   assignments: FolderAssignment[]
   unassignedSessionCount: number
 }
+
+export type SessionSummary = {
+  provider: ProviderKey
+  sessionKey: string
+  month: string
+  startedAt: string
+  endedAt: string
+  messageCount: number
+  model: string | null
+  weightedTokens: number
+}
+
+export type SessionDetail = {
+  available: boolean
+  transcriptExists?: boolean
+  preview?: string
+  resume?: {
+    command: string
+    changeDirectory?: string
+    resume: string
+    workingDirectoryExists: boolean
+  }
+}
