@@ -102,11 +102,3 @@ export function nonNegativeInteger(value: unknown): number {
 export function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
-
-export function monthFromTimestamp(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const match = /^(\d{4})-(\d{2})-\d{2}T/.exec(value);
-  if (!match) return undefined;
-  const month = Number(match[2]);
-  return month >= 1 && month <= 12 ? `${match[1]}-${match[2]}` : undefined;
-}
