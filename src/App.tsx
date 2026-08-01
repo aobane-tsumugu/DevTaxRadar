@@ -46,6 +46,7 @@ import {
   incomeCategoryLabel,
   lifecycleLabel,
   PanelHeading,
+  ruleId,
   usageModeLabel,
   yen,
 } from './client/pages/shared'
@@ -170,7 +171,7 @@ function App() {
   ): Promise<void> {
     if (!row.projectKey || !row.monthKey) return
     const effectiveFrom = `${row.monthKey}-01`
-    const id = `rule-${row.projectKey.slice(-12)}-${effectiveFrom}`
+    const id = ruleId(row.projectKey, effectiveFrom)
     const existing = planning.projectRules.find((rule) => rule.id === id)
     const others = planning.projectRules.filter((rule) => rule.id !== id)
 

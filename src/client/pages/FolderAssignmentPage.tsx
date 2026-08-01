@@ -12,17 +12,13 @@ import type {
   ProjectRuleRecord,
 } from '../../planning/types'
 import { getSessionDetail, getSessions } from '../api'
-import { CLASSIFICATION_LABELS, PanelHeading } from './shared'
+import { CLASSIFICATION_LABELS, PanelHeading, ruleId } from './shared'
 
 type SortKey = 'usage' | 'recent' | 'name'
 
 const PROVIDER_LABELS: Record<ProviderKey, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
-}
-
-function ruleId(projectKey: string, effectiveFrom: string): string {
-  return `rule-${projectKey.slice(-12)}-${effectiveFrom}`
 }
 
 // The "まとめて設定..." placeholder option already uses the empty string, so

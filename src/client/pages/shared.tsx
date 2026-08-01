@@ -34,6 +34,13 @@ export const CLASSIFICATION_LABELS: Record<ProjectClassification, string> = {
   unclassified: 'あとで確認',
 }
 
+// FolderAssignmentPage and App must derive the same id for the same
+// (projectKey, effectiveFrom) pair, or a rule set from one screen becomes
+// invisible/duplicated on the other. Keep this the single source of truth.
+export function ruleId(projectKey: string, effectiveFrom: string): string {
+  return `rule-${projectKey.slice(-12)}-${effectiveFrom}`
+}
+
 export const incomeCategoryLabel = (value: PlanningSnapshot['profile']['incomeCategory']) =>
   ({
     undecided: '所得区分・未確定',
