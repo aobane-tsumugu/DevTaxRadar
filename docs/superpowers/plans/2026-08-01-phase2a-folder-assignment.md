@@ -1313,26 +1313,102 @@ const previousDay = (date: string) => shiftDay(date, -1)
 
 `Date.UTC` を使うのは、ローカルタイムの日付文字列を日単位でずらすときに時差の影響を受けないためである。ここで扱うのは時刻を持たない日付なので、UTCで計算して文字列へ戻すのが安全である。
 
-- [ ] **Step 3: 2件目以降のルールを行に表示する**
+- [ ] **Step 3: 2件目以降のルールを編集できるようにする**
 
-`folder.assignments.length > 1` のとき、行の下に期間ごとの割当を並べる。それぞれに開始日の入力、制作物、分類のセレクトを出す。1件目と同じ `assign` を、ルールIDを指定できる形へ広げて使う。
+期間を分割したあと、2件目のルールを設定する手段がないと、分割機能が完結しない。分割で作られるルールは `classification: 'unclassified'` で始まるため、編集できなければ利用者は「未分類」から動かせないルールを抱えることになる。
+
+まず `assign` を、任意のルールを対象にできる形へ一般化する。現在は `folder.assignments[0]` に固定されている。
 
 ```tsx
-{folder.assignments.length > 1 && (
+async function assignRule(
+  folder: FolderSummary,
+  target: FolderAssignment | undefined,
+  patch: { taxUnitId?: string; classification?: ProjectClassification; effectiveFrom?: string },
+) {
+  const effectiveFrom = patch.effectiveFrom ?? target?.effectiveFrom ?? folder.firstUsedOn
+  const next: ProjectRuleRecord = {
+    id: target?.ruleId ?? ruleId(folder.projectKey, effectiveFrom),
+    projectKey: folder.projectKey,
+    effectiveFrom,
+    effectiveTo: target?.effectiveTo,
+    provider: target?.provider,
+    taxUnitId:
+      patch.taxUnitId === NO_TAX_UNIT ? undefined : (patch.taxUnitId ?? target?.taxUnitId),
+    classification: patch.classification ?? target?.classification ?? 'unclassified',
+    reason: '割当画面で登録',
+  }
+  const others = planning.projectRules.filter((rule) => rule.id !== next.id)
+  await onSaveRules([...others, next])
+}
+```
+
+期間が1件以下のときは行のセレクトで編集し、2件以上のときは行のセレクトを隠して期間ごとの行で編集する。同じフォルダに2つの編集入口があると、どちらがどの期間を指すのか利用者に分からない。
+
+```tsx
+{folder.assignments.length > 1 ? (
   <ul className="assignment-periods">
     {folder.assignments.map((assignment) => (
       <li key={assignment.ruleId}>
-        <span>
-          {assignment.effectiveFrom}〜{assignment.effectiveTo ?? ''}
+        <span className="period-range">
+          {assignment.effectiveFrom}〜{assignment.effectiveTo ?? '（継続中）'}
         </span>
-        <span>{assignment.taxUnitName ?? '制作物なし'}</span>
-        <span>{CLASSIFICATION_LABELS[assignment.classification]}</span>
+        <label>
+          <span>制作物</span>
+          <select
+            value={assignment.taxUnitId ?? NO_TAX_UNIT}
+            disabled={busy}
+            onChange={(event) => assignRule(folder, assignment, { taxUnitId: event.target.value })}
+          >
+            <option value={NO_TAX_UNIT}>指定しない</option>
+            {planning.taxUnits.map((unit) => (
+              <option key={unit.id} value={unit.id}>
+                {unit.name || '名前未入力'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>この期間にしたこと</span>
+          <select
+            value={assignment.classification}
+            disabled={busy}
+            onChange={(event) =>
+              assignRule(folder, assignment, {
+                classification: event.target.value as ProjectClassification,
+              })
+            }
+          >
+            {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
         <small>{assignment.sessionCount}セッション</small>
       </li>
     ))}
   </ul>
-)}
+) : null}
 ```
+
+行のセレクト（Task 4 で作ったもの）は `folder.assignments.length <= 1` のときだけ描画する。
+
+**あわせて `src/server/folders.ts` の `assignments` を `effectiveFrom` の昇順で並べる。** 現在は `planning.projectRules` の並び順をそのまま使っているが、`assign` の保存は編集したルールを配列の末尾へ移すため、1件編集するたびに順序が入れ替わる。「1件目＝最初の期間」という前提が崩れ、`assignments[0]` や `assignments.at(-1)` が別の期間を指すようになる。
+
+```ts
+    folder.assignments = planning.projectRules
+      .filter((rule) => rule.projectKey === folder.projectKey)
+      .map((rule) => ({ /* 既存のまま */ }))
+      .sort((left, right) => {
+        if (left.effectiveFrom !== right.effectiveFrom) {
+          return left.effectiveFrom < right.effectiveFrom ? -1 : 1
+        }
+        return left.ruleId < right.ruleId ? -1 : 1
+      })
+```
+
+`tests/server/folders.test.ts` の期間分割のテストは、ルールを逆順で渡しても `effectiveFrom` 昇順で返ることを確かめる形へ広げる。
 
 - [ ] **Step 4: スタイルを足す**
 
