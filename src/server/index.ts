@@ -54,6 +54,57 @@ app.get('/api/dashboard', async () => {
 
 app.get('/api/config', async () => getConfiguration())
 
+app.get('/api/planning', async () => {
+  const { getPlanningSnapshot } = await import('./planningRepository.js')
+  return getPlanningSnapshot()
+})
+
+app.put('/api/planning', async (request, reply) => {
+  const { planningSnapshotSchema, savePlanningSnapshot } = await import('./planningRepository.js')
+  const parsed = planningSnapshotSchema.safeParse(request.body)
+  if (!parsed.success) {
+    await reply.code(400).send({
+      error: 'invalid_request',
+      details: parsed.error.flatten(),
+    })
+    return
+  }
+  savePlanningSnapshot(parsed.data)
+  return { saved: true }
+})
+
+app.get('/api/diagnosis', async () => {
+  const [{ diagnosePlanning }, { getPlanningSnapshot }] = await Promise.all([
+    import('../core/index.js'),
+    import('./planningRepository.js'),
+  ])
+  return diagnosePlanning(getPlanningSnapshot())
+})
+
+app.get('/api/ledger', async () => {
+  const [{ buildPlanningLedger }, { getPlanningSnapshot }] = await Promise.all([
+    import('../core/index.js'),
+    import('./planningRepository.js'),
+  ])
+  return buildPlanningLedger(getPlanningSnapshot())
+})
+
+app.get('/api/export', async (request, reply) => {
+  const parsed = z.object({ format: z.literal('markdown') }).safeParse(request.query)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+  const [{ buildPlanningLedger, diagnosePlanning }, { getPlanningSnapshot, planningMarkdown }] = await Promise.all([
+    import('../core/index.js'),
+    import('./planningRepository.js'),
+  ])
+  const snapshot = getPlanningSnapshot()
+  await reply.type('text/markdown; charset=utf-8').send(
+    planningMarkdown(snapshot, diagnosePlanning(snapshot), buildPlanningLedger(snapshot)),
+  )
+})
+
 const configurationSchema = z.object({
   charges: z.object({
     claude: z.number().int().nonnegative(),

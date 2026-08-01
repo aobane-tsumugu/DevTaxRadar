@@ -5,6 +5,7 @@ import {
   type BillingMonth,
 } from '../core/index.js'
 import type { Allocation, DashboardData, TaxGroup } from '../client/types.js'
+import type { PlanningSnapshot } from '../planning/types.js'
 import {
   getConfiguration,
   getProjectUsage,
@@ -12,6 +13,11 @@ import {
   type ProjectMapping,
   type ProjectUsageRow,
 } from './database.js'
+import { getPlanningSnapshot } from './planningRepository.js'
+
+type ResolvedProjectMapping = ProjectMapping & {
+  source: 'planning' | 'legacy'
+}
 
 const providerLabel = {
   claude: 'Claude Code',
@@ -90,17 +96,65 @@ function safeLocalLabel(value: string | null, fallback: string): string {
   return cleaned || fallback
 }
 
-function displayProject(row: ProjectUsageRow, mapping?: ProjectMapping): string {
+function displayProject(row: ProjectUsageRow, mapping?: ResolvedProjectMapping): string {
   return mapping?.productName || safeLocalLabel(
     row.projectLabel,
     `Project ${row.projectKey.slice(-6)}`,
   )
 }
 
+function monthBounds(month: string): { first: string; last: string } {
+  const [year, monthNumber] = month.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year!, monthNumber!, 0)).getUTCDate()
+  return {
+    first: `${month}-01`,
+    last: `${month}-${String(lastDay).padStart(2, '0')}`,
+  }
+}
+
+/**
+ * Resolve a monthly aggregate conservatively. Since the usage row no longer
+ * contains daily detail, a planning rule is usable only when it is the sole
+ * compatible rule touching the month and covers every day of that month.
+ */
+export function resolveMonthlyProjectMapping(
+  planning: PlanningSnapshot,
+  row: Pick<ProjectUsageRow, 'projectKey' | 'provider' | 'month'>,
+  legacyMapping?: ProjectMapping,
+): ResolvedProjectMapping | undefined {
+  const projectRules = planning.projectRules.filter((rule) => rule.projectKey === row.projectKey)
+  if (projectRules.length === 0) {
+    return legacyMapping ? { ...legacyMapping, source: 'legacy' } : undefined
+  }
+
+  const { first, last } = monthBounds(row.month)
+  const touchingRules = projectRules.filter((rule) =>
+    (!rule.provider || rule.provider === row.provider) &&
+    rule.effectiveFrom <= last &&
+    (!rule.effectiveTo || rule.effectiveTo >= first),
+  )
+  if (touchingRules.length !== 1) return undefined
+
+  const rule = touchingRules[0]!
+  if (rule.effectiveFrom > first || (rule.effectiveTo && rule.effectiveTo < last)) {
+    return undefined
+  }
+  const taxUnit = planning.taxUnits.find((unit) => unit.id === rule.taxUnitId)
+  if (!taxUnit) return undefined
+
+  return {
+    projectKey: row.projectKey,
+    productName: taxUnit.name,
+    assetName: taxUnit.name,
+    classification: rule.classification,
+    source: 'planning',
+  }
+}
+
 function allocationForProject(
   row: ProjectUsageRow,
   line: AllocationLine,
-  mapping: ProjectMapping | undefined,
+  mapping: ResolvedProjectMapping | undefined,
 ): Allocation {
   const classification = mapping?.classification ?? 'unclassified'
   const view = classificationView[classification]
@@ -130,7 +184,7 @@ function allocationForProject(
       model: row.model ?? 'unknown',
       tokens: row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens,
       classification: mapping
-        ? `ローカル設定 → ${mapping.productName}`
+        ? `${mapping.source === 'planning' ? '期間ルール' : 'ローカル設定'} → ${mapping.productName}`
         : '未分類',
       manualEdit: mapping ? '確認済み' : '要確認',
     },
@@ -181,9 +235,11 @@ export function buildDashboard(): DashboardData {
   const rows = getProjectUsage()
   const overview = getUsageOverview()
   const configuration = getConfiguration()
-  const mappingByProject = new Map(
+  const planning = getPlanningSnapshot()
+  const legacyMappingByProject = new Map(
     configuration.mappings.map((mapping) => [mapping.projectKey, mapping]),
   )
+  const resolvedMappingBySource = new Map<string, ResolvedProjectMapping>()
   const rowBySource = new Map<string, ProjectUsageRow>()
   const grouped = new Map<string, ProjectUsageRow[]>()
   const monthlyChargeByKey = new Map(
@@ -196,6 +252,13 @@ export function buildDashboard(): DashboardData {
   for (const row of rows) {
     const key = `${row.provider}:${row.month}`
     grouped.set(key, [...(grouped.get(key) ?? []), row])
+    const sourceId = `${row.provider}:${row.month}:${row.projectKey}`
+    const resolved = resolveMonthlyProjectMapping(
+      planning,
+      row,
+      legacyMappingByProject.get(row.projectKey),
+    )
+    if (resolved) resolvedMappingBySource.set(sourceId, resolved)
   }
 
   const providerMonthKeys = new Set([
@@ -219,7 +282,7 @@ export function buildDashboard(): DashboardData {
         return {
           id,
           productId: row.projectKey,
-          bucket: mappingByProject.get(row.projectKey)?.classification === 'private'
+          bucket: resolvedMappingBySource.get(id)?.classification === 'private'
             ? 'private' as const
             : 'product' as const,
           usageWeight: usageWeight(row),
@@ -243,7 +306,7 @@ export function buildDashboard(): DashboardData {
       allocations.push(allocationForProject(
         row,
         line,
-        mappingByProject.get(row.projectKey),
+        line.sourceId ? resolvedMappingBySource.get(line.sourceId) : undefined,
       ))
     }
   }
@@ -265,15 +328,33 @@ export function buildDashboard(): DashboardData {
     folder: string
     sessions: number
     projectKey: string
+    firstObservedAt?: string
+    lastObservedAt?: string
+    firstObservedMonth: string
+    lastObservedMonth: string
+    providers: Array<'Claude Code' | 'Codex'>
   }>()
   for (const row of rows) {
     const current = projectSummaries.get(row.projectKey)
-    const mapping = mappingByProject.get(row.projectKey)
+    const mapping = resolvedMappingBySource.get(`${row.provider}:${row.month}:${row.projectKey}`)
     projectSummaries.set(row.projectKey, {
       name: displayProject(row, mapping),
       folder: safeLocalLabel(row.projectLabel, `Project ${row.projectKey.slice(-6)}`),
       sessions: (current?.sessions ?? 0) + row.sessions,
       projectKey: row.projectKey,
+      firstObservedAt: [current?.firstObservedAt, row.firstObservedAt]
+        .filter((value): value is string => Boolean(value))
+        .sort()[0],
+      lastObservedAt: [current?.lastObservedAt, row.lastObservedAt]
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1),
+      firstObservedMonth: [current?.firstObservedMonth, row.month].filter(Boolean).sort()[0]!,
+      lastObservedMonth: [current?.lastObservedMonth, row.month].filter(Boolean).sort().at(-1)!,
+      providers: [...new Set([
+        ...(current?.providers ?? []),
+        row.provider === 'claude' ? 'Claude Code' as const : 'Codex' as const,
+      ])],
     })
   }
 
@@ -348,8 +429,9 @@ export function buildDashboard(): DashboardData {
     }
   })
 
-  const uniqueProjects = projectSummaries.size
-  const mappedProjects = [...projectSummaries.keys()].filter((key) => mappingByProject.has(key)).length
+  const mappedRows = rows.filter((row) =>
+    resolvedMappingBySource.has(`${row.provider}:${row.month}:${row.projectKey}`),
+  ).length
   const lastScan = overview.recentScans.find((scan) => scan.status === 'complete')
 
   return {
@@ -359,7 +441,7 @@ export function buildDashboard(): DashboardData {
       lastSynced: typeof lastScan?.completedAt === 'string'
         ? new Date(lastScan.completedAt).toLocaleString('ja-JP')
         : '未走査',
-      allocatedRate: uniqueProjects === 0 ? 0 : Math.round(mappedProjects / uniqueProjects * 100),
+      allocatedRate: rows.length === 0 ? 0 : Math.round(mappedRows / rows.length * 100),
     },
     months,
     allocations,
@@ -367,9 +449,9 @@ export function buildDashboard(): DashboardData {
     assets,
     guidance: [
       {
-        title: `${uniqueProjects - mappedProjects}件の未分類プロジェクト`,
+        title: `${rows.length - mappedRows}件の未分類利用（月・プロジェクト単位）`,
         description: 'オンボーディングでプロダクトと作業目的を確認してください',
-        severity: uniqueProjects === mappedProjects ? 'ok' : 'warning',
+        severity: rows.length === mappedRows ? 'ok' : 'warning',
       },
       {
         title: `未取得利用 ${Math.round(configuration.unobservedRatio * 100)}%`,

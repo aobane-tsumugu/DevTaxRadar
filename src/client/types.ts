@@ -57,7 +57,17 @@ export type DashboardData = {
     inService: boolean
   }>
   guidance: Array<{ title: string; description: string; severity: 'ok' | 'warning' }>
-  products: Array<{ name: string; folder: string; sessions: number; projectKey?: string }>
+  products: Array<{
+    name: string
+    folder: string
+    sessions: number
+    projectKey?: string
+    firstObservedAt?: string
+    lastObservedAt?: string
+    firstObservedMonth?: string
+    lastObservedMonth?: string
+    providers?: Array<'Claude Code' | 'Codex'>
+  }>
 }
 
 export type ProviderKey = 'claude' | 'codex'

@@ -4,6 +4,7 @@ import type {
   RuntimeData,
   ScanResult,
 } from './types'
+import type { Diagnosis, PlanningLedger, PlanningSnapshot } from '../planning/types'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -60,4 +61,38 @@ export function saveConfiguration(
     },
     body: JSON.stringify(configuration),
   })
+}
+
+export function getPlanning(): Promise<PlanningSnapshot> {
+  return requestJson('/api/planning')
+}
+
+export function savePlanning(
+  csrfToken: string,
+  planning: PlanningSnapshot,
+): Promise<{ saved: true }> {
+  return requestJson('/api/planning', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevTax-CSRF': csrfToken,
+    },
+    body: JSON.stringify(planning),
+  })
+}
+
+export function getDiagnosis(): Promise<Diagnosis> {
+  return requestJson('/api/diagnosis')
+}
+
+export function getLedger(year: number): Promise<PlanningLedger> {
+  return requestJson(`/api/ledger?year=${encodeURIComponent(String(year))}`)
+}
+
+export async function getPlanningExport(format: 'markdown' | 'csv' = 'markdown'): Promise<Blob> {
+  const response = await fetch(`/api/export?format=${format}`, {
+    headers: { Accept: format === 'csv' ? 'text/csv' : 'text/markdown' },
+  })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  return response.blob()
 }

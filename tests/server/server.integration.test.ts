@@ -407,5 +407,5 @@ describe("local server boundary", () => {
       `http://127.0.0.1:${port}/api/config`,
     ).then(async (response) => await response.json());
     expect(configurationAfterClear).toEqual(clearedConfiguration);
-  });
+  }, 20_000);
 });

@@ -1,7 +1,7 @@
 # DevTax Radar 技術設計
 
-Date: 2026-07-18
-Decision status: Adopted for local-first public repository
+Date: 2026-07-24
+Decision status: Adopted for confirmed specification v0.3
 
 ## 1. 採用構成
 
@@ -27,7 +27,7 @@ Cloudflare等の公開Webアプリは、ブラウザの制約上、各利用者�
 | 領域 | 採用 | 理由 |
 | --- | --- | --- |
 | Language | TypeScript | Collector、配賦エンジン、UIで型を共有できる |
-| UI | React | 2ページのダッシュボードを短時間で構築できる |
+| UI | React | 3画面と5段階オンボーディングを、ブラウザで分かりやすく表示できる |
 | Build | Vite | ローカル開発と静的ビルドが速い |
 | Styling | CSS | 追加ランタイムなしでダッシュボードを実装済み |
 | Charts | React + CSS | 複数月の積み上げ表示を独自実装済み |
@@ -67,12 +67,15 @@ devtax-radar/
 │  │  └─ release.yml
 │  └─ dependabot.yml
 ├─ src/
-│  ├─ App.tsx                    # 2画面UI・オンボーディング
+│  ├─ App.tsx                    # 3画面UI・5段階オンボーディング
 │  ├─ client/                    # API client・UI型
+│  ├─ planning/
+│  │  └─ types.ts               # 診断・制作物・費用・証拠の共有型
 │  ├─ server/
 │  │  ├─ index.ts               # Fastify API・静的配信
 │  │  ├─ database.ts            # node:sqlite
 │  │  ├─ dashboard.ts
+│  │  ├─ planningRepository.ts  # 診断・台帳の検証と永続化
 │  │  ├─ paths.ts
 │  │  └─ security.ts
 │  ├─ adapters/
@@ -81,7 +84,9 @@ devtax-radar/
 │  ├─ core/
 │  │  ├─ allocation.ts
 │  │  ├─ taxDecision.ts
-│  │  └─ assetThresholds.ts
+│  │  ├─ assetThresholds.ts
+│  │  ├─ diagnosis.ts           # 現在地・次の行動・不足情報
+│  │  └─ planningLedger.ts      # 設備・自宅費用・直接費の台帳
 │  └─ index.css
 ├─ fixtures/
 │  ├─ claude/                   # 合成JSONL
@@ -254,7 +259,7 @@ MVPでは決定木として実装し、LLMへ最終判断させない。
    └─ 新機能・機能向上 → 資本的支出候補
 ```
 
-取得価額候補は資産単位で累積し、供用開始後に10万円・20万円等の金額境界へ渡す。決定木と金額境界モジュールは実装済みだが、金額境界の全入力をダッシュボードから編集・保存する接続は未実装である。
+取得価額候補は資産単位で累積し、実際に使い始めた状況とともに10万円・20万円等の金額境界へ渡す。決定木と金額境界モジュールは実装済みである。5段階オンボーディングから制作物、開始イベント、設備、自宅費用、直接費、証拠を編集・保存できるが、金額境界にある全例外条件と候補の確定・修正履歴はまだ画面編集へ接続していない。
 
 すべての結果:
 
@@ -277,6 +282,115 @@ type TaxDecision = {
 - 年間上限300万円は事業月数で月割り
 - 一括償却資産として選択した資産との重複適用不可
 - 貸付用資産は、主要な事業として行う貸付け等を除いて対象外
+
+## 7.1 診断・台帳アーキテクチャ
+
+既存の`/api/config`と既存SQLite表は後方互換のため維持する。新機能は追加テーブルと`/api/planning`名前空間へ実装し、既存DBもmigrationなしで起動できるよう`CREATE TABLE IF NOT EXISTS`で段階導入する。
+
+```text
+履歴・請求設定（既存）
+  usage_events / provider_month_charges / project_mappings
+             ↓
+診断・制作物台帳（追加）
+  planning_profiles / tax_units / lifecycle_events
+             ↓
+費用・証拠台帳（追加）
+  equipment_assets / home_cost_rules / direct_costs / evidence_records
+             ↓
+純粋関数
+  diagnosis / lifecycle / cost ledger
+             ↓
+Dashboard projection / export
+```
+
+### 共有型
+
+`src/planning/types.ts`をブラウザ・サーバー共通の純粋型として利用する。
+
+- `PlanningProfile`: 年分、早期診断／事後整理、所得・申告候補、収益化状況
+- `TaxUnitRecord`: 制作物・改良計画、自己利用／外部提供／混合、状態、完成条件
+- `LifecycleEventRecord`: 開発開始、評価、自分利用開始、外部公開、販売、改良、廃止、中止
+- `EquipmentRecord`: PC・DGX等、取得・転用・業務割合・期間償却候補
+- `HomeCostRecord`: 家賃・電気・通信費、按分方式、式、理由、有効期間
+- `DirectCostRecord`: 外注・素材・クラウド等の制作物直接費
+- `EvidenceRecord`: Gitを必須としない参照・メモと証拠強度
+- `DecisionRecord`: 候補、確認・上書き、理由、確認日時、エンジン版
+
+### API
+
+- `GET /api/planning`: 全台帳のローカルsnapshotを取得
+- `PUT /api/planning`: 検証済みsnapshotを単一transactionで保存
+- `GET /api/diagnosis`: 保存事実から現在地、今すぐ、イベント時、不足事実を再生成
+- `GET /api/ledger`: 設定した対象年について、直接費、設備、家事関連費を集計
+- `GET /api/export?format=markdown`: 税理士相談用の明細。端末内の参照情報は出力しない
+
+Mutationは既存と同じCSRF・Origin検査を通す。IDは非可逆なローカルIDとし、証拠ファイル本体、プロンプト、応答、ソースコードは保存しない。
+
+### 画面と初回案内
+
+通常画面は次の3つで構成する。
+
+1. 「今年どうなる？」: 3グループの年間・月別集計、準備進捗、現在地、次の行動
+2. 「なぜそうなる？」: AI利用の配賦明細、制作物、設備、自宅費用、証拠、費用台帳、Markdown出力
+3. 「税務QA」: 取得価額、資本的支出、金額境界、実際に使い始めた日等を初心者向けに説明
+
+初回案内は「履歴→現在地→制作物→費用→診断」の5段階とする。各段階で質問の目的と「ここまで分かったこと」を表示し、途中保存と再開を可能にする。早期診断と事後整理、自分利用と外部提供は同じ画面で混同せずに選択・記録する。
+
+## 7.2 ライフサイクル
+
+自己利用開始と外部公開は別イベントである。`usageMode=mixed`でも一つの日付へ統合しない。公開前でも実作業へ正式採用すれば供用候補になり、公開済みでも本来目的に使用していない場合は事実確認を残す。
+
+同一フォルダを全期間一分類に固定しない。期間付きルールまたは`provider + session_key`の手動割当を優先し、既存`project_mappings`はfallbackとして利用する。再スキャンで行IDが変わるため、セッション割当は`usage_events.id`を参照しない。
+
+## 7.3 診断エンジン
+
+診断文はDBへ固定保存せず、保存事実から再生成する。
+
+```ts
+type Diagnosis = {
+  currentPosition: string[];
+  immediateActions: ActionItem[];
+  eventTriggeredActions: ActionItem[];
+  missingFacts: string[];
+  readiness: { confirmed: number; total: number };
+};
+```
+
+早期診断では完成条件、利用形態、按分方式、証拠の準備を案内する。事後整理では事実発生日と復元日を分け、既存履歴・公開物・手動メモからの復元を案内する。
+
+禁止する提案はコードとテストで固定する。
+
+- 金額境界を超えるための追加支出・開発
+- 税務だけを目的とした公開延期
+- 実態と異なる供用日
+- 形式だけの版分割、私用の業務化
+
+## 7.4 設備・家事関連費
+
+設備は購入額をそのまま制作物原価へ入れず、登録済みの当年償却費候補または転用時残高を基礎とする。
+
+```text
+設備の制作物配賦候補
+= 当年償却費候補 × 業務利用割合 × 制作物割合
+```
+
+家賃は面積または面積×時間、電気はメーターまたは消費電力×時間×単価、通信費は専用回線または利用時間等の再現可能な方式を保存する。直接、共通、一般管理、私用を分け、一般管理分を無条件にソフトウェア取得価額へ入れない。
+
+### 金額保存則
+
+各費用源について次を満たし、二重計上を拒否する。
+
+```text
+原額 = 制作物配賦 + 通常業務 + 私用 + 未分類・未配賦
+```
+
+設備の制作物割合、家事関連費の配賦割合は合計100%以下とし、残りを未配賦として表示する。
+
+## 7.5 証拠と判断履歴
+
+証拠は`automatic / external / self-recorded`を区別する。Gitは選択肢の一つであり、デプロイ、販売ページ、ストア、ファイル、スクリーンショット、領収書、カード明細、日記、作業メモ、AIセッションを同等の入口から登録できる。
+
+判断は上書きせずrevisionとして追記し、自動候補、入力事実、適用ルール、不足情報、ユーザー選択、修正理由、確認日時を保持する。
 
 ## 8. 匿名デモ／エクスポートのマスキング
 
@@ -391,7 +505,7 @@ AI審査がコードを探索しやすいよう、READMEから以下へ直接リ
 | 税務判断を断定する | 候補、根拠、不足情報、ユーザー確定 |
 | Node導入が非技術者には難しい | GitHub Releasesで`npm install`不要のZIPを提供 |
 | `node:sqlite`の仕様変更 | DB access layerとmigration testで隔離 |
-| 機能過多 | 実ログ読取、月次配賦、2ページ、10/20万円境界を最初の縦切りにする |
+| 機能過多 | AI原価に直結する診断、制作物、設備、自宅費用、証拠へ限定し、税額・暗号資産・電子申告は扱わない |
 
 ## 12. 配布判断
 
@@ -402,12 +516,12 @@ AI審査がコードを探索しやすいよう、READMEから以下へ直接リ
 - ソース配布: cloneまたはsource archiveから`npm ci && npm run build && npm start`
 - バージョン配布: `v*`タグでGitHub Release ZIPを自動公開。Node.js 24.14以上で`npm start`
 - ライセンス: `LICENSE`にMIT Licenseを採用済み
-- 公開デモ: 必須ではない。必要な場合だけ合成fixtureによる静的ショーケースを作る
+- 公開デモ: Cloudflare Pagesへ、合成fixtureだけを使う静的ショーケースを公開済み。実履歴の走査・保存は行わない
 
 ### 将来
 
 - Tauri等: Nodeを意識しないワンクリック配布
-- Cloudflare Pages／Workers Static Assets: 紹介サイトまたは合成デモのみ
+- Cloudflare Workers等の動的サービス: 将来必要になった場合も、実履歴をアップロードしない境界を維持する
 - local agent + optional sync: 複数PC同期をユーザーが明示的に望む段階
 
 ## 13. 税務ルールの国税庁公式資料

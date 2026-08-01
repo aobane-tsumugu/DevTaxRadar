@@ -46,6 +46,8 @@ export type ProjectUsageRow = {
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  firstObservedAt?: string | null
+  lastObservedAt?: string | null
 }
 
 export type ProjectMapping = {
@@ -143,7 +145,136 @@ export function getDatabase(): DatabaseSync {
 
     INSERT OR IGNORE INTO app_settings(key, value)
     VALUES ('unobserved_ratio', '0.10');
+
+    CREATE TABLE IF NOT EXISTS planning_profiles (
+      singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+      tax_year INTEGER NOT NULL,
+      journey_mode TEXT NOT NULL,
+      income_category TEXT NOT NULL,
+      filing_type TEXT NOT NULL,
+      activity_started_on TEXT,
+      monetization_status TEXT NOT NULL,
+      has_bookkeeping INTEGER NOT NULL,
+      notes TEXT
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_tax_units (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      unit_type TEXT NOT NULL,
+      usage_mode TEXT NOT NULL,
+      revenue_model TEXT NOT NULL,
+      lifecycle_status TEXT NOT NULL,
+      journey_mode TEXT NOT NULL DEFAULT 'early',
+      monetization_status TEXT NOT NULL DEFAULT 'planned',
+      completion_criteria TEXT,
+      predecessor_id TEXT,
+      same_as_external_version TEXT,
+      notes TEXT
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_project_rules (
+      id TEXT PRIMARY KEY,
+      project_key TEXT NOT NULL,
+      provider TEXT,
+      effective_from TEXT NOT NULL,
+      effective_to TEXT,
+      tax_unit_id TEXT NOT NULL REFERENCES planning_tax_units(id),
+      classification TEXT NOT NULL,
+      reason TEXT
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_lifecycle_events (
+      id TEXT PRIMARY KEY,
+      tax_unit_id TEXT NOT NULL REFERENCES planning_tax_units(id),
+      event_type TEXT NOT NULL,
+      occurred_on TEXT NOT NULL,
+      recorded_at TEXT NOT NULL,
+      evidence_ids_json TEXT NOT NULL,
+      note TEXT
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_equipment (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      equipment_type TEXT NOT NULL,
+      acquisition_cost_jpy INTEGER NOT NULL,
+      ordered_on TEXT,
+      delivered_on TEXT,
+      acquired_on TEXT NOT NULL,
+      business_use_started_on TEXT,
+      converted_from_private INTEGER NOT NULL,
+      opening_unamortized_balance_jpy INTEGER,
+      business_use_ratio REAL NOT NULL,
+      useful_life_years INTEGER,
+      role TEXT NOT NULL,
+      tax_unit_id TEXT REFERENCES planning_tax_units(id),
+      project_allocation_ratio REAL NOT NULL,
+      evidence_ids_json TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_home_costs (
+      id TEXT PRIMARY KEY,
+      month TEXT NOT NULL,
+      category TEXT NOT NULL,
+      amount_jpy INTEGER NOT NULL,
+      method TEXT NOT NULL,
+      business_use_ratio REAL NOT NULL,
+      basis TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      tax_unit_id TEXT REFERENCES planning_tax_units(id),
+      project_allocation_ratio REAL NOT NULL,
+      treatment TEXT NOT NULL,
+      evidence_ids_json TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_direct_costs (
+      id TEXT PRIMARY KEY,
+      tax_unit_id TEXT REFERENCES planning_tax_units(id),
+      incurred_on TEXT NOT NULL,
+      cost_type TEXT NOT NULL,
+      amount_jpy INTEGER NOT NULL,
+      directly_attributable INTEGER NOT NULL,
+      treatment TEXT NOT NULL,
+      note TEXT,
+      evidence_ids_json TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_evidence (
+      id TEXT PRIMARY KEY,
+      evidence_type TEXT NOT NULL,
+      strength TEXT NOT NULL,
+      occurred_on TEXT,
+      recorded_at TEXT NOT NULL,
+      local_reference TEXT,
+      note TEXT NOT NULL,
+      tax_unit_id TEXT REFERENCES planning_tax_units(id)
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS planning_decisions (
+      id TEXT PRIMARY KEY,
+      tax_unit_id TEXT NOT NULL REFERENCES planning_tax_units(id),
+      tax_year INTEGER NOT NULL,
+      engine_version TEXT NOT NULL,
+      candidate TEXT NOT NULL,
+      status TEXT NOT NULL,
+      selected_candidate TEXT,
+      reason TEXT,
+      created_at TEXT NOT NULL,
+      confirmed_at TEXT
+    ) STRICT;
   `)
+
+  const taxUnitColumns = new Set(
+    (database.prepare(`PRAGMA table_info(planning_tax_units)`).all() as Array<{ name: string }>)
+      .map((column) => column.name),
+  )
+  if (!taxUnitColumns.has('journey_mode')) {
+    database.exec(`ALTER TABLE planning_tax_units ADD COLUMN journey_mode TEXT NOT NULL DEFAULT 'early'`)
+  }
+  if (!taxUnitColumns.has('monetization_status')) {
+    database.exec(`ALTER TABLE planning_tax_units ADD COLUMN monetization_status TEXT NOT NULL DEFAULT 'planned'`)
+  }
 
   return database
 }
@@ -221,7 +352,9 @@ export function getUsageOverview(): UsageOverview {
       SUM(input_tokens) AS inputTokens,
       SUM(output_tokens) AS outputTokens,
       SUM(cache_read_tokens) AS cacheReadTokens,
-      SUM(cache_write_tokens) AS cacheWriteTokens
+      SUM(cache_write_tokens) AS cacheWriteTokens,
+      MIN(observed_at) AS firstObservedAt,
+      MAX(observed_at) AS lastObservedAt
     FROM usage_events
     GROUP BY provider, month
     ORDER BY month, provider

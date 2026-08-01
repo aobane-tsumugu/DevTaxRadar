@@ -1,6 +1,146 @@
 import type { Allocation, DashboardData } from './types'
+import type { Diagnosis, PlanningLedger, PlanningSnapshot } from '../planning/types'
 
 export type { Allocation, DashboardData, TaxGroup } from './types'
+
+export const demoPlanning: PlanningSnapshot = {
+  version: 1,
+  profile: {
+    taxYear: 2026,
+    journeyMode: 'early',
+    incomeCategory: 'undecided',
+    filingType: 'undecided',
+    activityStartedOn: '2026-04-01',
+    monetizationStatus: 'planned',
+    hasBookkeeping: true,
+  },
+  taxUnits: [
+    {
+      id: 'tax-unit-internal', name: '執筆アシスタント', unitType: 'new-software',
+      usageMode: 'internal', revenueModel: 'efficiency', lifecycleStatus: 'in-use',
+      completionCriteria: '正式原稿の制作工程で安定して一話を処理できる',
+      sameAsExternalVersion: 'no',
+    },
+    {
+      id: 'tax-unit-public', name: 'DevTax Radar', unitType: 'new-software',
+      usageMode: 'external', revenueModel: 'oss', lifecycleStatus: 'developing',
+      completionCriteria: '公開デモ、README、ローカル履歴集計が動作する',
+      sameAsExternalVersion: 'yes',
+    },
+    {
+      id: 'tax-unit-mixed', name: 'コンテンツ制作基盤 v2', unitType: 'improvement-plan',
+      usageMode: 'mixed', revenueModel: 'sales', lifecycleStatus: 'improving',
+      completionCriteria: '自分の制作工程と外部提供版の双方で受入条件を満たす',
+      predecessorId: 'tax-unit-internal', sameAsExternalVersion: 'undecided',
+    },
+  ],
+  projectRules: [
+    {
+      id: 'rule-devtax-developing', projectKey: 'demo-product-a', provider: 'codex',
+      effectiveFrom: '2026-07-18', taxUnitId: 'tax-unit-public',
+      classification: 'new-development', reason: '公開前の新規開発期間',
+    },
+    {
+      id: 'rule-writer-in-use', projectKey: 'demo-product-b', provider: 'claude',
+      effectiveFrom: '2026-06-06', taxUnitId: 'tax-unit-internal',
+      classification: 'maintenance', reason: '自己利用開始後の保守期間',
+    },
+  ],
+  lifecycleEvents: [
+    {
+      id: 'event-internal-use', taxUnitId: 'tax-unit-internal', eventType: 'internal-use-started',
+      occurredOn: '2026-06-06', recordedAt: '2026-06-07T09:00:00+09:00', evidenceIds: ['evidence-first-use'],
+      note: 'テストではなく正式な制作工程へ採用',
+    },
+    {
+      id: 'event-public-start', taxUnitId: 'tax-unit-public', eventType: 'development-started',
+      occurredOn: '2026-07-18', recordedAt: '2026-07-18T12:00:00+09:00', evidenceIds: [],
+    },
+  ],
+  equipment: [
+    {
+      id: 'equipment-dgx', name: 'DGX Spark', equipmentType: 'dgx', acquisitionCostJpy: 650000,
+      acquiredOn: '2026-07-20', deliveredOn: '2026-07-20', businessUseStartedOn: '2026-07-21',
+      convertedFromPrivate: false, businessUseRatio: 0.9, usefulLifeYears: 4,
+      role: 'ローカルLLM検証と画像生成', taxUnitId: 'tax-unit-mixed', projectAllocationRatio: 0.6,
+      evidenceIds: ['evidence-dgx-receipt'],
+    },
+    {
+      id: 'equipment-laptop', name: 'GPUノートPC', equipmentType: 'pc', acquisitionCostJpy: 280000,
+      acquiredOn: '2025-03-15', businessUseStartedOn: '2026-04-01', convertedFromPrivate: true,
+      openingUnamortizedBalanceJpy: 205000, businessUseRatio: 0.7, usefulLifeYears: 4,
+      role: '外出時の開発と動作確認', taxUnitId: 'tax-unit-public', projectAllocationRatio: 0.5,
+      evidenceIds: [],
+    },
+  ],
+  homeCosts: [
+    {
+      id: 'home-rent-07', month: '2026-07', category: 'rent', amountJpy: 120000,
+      method: 'area-time', businessUseRatio: 0.12, basis: '作業面積20% × 使用時間60%',
+      rationale: '共用部屋のため面積と利用時間を併用', taxUnitId: 'tax-unit-public',
+      projectAllocationRatio: 0.5, treatment: 'shared', evidenceIds: [],
+    },
+    {
+      id: 'home-electricity-07', month: '2026-07', category: 'electricity', amountJpy: 14500,
+      method: 'watt-hour', businessUseRatio: 0.22, basis: '機器消費電力 × 稼働時間 ÷ 月使用量',
+      rationale: 'DGXとPCの仕様・稼働記録から算出', taxUnitId: 'tax-unit-mixed',
+      projectAllocationRatio: 0.6, treatment: 'shared', evidenceIds: [],
+    },
+    {
+      id: 'home-internet-07', month: '2026-07', category: 'internet', amountJpy: 6200,
+      method: 'usage-time', businessUseRatio: 0.65, basis: '業務利用時間の記録',
+      rationale: '共用回線のため利用時間で按分', projectAllocationRatio: 0,
+      treatment: 'general', evidenceIds: [],
+    },
+  ],
+  directCosts: [],
+  evidence: [
+    {
+      id: 'evidence-first-use', evidenceType: 'first-use', strength: 'self-recorded',
+      occurredOn: '2026-06-06', recordedAt: '2026-06-07T09:00:00+09:00',
+      note: '正式原稿への初回採用メモ', taxUnitId: 'tax-unit-internal',
+    },
+    {
+      id: 'evidence-dgx-receipt', evidenceType: 'receipt', strength: 'external',
+      occurredOn: '2026-07-20', recordedAt: '2026-07-20T18:00:00+09:00',
+      note: '購入領収書（ローカル参照のみ）', taxUnitId: 'tax-unit-mixed',
+    },
+  ],
+  decisions: [],
+}
+
+export const demoDiagnosis: Diagnosis = {
+  currentPosition: [
+    '自分の実作業で使う制作物と、外部公開を目指す制作物の両方があります。',
+    '執筆アシスタントは自己利用開始済み、DevTax Radarは公開前の開発中です。',
+    'PC・DGXと自宅費用の按分根拠を登録済みですが、未添付の証拠があります。',
+  ],
+  immediateActions: [
+    { id: 'action-1', priority: 'high', title: 'GPUノートPCの転用時残高を確認', reason: '私用から業務へ転用しているため、購入額全額ではなく転用時点の残高確認が必要です。', trigger: 'now' },
+    { id: 'action-2', priority: 'high', title: 'DevTax Radarの完成条件を確認', reason: '供用開始を後から説明できるよう、正式利用の条件を先に残します。', trigger: 'now', taxUnitId: 'tax-unit-public' },
+    { id: 'action-3', priority: 'medium', title: '7月の家賃按分根拠を添付', reason: '面積と利用時間の計算メモが未登録です。', trigger: 'now' },
+  ],
+  eventTriggeredActions: [
+    { id: 'action-4', priority: 'medium', title: '初回公開日を記録', reason: '外部公開した日に、URLやデプロイ履歴を証拠として残します。', trigger: 'event', taxUnitId: 'tax-unit-public' },
+    { id: 'action-5', priority: 'low', title: '旧版の利用終了を記録', reason: 'v2へ全面移行したときに、旧版の残価と二重計上を確認します。', trigger: 'event', taxUnitId: 'tax-unit-mixed' },
+  ],
+  missingFacts: ['GPUノートPCの転用時未償却残高', '家賃按分の計測メモ', '公開版と自己利用版が同一かの最終判断'],
+  readiness: { confirmed: 7, total: 10 },
+}
+
+export const demoLedger: PlanningLedger = {
+  year: 2026,
+  contributions: [
+    { sourceType: 'equipment', sourceId: 'equipment-dgx', taxUnitId: 'tax-unit-mixed', grossAmountJpy: 650000, businessAmountJpy: 585000, allocatedAmountJpy: 351000, privateAmountJpy: 65000, unallocatedAmountJpy: 234000, treatment: 'direct', warnings: ['当年償却額は供用日・耐用年数・償却方法の確認後に算定'] },
+    { sourceType: 'home', sourceId: 'home-rent-07', taxUnitId: 'tax-unit-public', grossAmountJpy: 120000, businessAmountJpy: 14400, allocatedAmountJpy: 7200, privateAmountJpy: 105600, unallocatedAmountJpy: 7200, treatment: 'shared', warnings: [] },
+    { sourceType: 'home', sourceId: 'home-electricity-07', taxUnitId: 'tax-unit-mixed', grossAmountJpy: 14500, businessAmountJpy: 3190, allocatedAmountJpy: 1914, privateAmountJpy: 11310, unallocatedAmountJpy: 1276, treatment: 'shared', warnings: [] },
+  ],
+  totals: { grossAmountJpy: 784500, businessAmountJpy: 602590, allocatedAmountJpy: 360114, privateAmountJpy: 181910, unallocatedAmountJpy: 242476 },
+  byTaxUnit: [
+    { taxUnitId: 'tax-unit-public', name: 'DevTax Radar', amountJpy: 7200, candidate: '取得価額候補', missingFacts: ['供用開始日'] },
+    { taxUnitId: 'tax-unit-mixed', name: 'コンテンツ制作基盤 v2', amountJpy: 352914, candidate: '資本的支出候補', missingFacts: ['改良完了日'] },
+  ],
+}
 
 const session = (
   provider: 'Claude Code' | 'Codex',
