@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UsageSession } from "../../src/server/sessionAggregation.ts";
 
@@ -147,5 +148,92 @@ describe("session storage", () => {
     const row = db.getUsageSessions()[0];
     expect(row?.startedAt).toBe("2026-07-15T10:00:00.000Z");
     expect(row?.endedAt).toBe("2026-07-15T11:00:00.000Z");
+  });
+
+  it("旧スキーマを検出して作り直し、time_zoneを追加し、2回起動しても失敗しない", async () => {
+    // v0.1.0以前の実際のスキーマを直接組み立てる: メッセージ単位のusage_events
+    // （started_atがない）と、time_zoneのないscans。
+    const databasePath = join(sessionDirectory, "devtax-radar.db");
+    const raw = new DatabaseSync(databasePath);
+    raw.exec(`
+      CREATE TABLE scans (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        files_seen INTEGER NOT NULL DEFAULT 0,
+        events_written INTEGER NOT NULL DEFAULT 0,
+        malformed_lines INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE usage_events (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        month TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        project_label TEXT,
+        model TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        observed_at TEXT,
+        schema_version TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        UNIQUE(provider, session_key, month, project_key, observed_at)
+      ) STRICT;
+    `);
+    raw.prepare(`
+      INSERT INTO scans(provider, started_at, completed_at, files_seen, events_written, malformed_lines, status)
+      VALUES ('claude', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:01.000Z', 1, 1, 0, 'complete')
+    `).run();
+    raw.close();
+
+    // 起動その1: dbは既にimport済み（beforeEach）。getDatabase()が旧スキーマを検出して作り直す。
+    const firstStart = db.getDatabase();
+    const usageColumns = (firstStart.prepare(`PRAGMA table_info(usage_events)`).all() as Array<{ name: string }>)
+      .map((column) => column.name);
+    const scanColumns = (firstStart.prepare(`PRAGMA table_info(scans)`).all() as Array<{ name: string }>)
+      .map((column) => column.name);
+    expect(usageColumns).toContain("started_at");
+    expect(scanColumns).toContain("time_zone");
+    expect(
+      (firstStart.prepare(`SELECT COUNT(*) AS n FROM scans`).get() as { n: number }).n,
+    ).toBe(1);
+
+    // 起動その2: モジュールを再importして新しいDatabaseSyncを同じファイルへ開く。
+    // 既に現行スキーマのため、ALTER/DROPガードは何もせず、例外も投げない。
+    vi.resetModules();
+    const restarted = await import("../../src/server/database.ts");
+    expect(() => restarted.getDatabase()).not.toThrow();
+    expect(
+      (restarted.getDatabase().prepare(`SELECT COUNT(*) AS n FROM scans`).get() as { n: number }).n,
+    ).toBe(1);
+    restarted.getDatabase().close();
+  });
+
+  it("再スキャンで消えたセッションの参照が残らない", () => {
+    db.replaceProviderSessions("claude", [
+      session({
+        sessionKey: "session_a",
+        localReference: { nativeSessionId: "native-a", sourcePath: "/a.jsonl", workingDirectory: "/work/a" },
+      }),
+      session({
+        sessionKey: "session_b",
+        projectKey: "project_b",
+        localReference: { nativeSessionId: "native-b", sourcePath: "/b.jsonl", workingDirectory: "/work/b" },
+      }),
+    ], diagnostics);
+
+    db.replaceProviderSessions("claude", [
+      session({
+        sessionKey: "session_a",
+        localReference: { nativeSessionId: "native-a", sourcePath: "/a.jsonl", workingDirectory: "/work/a" },
+      }),
+    ], diagnostics);
+
+    expect(db.getSessionReference("claude", "session_a")).toMatchObject({ nativeSessionId: "native-a" });
+    expect(db.getSessionReference("claude", "session_b")).toBeUndefined();
   });
 });
