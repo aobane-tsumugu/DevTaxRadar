@@ -976,7 +976,7 @@ async function storeRules(rules: ProjectRuleRecord[]): Promise<void> {
 
 `page !== 'guide'` でフィルターを出す条件は `page === 'summary' || page === 'evidence'` に変える。割当画面に配賦フィルターは不要である。
 
-あわせてオンボーディングからの導線を作る。設計6.1が求めているもので、これがないと利用者は新画面の存在に気づかない。`Onboarding` の props に `unassignedFolderCount: number` と `onOpenFolders: () => void` を足し、ステップ5（診断）の末尾に案内を出す。
+あわせてオンボーディングからの導線を作る。設計6.1が求めているもので、これがないと利用者は新画面の存在に気づかない。`Onboarding` の props に `unassignedFolderCount: number` を足し、ステップ5（診断）の末尾に案内を出す。画面遷移そのものは `App` 側で `onClose` を包んで行うため、`Onboarding` に遷移用のコールバックは渡さない。
 
 ```tsx
 {unassignedFolderCount > 0 && (
