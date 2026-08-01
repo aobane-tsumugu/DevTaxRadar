@@ -1094,7 +1094,7 @@ separate table that export paths never touch."
 
 ## Task 6: セッション割当の解決
 
-> 実行順の注意: この課題は「ルールの制作物を任意にする」課題（この文書では Task 6 として記述）より **後** に実行する。`taxUnitId` が任意でないと本タスクのテストが型エラーになるためである。実行順は 1, 2, 3, 4, 「ルールの任意化」, 「セッション割当の解決」, 7, 8 とする。
+> Task 5（ルールの制作物を任意にする）より後に実行すること。`taxUnitId` が任意でないと本タスクのテストが型エラーになる。
 
 `resolveMonthlyProjectMapping` は「月全体を1つのルールが覆う場合だけ採用」する。外れた月は丸ごと未分類へ落ちる。セッションの発生日時で解決すれば、月の途中の切替も表現できる。
 
@@ -1315,7 +1315,7 @@ unclassified. Session timestamps make the switch representable."
 
 ---
 
-## Task 6: ルールの制作物を任意にし一般学習を追加
+## Task 5: ルールの制作物を任意にし一般学習を追加
 
 「私用」「一般学習」は資産を形成しない。ダミーの制作物を作らせないよう `taxUnitId` を任意にする。`general-learning` は `src/core/types.ts` の `WorkPurpose` に既にあるのに、ルール側の enum になかった。
 
