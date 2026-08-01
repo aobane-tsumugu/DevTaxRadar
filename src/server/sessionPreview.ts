@@ -9,6 +9,8 @@ export type ResumeCommand = {
   changeDirectory?: string
   resume: string
   workingDirectoryExists: boolean
+  /** cdを省いた理由。省いていなければundefined */
+  changeDirectoryOmittedReason?: 'not-found' | 'unquotable-path'
 }
 
 function firstText(content: unknown): string | undefined {
@@ -93,6 +95,22 @@ export async function readSessionPreview(
   return undefined
 }
 
+/**
+ * Escaping quotes in a path is a shell-specific problem: PowerShell wants `` `" ``
+ * or doubled `""`, cmd.exe wants yet another rule, and bash wants `\"`. We don't
+ * know which shell the generated command will be pasted into, so no single
+ * backslash-escaped string can satisfy all of them (a PowerShell user pasting
+ * `cd "C:\wo\"rk"` gets a parser error: the backslash has no escaping meaning
+ * inside a PowerShell double-quoted string, so the quote still terminates it).
+ * Rather than emit a command that silently breaks in some shells, we omit `cd`
+ * entirely for paths containing a quote and tell the caller why. Windows paths
+ * can't contain `"` in the first place, so this only affects the rare
+ * synthetic/edge case, not normal use.
+ */
+function containsUnquotablePath(workingDirectory: string): boolean {
+  return workingDirectory.includes('"')
+}
+
 export function buildResumeCommand(
   provider: UsageProvider,
   nativeSessionId: string,
@@ -102,9 +120,22 @@ export function buildResumeCommand(
   const resume =
     provider === 'claude' ? `claude --resume ${nativeSessionId}` : `codex resume ${nativeSessionId}`
   if (!workingDirectoryExists) {
-    return { command: resume, resume, workingDirectoryExists: false }
+    return {
+      command: resume,
+      resume,
+      workingDirectoryExists: false,
+      changeDirectoryOmittedReason: 'not-found',
+    }
   }
-  const changeDirectory = `cd "${workingDirectory.replaceAll('"', '\\"')}"`
+  if (containsUnquotablePath(workingDirectory)) {
+    return {
+      command: resume,
+      resume,
+      workingDirectoryExists: true,
+      changeDirectoryOmittedReason: 'unquotable-path',
+    }
+  }
+  const changeDirectory = `cd "${workingDirectory}"`
   return {
     command: `${changeDirectory} && ${resume}`,
     changeDirectory,

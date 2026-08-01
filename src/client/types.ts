@@ -151,5 +151,6 @@ export type SessionDetail = {
     changeDirectory?: string
     resume: string
     workingDirectoryExists: boolean
+    changeDirectoryOmittedReason?: 'not-found' | 'unquotable-path'
   }
 }

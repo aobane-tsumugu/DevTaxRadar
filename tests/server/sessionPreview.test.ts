@@ -134,10 +134,20 @@ describe('buildResumeCommand', () => {
     expect(result.command).toBe('claude --resume abc-123')
     expect(result.changeDirectory).toBeUndefined()
     expect(result.workingDirectoryExists).toBe(false)
+    expect(result.changeDirectoryOmittedReason).toBe('not-found')
   })
 
-  it('引用符を含むパスをエスケープする', () => {
+  it('引用符を含むパスではcdを省く', () => {
     const result = buildResumeCommand('claude', 'abc', 'C:\\wo"rk', true)
-    expect(result.changeDirectory).toBe('cd "C:\\wo\\"rk"')
+    expect(result.changeDirectory).toBeUndefined()
+    expect(result.command).toBe('claude --resume abc')
+    expect(result.changeDirectoryOmittedReason).toBe('unquotable-path')
+  })
+
+  it('引用符を含み、かつ作業フォルダが存在しなければnot-foundを優先する', () => {
+    const result = buildResumeCommand('claude', 'abc', 'C:\\wo"rk', false)
+    expect(result.changeDirectory).toBeUndefined()
+    expect(result.command).toBe('claude --resume abc')
+    expect(result.changeDirectoryOmittedReason).toBe('not-found')
   })
 })
