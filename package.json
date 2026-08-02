@@ -3,6 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "description": "Allocate Claude Code and Codex subscriptions to explainable product costs.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aobane-tsumugu/DevTaxRadar.git"
+  },
+  "homepage": "https://github.com/aobane-tsumugu/DevTaxRadar#readme",
+  "bugs": {
+    "url": "https://github.com/aobane-tsumugu/DevTaxRadar/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=24.14.0"
