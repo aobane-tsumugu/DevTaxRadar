@@ -8,7 +8,7 @@ import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
 import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
 import { buildDashboard } from './dashboard.js'
 import { getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
-import { csrfToken, protectMutation } from './security.js'
+import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
 
 const host = '127.0.0.1'
@@ -18,6 +18,7 @@ const app = Fastify({
   bodyLimit: 64 * 1024,
 })
 
+app.addHook('preHandler', createLoopbackHostGuard(port))
 app.addHook('preHandler', protectMutation)
 
 app.get('/api/health', async () => ({
