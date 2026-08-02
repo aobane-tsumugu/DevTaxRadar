@@ -83,7 +83,10 @@ export default function FolderAssignmentPage({
     })
     return [...filtered].sort((left, right) => {
       if (sortKey === 'name') return left.label.localeCompare(right.label, 'ja')
-      if (sortKey === 'recent') return left.lastUsedOn < right.lastUsedOn ? 1 : -1
+      if (sortKey === 'recent') {
+        if (left.lastUsedOn === right.lastUsedOn) return 0
+        return left.lastUsedOn < right.lastUsedOn ? 1 : -1
+      }
       return right.sessionCount - left.sessionCount
     })
   }, [folders, query, sortKey, unassignedOnly])

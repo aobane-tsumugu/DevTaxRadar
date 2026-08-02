@@ -80,7 +80,7 @@ const classificationView: Record<
   },
 }
 
-function safeLocalLabel(value: string | null, fallback: string): string {
+export function safeLocalLabel(value: string | null, fallback: string): string {
   if (!value) return fallback
   const finalSegment = value.split(/[\\/]/).filter(Boolean).at(-1) ?? fallback
   const cleaned = finalSegment

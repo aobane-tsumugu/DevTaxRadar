@@ -32,7 +32,7 @@ export type FolderSummary = {
 const providerOrder: Record<UsageProvider, number> = { claude: 0, codex: 1 }
 
 function displayLabel(row: UsageSessionRow): string {
-  return row.projectLabel ?? `Project ${row.projectKey.slice(-6)}`
+  return safeLocalLabel(row.projectLabel, `Project ${row.projectKey.slice(-6)}`)
 }
 
 /**

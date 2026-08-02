@@ -728,6 +728,7 @@ describe('セッション単位のダッシュボード集計', () => {
     const dashboardBody = JSON.stringify(await getJson('/api/dashboard'))
     const ledgerBody = JSON.stringify(await getJson('/api/ledger'))
     const diagnosisBody = JSON.stringify(await getJson('/api/diagnosis'))
+    const foldersBody = JSON.stringify(await getJson('/api/folders'))
     const exportBody = JSON.stringify(
       await fetch(`http://127.0.0.1:${testPort}/api/export?format=markdown`).then((response) =>
         response.text(),
@@ -738,6 +739,7 @@ describe('セッション単位のダッシュボード集計', () => {
       expect(dashboardBody).not.toContain(raw)
       expect(ledgerBody).not.toContain(raw)
       expect(diagnosisBody).not.toContain(raw)
+      expect(foldersBody).not.toContain(raw)
       expect(exportBody).not.toContain(raw)
     }
   })

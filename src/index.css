@@ -3208,6 +3208,9 @@ th.number {
   font-size: 16px;
 }
 .assignment-warning {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--amber-soft);
   color: var(--amber);
   font-size: 13px;
 }
@@ -3227,6 +3230,7 @@ th.number {
   font-size: 14px;
 }
 .assignment-toggle {
+  display: flex;
   flex-direction: row;
   align-items: center;
   gap: 7px;
@@ -3417,6 +3421,9 @@ th.number {
   max-width: 100%;
 }
 .session-resume small {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--amber-soft);
   color: var(--amber);
 }
 
