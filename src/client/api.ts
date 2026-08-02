@@ -25,8 +25,14 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`
     try {
-      const payload = (await response.json()) as { error?: string }
-      if (payload.error) detail = payload.error
+      const payload = (await response.json()) as { error?: string; message?: string }
+      // `message` is the specific, human-readable reason (e.g. a dangling
+      // taxUnitId or a reversed period from PUT /api/planning/rules).
+      // `error` is a machine-readable code (e.g. "invalid_request") meant
+      // for branching, not for showing to the user -- fall back to it only
+      // when the server had nothing more specific to say.
+      if (payload.message) detail = payload.message
+      else if (payload.error) detail = payload.error
     } catch {
       // Keep the HTTP status when the response is not JSON.
     }

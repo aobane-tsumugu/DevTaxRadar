@@ -37,11 +37,13 @@ export default function FolderAssignmentPage({
   folders,
   planning,
   busy,
+  error,
   onSaveRules,
 }: {
   folders: FolderSummary[]
   planning: PlanningSnapshot
   busy: boolean
+  error: string | null
   onSaveRules: (rules: ProjectRuleRecord[]) => Promise<void>
 }) {
   const [query, setQuery] = useState('')
@@ -166,6 +168,12 @@ export default function FolderAssignmentPage({
 
   return (
     <>
+      {error && (
+        <div className="setup-notice error" role="alert" aria-live="polite">
+          <span>!</span>
+          {error}
+        </div>
+      )}
       <section className="assignment-toolbar" aria-label="フォルダの絞り込み">
         <div className="assignment-counts">
           <strong>

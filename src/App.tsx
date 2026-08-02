@@ -70,6 +70,7 @@ function App() {
   const [ledger, setLedger] = useState<PlanningLedger>(demoLedger)
   const [folders, setFolders] = useState<FolderSummary[]>([])
   const [rulesBusy, setRulesBusy] = useState(false)
+  const [rulesError, setRulesError] = useState<string | null>(null)
   const [runtimeLoading, setRuntimeLoading] = useState(true)
   const autoOnboardingShown = useRef(false)
 
@@ -152,14 +153,24 @@ function App() {
       const activeRuntime = runtime ?? (await getRuntime())
       if (!runtime) setRuntime(activeRuntime)
       await savePlanningRules(activeRuntime.csrfToken, rules)
-      const [nextFolders, nextPlanning, nextDashboard] = await Promise.all([
+      const [nextFolders, nextPlanning, nextDashboard, nextDiagnosis] = await Promise.all([
         getFolders(),
         getPlanning(),
         getDashboardData(),
+        getDiagnosis(),
       ])
       setFolders(nextFolders.folders)
       setPlanningState(nextPlanning)
       setData(nextDashboard)
+      setDiagnosis(nextDiagnosis)
+      setRulesError(null)
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? error.message : undefined
+      setRulesError(
+        detail
+          ? `保存できませんでした。もう一度お試しください。（${detail}）`
+          : '保存できませんでした。もう一度お試しください。',
+      )
     } finally {
       setRulesBusy(false)
     }
@@ -452,6 +463,7 @@ function App() {
               selected={selectedAllocation}
               onSelect={setSelectedAllocation}
               busy={rulesBusy}
+              error={rulesError}
               onReclassify={reclassifyAllocation}
             />
           ) : page === 'folders' ? (
@@ -459,6 +471,7 @@ function App() {
               folders={folders}
               planning={planning}
               busy={rulesBusy}
+              error={rulesError}
               onSaveRules={storeRules}
             />
           ) : (
@@ -789,6 +802,7 @@ function EvidencePage({
   selected,
   onSelect,
   busy,
+  error,
   onReclassify,
 }: {
   data: DashboardData
@@ -799,6 +813,7 @@ function EvidencePage({
   selected: Allocation | null
   onSelect: (row: Allocation | null) => void
   busy: boolean
+  error: string | null
   onReclassify: (row: Allocation, classification: ProjectClassification) => Promise<void>
 }) {
   const active = selected ?? allocations[0] ?? null
@@ -829,6 +844,12 @@ function EvidencePage({
 
   return (
     <>
+      {error && (
+        <div className="setup-notice error" role="alert" aria-live="polite">
+          <span>!</span>
+          {error}
+        </div>
+      )}
       <section className="panel evidence-table-panel">
         <PanelHeading
           title="配賦明細"
