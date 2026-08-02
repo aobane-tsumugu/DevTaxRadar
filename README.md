@@ -322,7 +322,7 @@ npm run build
 
 - [統合プロダクト仕様](./PRODUCT_SPEC.md)
 - [技術設計](./TECHNICAL_DESIGN.md)
-- [セッション単位の帰属と履歴保全 設計](./docs/superpowers/specs/2026-08-01-session-attribution-and-retention-design.md) — 保存形式をメッセージ単位からセッション単位へ作り直した経緯と、フォルダの割当・契約期間の設計
+- [セッション単位の帰属と履歴保全 設計](./docs/design/session-attribution-and-retention.md) — 保存形式をメッセージ単位からセッション単位へ作り直した経緯と、フォルダの割当・契約期間・履歴保全の設計
 - [セキュリティ方針](./docs/SECURITY.md)
 - [メンテナー向けの手順](./docs/MAINTAINING.md) — 公開デモのデプロイとリリース
 

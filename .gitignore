@@ -13,6 +13,14 @@ artifacts/
 docs/README_AB_EXPERIMENT.md
 scripts/run-readme-ab-experiment.mjs
 
+# Build scaffolding, kept locally. These are step-by-step instructions written
+# for the agent that implemented each phase -- they depend on a private tooling
+# plugin the reader cannot run, they restate code that now lives in src/, and
+# they go stale the moment that code changes. The design document they were
+# derived from is published under docs/design/ instead.
+docs/superpowers/
+IMPLEMENTATION_PLAN.md
+
 # Environment and secrets
 .env
 .env.*
