@@ -714,7 +714,11 @@ git commit -m "feat: exclude out-of-contract months and sessions from allocation
     claude: {},
     codex: {},
   })
-  const [chargeConfirmPending, setChargeConfirmPending] = useState(false)
+  // Remember WHICH providers were warned about, not just that a warning fired.
+  // A bare boolean goes stale: warn about Claude, then re-select Codex on an
+  // earlier step, and the second press would skip the check entirely and save
+  // Codex as 0 yen without ever naming it.
+  const [confirmedMissingCharges, setConfirmedMissingCharges] = useState<string | null>(null)
 ```
 
 `LocalConfiguration` は同ファイルで既に import 済み。
@@ -758,7 +762,7 @@ git commit -m "feat: exclude out-of-contract months and sessions from allocation
     const normalized = amount === undefined ? undefined : Math.max(0, amount)
     if (provider === 'claude') setClaudeCharge(normalized)
     else setCodexCharge(normalized)
-    setChargeConfirmPending(false)
+    setConfirmedMissingCharges(null)
     setMonthlyCharges((current) =>
       current.map((charge) =>
         charge.provider === provider ? { ...charge, amountJpy: normalized ?? 0 } : charge,
@@ -801,8 +805,9 @@ Codex 側も同じ形にする（`aria-label="Codex 月額"`、`value={codexChar
         selectedProviders.includes(provider) &&
         (provider === 'claude' ? claudeCharge : codexCharge) === undefined,
     )
-    if (missingCharges.length > 0 && !chargeConfirmPending) {
-      setChargeConfirmPending(true)
+    const missingKey = missingCharges.join(',')
+    if (missingCharges.length > 0 && confirmedMissingCharges !== missingKey) {
+      setConfirmedMissingCharges(missingKey)
       setNotice({
         kind: 'error',
         message: `${missingCharges
@@ -813,7 +818,17 @@ Codex 側も同じ形にする（`aria-label="Codex 月額"`、`value={codexChar
     }
 ```
 
-`advance` 関数の冒頭で `setNotice(null)` を呼んでいる場合、`chargeConfirmPending` はここでリセットしない。リセットは Step 3 の `updateProviderCharge`（利用者が金額を入れ直したとき）だけで行う。
+`advance` 関数の冒頭で `setNotice(null)` を呼んでいる場合でも、`confirmedMissingCharges` はここでリセットしない。リセットは Step 3 の `updateProviderCharge`（利用者が金額を入れ直したとき）だけで行う。未入力の provider の顔ぶれが変わった場合は、`missingKey` の比較が食い違うため自動的にもう一度警告が出る。
+
+あわせて「戻る」ボタンの `onClick` に `setNotice(null)` を足す。いまは `advance` でしか通知を消していないため、費用ステップで出したエラーが対象年や制作物のステップまで残り続ける。
+
+```tsx
+              onClick={() => {
+                setNotice(null)
+                if (step === 0) onClose()
+                else onStep(step - 1)
+              }}
+```
 
 - [ ] **Step 6: 保存内容へ契約期間と未入力を反映する**
 

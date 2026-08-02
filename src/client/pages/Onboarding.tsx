@@ -16,6 +16,14 @@ import type {
   TaxUnitRecord,
 } from '../../planning/types'
 import { diagnosePlanning } from '../../core/diagnosis'
+import {
+  chargeConfirmationKey,
+  invertedContractMessage,
+  missingChargeMessage,
+  missingChargeProviders,
+  needsChargeConfirmation,
+  providerWithInvertedContract,
+} from '../chargeGuard'
 import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
 
 function Onboarding({
@@ -58,7 +66,11 @@ function Onboarding({
     claude: {},
     codex: {},
   })
-  const [chargeConfirmPending, setChargeConfirmPending] = useState(false)
+  // Remember WHICH providers were warned about, not just that a warning fired.
+  // A bare boolean goes stale: warn about Claude, then re-select Codex on an
+  // earlier step, and the second press would skip the check entirely and save
+  // Codex as 0 yen without ever naming it.
+  const [confirmedMissingCharges, setConfirmedMissingCharges] = useState<string | null>(null)
   const [unobservedPercent, setUnobservedPercent] = useState(10)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{
@@ -148,7 +160,7 @@ function Onboarding({
     const normalized = amount === undefined ? undefined : Math.max(0, amount)
     if (provider === 'claude') setClaudeCharge(normalized)
     else setCodexCharge(normalized)
-    setChargeConfirmPending(false)
+    setConfirmedMissingCharges(null)
     setMonthlyCharges((current) =>
       current.map((charge) =>
         charge.provider === provider ? { ...charge, amountJpy: normalized ?? 0 } : charge,
@@ -356,34 +368,18 @@ function Onboarding({
       onStep(4)
       return
     }
-    const invalidContract = (['claude', 'codex'] as ProviderKey[]).find((provider) => {
-      const contract = contracts[provider]
-      return Boolean(
-        contract.startedOn && contract.endedOn && contract.startedOn > contract.endedOn,
-      )
-    })
+    const invalidContract = providerWithInvertedContract(contracts)
     if (invalidContract) {
-      setNotice({
-        kind: 'error',
-        message: `${invalidContract === 'claude' ? 'Claude Code' : 'Codex'}の契約終了日は、開始日以降にしてください。`,
-      })
+      setNotice({ kind: 'error', message: invertedContractMessage(invalidContract) })
       return
     }
-    const missingCharges = (['claude', 'codex'] as ProviderKey[]).filter(
-      (provider) =>
-        selectedProviders.includes(provider) &&
-        (provider === 'claude' ? claudeCharge : codexCharge) === undefined,
-    )
-    if (missingCharges.length > 0 && !chargeConfirmPending) {
-      setChargeConfirmPending(true)
-      setNotice({
-        kind: 'error',
-        message: `${missingCharges
-          .map((provider) => (provider === 'claude' ? 'Claude Code' : 'Codex'))
-          .join(
-            'と',
-          )}の月額が未入力のため、配賦額は0円になります。このまま進める場合は、もう一度「保存する」を押してください。`,
-      })
+    const missingCharges = missingChargeProviders(selectedProviders, {
+      claude: claudeCharge,
+      codex: codexCharge,
+    })
+    if (needsChargeConfirmation(missingCharges, confirmedMissingCharges)) {
+      setConfirmedMissingCharges(chargeConfirmationKey(missingCharges))
+      setNotice({ kind: 'error', message: missingChargeMessage(missingCharges) })
       return
     }
     if (apiUnavailable) {
@@ -1790,7 +1786,13 @@ function Onboarding({
             <button
               className="secondary-button"
               disabled={busy}
-              onClick={() => (step === 0 ? onClose() : onStep(step - 1))}
+              onClick={() => {
+                // Without this, an error raised on the cost step keeps showing
+                // on 対象年 and 制作物 until the next forward click.
+                setNotice(null)
+                if (step === 0) onClose()
+                else onStep(step - 1)
+              }}
             >
               {step === 0 ? 'あとで確認' : '戻る'}
             </button>
