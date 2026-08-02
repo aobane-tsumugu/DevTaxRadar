@@ -130,6 +130,25 @@ describe('summarizeFolders', () => {
     expect(folders[0]?.unassignedSessionCount).toBe(0)
   })
 
+  it('ルールがあっても分類が「あとで確認」のままなら未割当として数える', () => {
+    const folders = summarizeFolders(
+      [session()],
+      planning([
+        {
+          id: 'rule-unclassified',
+          projectKey: 'project_a',
+          effectiveFrom: '2026-01-01',
+          taxUnitId: 'unit-a',
+          classification: 'unclassified',
+        },
+      ]),
+      'Asia/Tokyo',
+    )
+
+    expect(folders[0]?.assignments).toHaveLength(1)
+    expect(folders[0]?.unassignedSessionCount).toBe(1)
+  })
+
   it('期間で分かれたルールをそれぞれの適用件数とともに返す', () => {
     const folders = summarizeFolders(
       [

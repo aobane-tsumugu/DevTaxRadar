@@ -1,6 +1,7 @@
 import { localDateFromTimestamp, resolvedTimeZone } from '../adapters/localTime.ts'
 import type { UsageProvider } from '../adapters/types.ts'
 import type { PlanningSnapshot, ProjectClassification } from '../planning/types.js'
+import { safeLocalLabel } from './dashboard.js'
 import { getUsageSessions, type UsageSessionRow } from './database.js'
 import { resolveSessionAssignment } from './sessionAssignment.js'
 import { getPlanningSnapshot } from './planningRepository.js'
@@ -67,7 +68,11 @@ export function summarizeFolders(
         lastUsedOn: day,
         providers: [session.provider],
         assignments: [],
-        unassignedSessionCount: assignment.ruleId ? 0 : 1,
+        // A session only counts as handled once it has a real classification.
+        // A rule can exist (non-null ruleId) yet still leave classification at
+        // its default 'unclassified' -- that folder must keep counting as
+        // outstanding, or this figure disagrees with dashboard classifiedRate.
+        unassignedSessionCount: assignment.classification === 'unclassified' ? 1 : 0,
       })
       continue
     }
@@ -77,9 +82,9 @@ export function summarizeFolders(
     if (day < current.firstUsedOn) current.firstUsedOn = day
     if (day > current.lastUsedOn) current.lastUsedOn = day
     if (!current.providers.includes(session.provider)) current.providers.push(session.provider)
-    if (!assignment.ruleId) current.unassignedSessionCount += 1
+    if (assignment.classification === 'unclassified') current.unassignedSessionCount += 1
     if (session.projectLabel && current.label.startsWith('Project ')) {
-      current.label = session.projectLabel
+      current.label = safeLocalLabel(session.projectLabel, current.label)
     }
   }
 
