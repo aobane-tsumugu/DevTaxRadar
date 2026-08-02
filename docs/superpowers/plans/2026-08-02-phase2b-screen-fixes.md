@@ -1242,11 +1242,31 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ')
 
+// jsdom has no layout engine, so offsetParent is always null there and cannot be
+// used to decide visibility. Walk the ancestor chain instead: it gives the same
+// answer in the browser and under test, and it catches the case that actually
+// occurs in this modal — inputs inside a closed <details> are still matched by
+// the selector but cannot receive focus.
+function isHidden(element: HTMLElement, container: HTMLElement): boolean {
+  let node: HTMLElement | null = element
+  while (node) {
+    if (node.hidden || node.style.display === 'none' || node.style.visibility === 'hidden') {
+      return true
+    }
+    if (node instanceof HTMLDetailsElement && !node.open) {
+      // A closed <details> still exposes its own summary.
+      const summary = node.querySelector('summary')
+      if (element !== summary) return true
+    }
+    if (node === container) return false
+    node = node.parentElement
+  }
+  return false
+}
+
 export function focusableElements(container: HTMLElement): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
-    // offsetParent is null for display:none subtrees. jsdom reports 0 for every
-    // layout box, so this check must not depend on measured size.
-    (element) => element.offsetParent !== null || element.style.display !== 'none',
+    (element) => !isHidden(element, container),
   )
 }
 
