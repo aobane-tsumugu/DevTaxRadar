@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -85,6 +85,11 @@ describe('local server boundary', () => {
       join(codexHistory, 'synthetic-session.jsonl'),
     )
 
+    // Task 2: point retention reads at a throwaway settings file instead of
+    // the real ~/.claude/settings.json. Must exist before the server starts.
+    const claudeSettingsPath = join(isolatedData, 'claude-settings.json')
+    writeFileSync(claudeSettingsPath, JSON.stringify({ cleanupPeriodDays: 400 }), 'utf8')
+
     const child = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
       cwd: resolve('.'),
       stdio: 'ignore',
@@ -94,6 +99,7 @@ describe('local server boundary', () => {
         HOME: isolatedHome,
         USERPROFILE: isolatedHome,
         DEVTAX_RADAR_DATA_DIR: isolatedData,
+        DEVTAX_RADAR_CLAUDE_SETTINGS: claudeSettingsPath,
       },
     })
     children.push(child)
@@ -106,12 +112,44 @@ describe('local server boundary', () => {
         promptBodiesExtracted: boolean
         telemetry: boolean
       }
+      retention: {
+        claude: {
+          detected: boolean
+          fileCount: number
+          oldestModifiedOn?: string
+          autoDelete: { kind: string; days?: number; source?: string; reason?: string }
+          nextLossOn?: string
+          daysUntilNextLoss?: number
+          alreadyLosing: boolean
+        }
+        codex: {
+          detected: boolean
+          fileCount: number
+          oldestModifiedOn?: string
+          autoDelete: { kind: string }
+          alreadyLosing: boolean
+        }
+      }
     }
     expect(runtime.privacy).toEqual({
       localOnly: true,
       promptBodiesExtracted: false,
       telemetry: false,
     })
+    expect(runtime.retention.claude.autoDelete).toEqual({
+      kind: 'configured',
+      days: 400,
+      source: 'explicit',
+    })
+    expect(runtime.retention.claude.detected).toBe(true)
+    expect(runtime.retention.claude.fileCount).toBe(1)
+    expect(runtime.retention.codex.autoDelete).toEqual({ kind: 'none' })
+    expect(runtime.retention.codex.detected).toBe(true)
+    expect(runtime.retention.codex.fileCount).toBe(1)
+    // The response must never carry a filesystem path.
+    const serializedRuntime = JSON.stringify(runtime)
+    expect(serializedRuntime).not.toContain('.claude')
+    expect(serializedRuntime).not.toContain('.codex')
 
     const idleProgress = (await fetch(`http://127.0.0.1:${port}/api/scan/progress`).then(
       async (response) => await response.json(),
@@ -520,6 +558,11 @@ describe('セッション単位のダッシュボード集計', () => {
         ...process.env,
         PORT: String(testPort),
         DEVTAX_RADAR_DATA_DIR: dataDirectory,
+        // This block doesn't assert on retention, but /api/runtime always
+        // reads it -- without this override it would fall through to the
+        // real ~/.claude/settings.json. A missing file is handled as the
+        // default cleanup period, so it does not need to be created here.
+        DEVTAX_RADAR_CLAUDE_SETTINGS: join(dataDirectory, 'claude-settings.json'),
       },
     })
     await waitForRuntime(testPort)

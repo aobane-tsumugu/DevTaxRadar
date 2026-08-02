@@ -5,9 +5,11 @@ import fastifyStatic from '@fastify/static'
 import Fastify from 'fastify'
 import { z } from 'zod'
 import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
+import { localDateFromTimestamp } from '../adapters/localTime.js'
 import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
 import { buildDashboard } from './dashboard.js'
-import { getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
+import { getClaudeSettingsPath, getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
+import { forecastNextLoss, readCleanupPeriod, readHistoryAgeCached } from './retention.js'
 import { beginScan, finishScan, readScanProgress, reportScannedFile } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
@@ -29,11 +31,42 @@ app.get('/api/health', async () => ({
 
 app.get('/api/runtime', async () => {
   const historyPaths = getDefaultHistoryPaths()
+  const today = localDateFromTimestamp(new Date().toISOString()) ?? ''
+
+  const claudeAge = readHistoryAgeCached(historyPaths.claude)
+  const claudePeriod = readCleanupPeriod(getClaudeSettingsPath())
+  const claudeForecast = forecastNextLoss(claudeAge, claudePeriod, today)
+
+  // Codex has no retention setting today (see the note in paths.ts). Report
+  // the age anyway so the screen keeps showing it if one ever lands.
+  const codexAge = readHistoryAgeCached(historyPaths.codex)
+
   return {
     csrfToken,
     providers: {
       claude: { detected: existsSync(historyPaths.claude) },
       codex: { detected: existsSync(historyPaths.codex) },
+    },
+    retention: {
+      claude: {
+        detected: existsSync(historyPaths.claude),
+        fileCount: claudeAge.fileCount,
+        oldestModifiedOn: claudeAge.oldestModifiedOn,
+        autoDelete:
+          claudePeriod.status === 'unreadable'
+            ? { kind: 'unreadable' as const, reason: claudePeriod.reason }
+            : { kind: 'configured' as const, days: claudePeriod.days, source: claudePeriod.status },
+        nextLossOn: claudeForecast.nextLossOn,
+        daysUntilNextLoss: claudeForecast.daysUntilNextLoss,
+        alreadyLosing: claudeForecast.alreadyLosing,
+      },
+      codex: {
+        detected: existsSync(historyPaths.codex),
+        fileCount: codexAge.fileCount,
+        oldestModifiedOn: codexAge.oldestModifiedOn,
+        autoDelete: { kind: 'none' as const },
+        alreadyLosing: false,
+      },
     },
     privacy: {
       localOnly: true,

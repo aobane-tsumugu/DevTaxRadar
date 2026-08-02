@@ -100,6 +100,40 @@ export function readHistoryAge(rootDirectory: string): HistoryAge {
   }
 }
 
+// GET /api/runtime is fetched on every page load, and readHistoryAge walks
+// the whole history tree synchronously. Measured against a real ~/.claude
+// history of 3,738 .jsonl files (~910 MiB), a single call takes roughly
+// 130-155ms; the ~/.codex equivalent (442 files) takes roughly 30-40ms. Since
+// /api/runtime calls this once per provider, that is ~170-190ms of Fastify's
+// single event loop thread blocked on every load -- well over the ~100ms
+// budget. Cache each root's result for a short time so repeated page loads
+// within that window are served from memory instead of re-walking the disk.
+const HISTORY_AGE_CACHE_TTL_MS = 60_000
+
+type HistoryAgeCacheEntry = { computedAtMs: number; age: HistoryAge }
+
+const historyAgeCache = new Map<string, HistoryAgeCacheEntry>()
+
+/**
+ * Cached wrapper around readHistoryAge, keyed by root directory. Recomputes
+ * only when the cached entry is older than HISTORY_AGE_CACHE_TTL_MS. `now` is
+ * injectable so tests can exercise the TTL without waiting on a real clock.
+ */
+export function readHistoryAgeCached(rootDirectory: string, now: number = Date.now()): HistoryAge {
+  const cached = historyAgeCache.get(rootDirectory)
+  if (cached && now - cached.computedAtMs < HISTORY_AGE_CACHE_TTL_MS) {
+    return cached.age
+  }
+  const age = readHistoryAge(rootDirectory)
+  historyAgeCache.set(rootDirectory, { computedAtMs: now, age })
+  return age
+}
+
+/** Test-only escape hatch: clears the cache so tests don't leak state into each other. */
+export function clearHistoryAgeCacheForTests(): void {
+  historyAgeCache.clear()
+}
+
 export type RetentionForecast = {
   nextLossOn?: string
   daysUntilNextLoss?: number

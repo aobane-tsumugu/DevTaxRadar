@@ -2,7 +2,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { forecastNextLoss, readCleanupPeriod, readHistoryAge } from '../../src/server/retention.ts'
+import {
+  clearHistoryAgeCacheForTests,
+  forecastNextLoss,
+  readCleanupPeriod,
+  readHistoryAge,
+  readHistoryAgeCached,
+} from '../../src/server/retention.ts'
 
 const temporaryDirectories: string[] = []
 
@@ -82,6 +88,68 @@ describe('readHistoryAge', () => {
     const root = temporaryDirectory()
     writeFileSync(join(root, 'notes.txt'), 'x', 'utf8')
     expect(readHistoryAge(root)).toEqual({ fileCount: 0 })
+  })
+
+  // GET /api/runtime calls readHistoryAge synchronously on every page load,
+  // so a slow walk blocks Fastify's single event loop thread each time. This
+  // times a synthetic tree of a few thousand files -- the same order of
+  // magnitude as a real ~/.claude/projects directory -- to check that
+  // assumption against a committed measurement instead of a guess.
+  it('walks a few thousand files fast enough for a synchronous request handler', () => {
+    const root = temporaryDirectory()
+    const fileCount = 3_000
+    const directoryCount = 30
+    const directories = Array.from({ length: directoryCount }, (_, index) => {
+      const directory = join(root, `project-${index}`)
+      mkdirSync(directory, { recursive: true })
+      return directory
+    })
+    for (let index = 0; index < fileCount; index += 1) {
+      const directory = directories[index % directoryCount]!
+      writeFileSync(join(directory, `session-${index}.jsonl`), '{}\n', 'utf8')
+    }
+
+    const startedAtMs = performance.now()
+    const age = readHistoryAge(root)
+    const elapsedMs = performance.now() - startedAtMs
+
+    expect(age.fileCount).toBe(fileCount)
+    // A generous ceiling to catch a gross algorithmic regression (e.g. an
+    // accidental O(n^2) walk) without turning into a flaky micro-benchmark on
+    // a loaded CI machine. See retention.ts and the task report for the
+    // real-world measurement (~130-155ms against a 3,738 file / ~910 MiB
+    // ~/.claude history) that motivated the readHistoryAgeCached wrapper.
+    expect(elapsedMs).toBeLessThan(5_000)
+  })
+})
+
+describe('readHistoryAgeCached', () => {
+  afterEach(() => {
+    clearHistoryAgeCacheForTests()
+  })
+
+  it('reuses the cached result until the TTL elapses', () => {
+    const root = temporaryDirectory()
+    writeFileSync(join(root, 'a.jsonl'), '{}\n', 'utf8')
+
+    expect(readHistoryAgeCached(root, 1_000).fileCount).toBe(1)
+
+    // A second file appears without the clock moving -- still served from
+    // cache, so the count must not change yet.
+    writeFileSync(join(root, 'b.jsonl'), '{}\n', 'utf8')
+    expect(readHistoryAgeCached(root, 1_000 + 59_000).fileCount).toBe(1)
+
+    // Past the 60s TTL: the walk reruns and picks up the new file.
+    expect(readHistoryAgeCached(root, 1_000 + 60_001).fileCount).toBe(2)
+  })
+
+  it('caches each root directory independently', () => {
+    const rootA = temporaryDirectory()
+    const rootB = temporaryDirectory()
+    writeFileSync(join(rootA, 'a.jsonl'), '{}\n', 'utf8')
+
+    expect(readHistoryAgeCached(rootA, 0).fileCount).toBe(1)
+    expect(readHistoryAgeCached(rootB, 0).fileCount).toBe(0)
   })
 })
 
