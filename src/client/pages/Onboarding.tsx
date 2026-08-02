@@ -1887,7 +1887,10 @@ function Onboarding({
                 {busy
                   ? step === 0
                     ? scanProgress?.running
-                      ? `走査中… ${scanProgress.filesScanned}ファイル`
+                      ? // Naming the provider matters here: the count restarts
+                        // at 0 for the second provider, and without the name
+                        // the number looks like it went backwards.
+                        `${scanProgress.provider === 'codex' ? 'Codex' : 'Claude'}を走査中… ${scanProgress.filesScanned}ファイル`
                       : '履歴を確認中…'
                     : '保存中…'
                   : step === 0

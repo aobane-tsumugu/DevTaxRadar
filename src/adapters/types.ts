@@ -62,8 +62,10 @@ export type AdapterOptions = {
    */
   includeLocalReferences?: boolean
   /**
-   * Called once per discovered file, after it has been read. Used only to
-   * report a count to the progress endpoint -- never passed a file path.
+   * Called once per discovered file, before that file is read, so a file that
+   * turns out to be unreadable is still counted and the number only ever goes
+   * up. Used only to report a count to the progress endpoint -- it takes no
+   * arguments, so a file path cannot travel through it.
    */
   onFileScanned?: () => void
 }
