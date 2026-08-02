@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolvedTimeZone } from '../../src/adapters/localTime.ts'
 import type { LocalSessionReference } from '../../src/adapters/types.ts'
 import type { UsageSession } from '../../src/server/sessionAggregation.ts'
 
@@ -698,5 +699,30 @@ describe('session storage', () => {
       diagnostics,
     )
     expect(result.changedReferences).toEqual([])
+  })
+
+  it('走査していなければ直近の走査のタイムゾーンはnull', () => {
+    expect(db.getLastScanTimeZone()).toBeNull()
+  })
+
+  it('走査すると、そのとき記録したタイムゾーンを返す', () => {
+    db.replaceProviderSessions('claude', [session()], diagnostics)
+    expect(db.getLastScanTimeZone()).toBe(resolvedTimeZone())
+  })
+
+  it('複数回走査した場合は最新の走査のタイムゾーンを返す', () => {
+    // replaceProviderSessions always records the process's real zone
+    // (resolvedTimeZone() is memoised for the process lifetime -- see
+    // src/adapters/localTime.ts), so two distinct values can only be
+    // observed here by writing the earlier scan row directly.
+    const database = db.getDatabase()
+    database
+      .prepare(
+        `INSERT INTO scans(provider, started_at, completed_at, time_zone, status)
+         VALUES ('claude', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'Old/Zone', 'complete')`,
+      )
+      .run()
+    db.replaceProviderSessions('claude', [session()], diagnostics)
+    expect(db.getLastScanTimeZone()).toBe(resolvedTimeZone())
   })
 })

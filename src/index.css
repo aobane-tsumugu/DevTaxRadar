@@ -1648,6 +1648,17 @@ th.number {
   color: var(--muted);
   font-size: 14px;
 }
+.scan-note {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.scan-note span {
+  display: block;
+}
+.scan-note span + span {
+  margin-top: 4px;
+}
 .retention-box {
   margin-top: 18px;
   padding: 14px 16px;

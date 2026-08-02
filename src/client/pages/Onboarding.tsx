@@ -80,6 +80,7 @@ function Onboarding({
   const [unobservedPercent, setUnobservedPercent] = useState(10)
   const [busy, setBusy] = useState(false)
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
+  const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'success' | 'error' | 'info'
     message: string
@@ -400,6 +401,7 @@ function Onboarding({
       setBusy(true)
       try {
         const result = await onScan(selectedProviders)
+        setLastScanResult(result)
         const events = Object.values(result.providers).reduce(
           (sum, provider) => sum + (provider?.events ?? 0),
           0,
@@ -728,6 +730,21 @@ function Onboarding({
                     {scanProgress?.running
                       ? `${scanProgress.provider === 'codex' ? 'Codex' : 'Claude Code'}の履歴を走査しています。走査したファイル数：${scanProgress.filesScanned}`
                       : '履歴を確認しています。'}
+                  </p>
+                )}
+                {!busy && lastScanResult && (
+                  <p className="scan-note" role="status">
+                    {Object.entries(lastScanResult.providers).map(([provider, summary]) => {
+                      const nonUtc = Number(summary?.diagnostics?.nonUtcTimestamps ?? 0)
+                      if (nonUtc === 0) return null
+                      return (
+                        <span key={provider}>
+                          {provider === 'codex' ? 'Codex' : 'Claude Code'}
+                          の履歴に、UTC表記でない日時が{nonUtc}
+                          件ありました。月の帰属がずれる場合があります。
+                        </span>
+                      )
+                    })}
                   </p>
                 )}
                 <div className="privacy-callout">

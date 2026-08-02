@@ -502,6 +502,17 @@ export function replaceProviderSessions(
   return { changedReferences }
 }
 
+export function getLastScanTimeZone(): string | null {
+  const row = getDatabase()
+    .prepare(
+      `SELECT time_zone AS timeZone FROM scans
+       WHERE time_zone IS NOT NULL
+       ORDER BY started_at DESC LIMIT 1`,
+    )
+    .get() as { timeZone: string } | undefined
+  return row?.timeZone ?? null
+}
+
 export function getUsageOverview(): UsageOverview {
   const db = getDatabase()
   const providers = db
