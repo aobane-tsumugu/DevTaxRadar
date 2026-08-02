@@ -371,9 +371,13 @@ export function buildDashboard(): DashboardData {
   const observedMonthKeys = new Set(
     assigned.map((session) => `${session.provider}:${session.month}`),
   )
-  const monthsExcludedByContract = [
-    ...new Set([...observedMonthKeys, ...monthlyChargeByKey.keys()]),
-  ].filter((key) => !providerMonthKeys.has(key)).length
+  // Distinct calendar months, not provider-month pairs: the message counts
+  // them in か月, and one month excluded for both providers is still one month.
+  const monthsExcludedByContract = new Set(
+    [...new Set([...observedMonthKeys, ...monthlyChargeByKey.keys()])]
+      .filter((key) => !providerMonthKeys.has(key))
+      .map((key) => key.split(':')[1]),
+  ).size
 
   const inputs = [...providerMonthKeys].sort().map((key) => {
     const [provider, month] = key.split(':') as [UsageProvider, string]
