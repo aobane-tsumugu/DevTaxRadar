@@ -17,7 +17,7 @@ import type {
   TaxUnitRecord,
 } from '../../planning/types'
 import { diagnosePlanning } from '../../core/diagnosis'
-import { getScanProgress, saveRetention } from '../api'
+import { getScanProgress } from '../api'
 import {
   chargeConfirmationKey,
   invertedContractMessage,
@@ -41,6 +41,7 @@ function Onboarding({
   onStep,
   onScan,
   onSave,
+  onSaveRetention,
   onSavePlanning,
   onClose,
   onSaved,
@@ -55,6 +56,7 @@ function Onboarding({
   onStep: (step: number) => void
   onScan: (providers: ProviderKey[]) => Promise<ScanResult>
   onSave: (configuration: LocalConfiguration) => Promise<void>
+  onSaveRetention: (days: number) => Promise<{ days: number; previousDays?: number }>
   onSavePlanning: (planning: PlanningSnapshot) => Promise<void>
   onClose: () => void
   onSaved?: () => void
@@ -345,10 +347,20 @@ function Onboarding({
 
   async function applyRetention() {
     if (!runtime || retentionDays === undefined) return
+    // The native min/max attributes do not stop a typed 0, a negative, or a
+    // decimal from being submitted. Catching it here keeps the server's
+    // machine-readable 400 out of the message the user reads.
+    if (!Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 36500) {
+      setNotice({
+        kind: 'error',
+        message: '保持する日数は、1以上36500以下の整数で入力してください。',
+      })
+      return
+    }
     setRetentionBusy(true)
     setNotice(null)
     try {
-      const result = await saveRetention(runtime.csrfToken, retentionDays)
+      const result = await onSaveRetention(retentionDays)
       setNotice({
         kind: 'success',
         message: `Claude Codeの履歴の保持期間を${result.days}日にしました。変更前の設定は同じフォルダへバックアップしています。`,
@@ -669,7 +681,8 @@ function Onboarding({
                         </li>
                         <li>
                           保存する際はファイルの内容を書き直すため、もとの行の並びやインデントは
-                          保たれません。変更するのは`cleanupPeriodDays`だけで、ほかの設定は変更しません
+                          保たれません。変更するのは cleanupPeriodDays
+                          という項目だけで、ほかの設定は変更しません
                         </li>
                         <li>
                           Claude Code自身もこのファイルを書き換えます。読み取りから保存までの間に

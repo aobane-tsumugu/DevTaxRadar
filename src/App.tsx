@@ -20,6 +20,7 @@ import {
   savePlanning,
   savePlanningRules,
   saveConfiguration,
+  saveRetention,
   scanHistory,
 } from './client/api'
 import type {
@@ -122,6 +123,18 @@ function App() {
     setData(nextDashboard)
     setConfiguration(nextConfiguration)
     setFolders(nextFolders.folders)
+    return result
+  }
+
+  async function storeRetention(days: number): Promise<{ days: number; previousDays?: number }> {
+    const activeRuntime = runtime ?? (await getRuntime())
+    if (!runtime) setRuntime(activeRuntime)
+    const result = await saveRetention(activeRuntime.csrfToken, days)
+    // Refetch: the retention box and the summary banner both read from
+    // `runtime`. Without this they keep showing the old period, contradicting
+    // the success message -- and reopening the box would offer to re-apply the
+    // value the user just replaced.
+    setRuntime(await getRuntime())
     return result
   }
 
@@ -498,6 +511,7 @@ function App() {
           onStep={setOnboardingStep}
           onScan={runScan}
           onSave={storeConfiguration}
+          onSaveRetention={storeRetention}
           onSavePlanning={storePlanning}
           onClose={() => {
             setOnboarding(false)
