@@ -1965,6 +1965,17 @@ th.number {
   text-align: center;
   font-size: 16px;
 }
+.empty-setup p {
+  margin: 0;
+  line-height: 1.7;
+}
+.empty-setup p + button {
+  margin-top: 14px;
+}
+.empty-setup td,
+td > .empty-setup {
+  margin-top: 0;
+}
 .onboarding-footer {
   padding: 14px 48px 18px;
   display: grid;

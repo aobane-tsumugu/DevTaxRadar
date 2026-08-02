@@ -41,6 +41,7 @@ import FolderAssignmentPage from './client/pages/FolderAssignmentPage'
 import {
   CLASSIFICATION_LABELS,
   categoryLabel,
+  EmptyState,
   GROUP_CLASS,
   GROUP_LABELS,
   incomeCategoryLabel,
@@ -452,6 +453,10 @@ function App() {
                 setPage('evidence')
               }}
               onOpenGuide={() => setPage('guide')}
+              onOpenOnboarding={() => {
+                setOnboardingStep(0)
+                setOnboarding(true)
+              }}
             />
           ) : page === 'evidence' ? (
             <EvidencePage
@@ -514,6 +519,7 @@ function SummaryPage({
   totals,
   onOpenEvidence,
   onOpenGuide,
+  onOpenOnboarding,
 }: {
   data: DashboardData
   planning: PlanningSnapshot
@@ -522,6 +528,7 @@ function SummaryPage({
   totals: Record<TaxGroup, number>
   onOpenEvidence: (allocation: Allocation) => void
   onOpenGuide: () => void
+  onOpenOnboarding: () => void
 }) {
   const annualTotal = totals.current + totals.future + totals.review
   const maxMonth = Math.max(
@@ -673,50 +680,59 @@ function SummaryPage({
               </span>
             }
           />
-          <div className="chart-legend" aria-hidden="true">
-            <span>
-              <i className="dot coral" />
-              今年の費用
-            </span>
-            <span>
-              <i className="dot indigo" />
-              将来残高
-            </span>
-            <span>
-              <i className="dot amber" />
-              要確認
-            </span>
-          </div>
-          <div
-            className="bar-chart"
-            role="img"
-            aria-label={
-              months.length > 0
-                ? `${months[0].label}から${months.at(-1)?.label}までの費用配賦積み上げグラフ`
-                : '費用配賦積み上げグラフ（対象の月がありません）'
-            }
-          >
-            <div className="axis-label top">{yen.format(maxMonth)}</div>
-            <div className="axis-label middle">{yen.format(Math.round(maxMonth / 2))}</div>
-            {months.map((month) => (
-              <div className="bar-column" key={month.label}>
-                <div className="bar-value">
-                  {yen.format(month.current + month.future + month.review)}
-                </div>
-                <div className="bar-track">
-                  {(['review', 'future', 'current'] as TaxGroup[]).map((group) => (
-                    <div
-                      key={group}
-                      className={`bar-part ${GROUP_CLASS[group]}`}
-                      style={{ height: `${(month[group] / maxMonth) * 100}%` }}
-                      title={`${GROUP_LABELS[group]} ${yen.format(month[group])}`}
-                    />
-                  ))}
-                </div>
-                <strong>{month.label}</strong>
+          {months.length === 0 ? (
+            <EmptyState
+              message="AIの利用履歴がまだ読み込まれていません。はじめの準備から履歴を走査すると、月ごとの費用がここに出ます。"
+              action={
+                <button className="primary-button" onClick={onOpenOnboarding}>
+                  はじめの準備を開く
+                </button>
+              }
+            />
+          ) : (
+            <>
+              <div className="chart-legend" aria-hidden="true">
+                <span>
+                  <i className="dot coral" />
+                  今年の費用
+                </span>
+                <span>
+                  <i className="dot indigo" />
+                  将来残高
+                </span>
+                <span>
+                  <i className="dot amber" />
+                  要確認
+                </span>
               </div>
-            ))}
-          </div>
+              <div
+                className="bar-chart"
+                role="img"
+                aria-label={`${months[0].label}から${months.at(-1)?.label}までの費用配賦積み上げグラフ`}
+              >
+                <div className="axis-label top">{yen.format(maxMonth)}</div>
+                <div className="axis-label middle">{yen.format(Math.round(maxMonth / 2))}</div>
+                {months.map((month) => (
+                  <div className="bar-column" key={month.label}>
+                    <div className="bar-value">
+                      {yen.format(month.current + month.future + month.review)}
+                    </div>
+                    <div className="bar-track">
+                      {(['review', 'future', 'current'] as TaxGroup[]).map((group) => (
+                        <div
+                          key={group}
+                          className={`bar-part ${GROUP_CLASS[group]}`}
+                          style={{ height: `${(month[group] / maxMonth) * 100}%` }}
+                          title={`${GROUP_LABELS[group]} ${yen.format(month[group])}`}
+                        />
+                      ))}
+                    </div>
+                    <strong>{month.label}</strong>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </section>
 
         <section className="panel guide-panel">
@@ -758,34 +774,38 @@ function SummaryPage({
           }
         />
         <div className="alert-list">
-          {data.boundaries.map((boundary) => {
-            const pct = Math.min((boundary.amount / boundary.threshold) * 100, 100)
-            const allocation = data.allocations.find((row) => row.asset === boundary.asset)
-            return (
-              <button
-                className="boundary-row"
-                key={boundary.asset}
-                onClick={() => allocation && onOpenEvidence(allocation)}
-              >
-                <div className="asset-monogram">{boundary.product.slice(-1)}</div>
-                <div className="boundary-name">
-                  <strong>{boundary.asset}</strong>
-                  <span>{boundary.kind}</span>
-                </div>
-                <div className="progress-wrap">
-                  <div className="progress-meta">
-                    <span>{yen.format(boundary.amount)}</span>
-                    <span>{boundary.thresholdLabel}</span>
+          {data.boundaries.length === 0 ? (
+            <EmptyState message="金額境界を確認できる資産がまだありません。フォルダの割当で制作物を決めて分類すると、10万円などの境界に近づいた資産がここに出ます。" />
+          ) : (
+            data.boundaries.map((boundary) => {
+              const pct = Math.min((boundary.amount / boundary.threshold) * 100, 100)
+              const allocation = data.allocations.find((row) => row.asset === boundary.asset)
+              return (
+                <button
+                  className="boundary-row"
+                  key={boundary.asset}
+                  onClick={() => allocation && onOpenEvidence(allocation)}
+                >
+                  <div className="asset-monogram">{boundary.product.slice(-1)}</div>
+                  <div className="boundary-name">
+                    <strong>{boundary.asset}</strong>
+                    <span>{boundary.kind}</span>
                   </div>
-                  <div className="progress">
-                    <i style={{ width: `${pct}%` }} />
+                  <div className="progress-wrap">
+                    <div className="progress-meta">
+                      <span>{yen.format(boundary.amount)}</span>
+                      <span>{boundary.thresholdLabel}</span>
+                    </div>
+                    <div className="progress">
+                      <i style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
-                </div>
-                <span className={`boundary-status ${boundary.tone}`}>{boundary.status}</span>
-                <span aria-hidden="true">›</span>
-              </button>
-            )
-          })}
+                  <span className={`boundary-status ${boundary.tone}`}>{boundary.status}</span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              )
+            })
+          )}
         </div>
       </section>
 
@@ -879,6 +899,13 @@ function EvidencePage({
               </tr>
             </thead>
             <tbody>
+              {allocations.length === 0 && (
+                <tr>
+                  <td colSpan={8}>
+                    <EmptyState message="表示できる配賦明細がありません。履歴を走査し、フォルダを制作物へ割り当てると、月ごとの内訳がここに出ます。" />
+                  </td>
+                </tr>
+              )}
               {allocations.map((row) => (
                 <tr key={row.id} className={active?.id === row.id ? 'selected-row' : ''}>
                   <td>
@@ -1165,6 +1192,9 @@ function PlanningEvidenceSections({
           title="設備・自宅費用の配賦チェック"
           subtitle="原額から私用・未配賦までを残し、二重計上を防ぎます"
         />
+        {ledger.contributions.length === 0 && (
+          <EmptyState message="設備・自宅費用・その他直接費がまだ入力されていません。はじめの準備の費用ステップで入力すると、当年の費用候補がここに出ます。" />
+        )}
         <dl>
           <div>
             <dt>原額</dt>

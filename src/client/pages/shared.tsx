@@ -104,3 +104,12 @@ export function PanelHeading({
     </div>
   )
 }
+
+export function EmptyState({ message, action }: { message: string; action?: ReactNode }) {
+  return (
+    <div className="empty-setup" role="status">
+      <p>{message}</p>
+      {action}
+    </div>
+  )
+}
