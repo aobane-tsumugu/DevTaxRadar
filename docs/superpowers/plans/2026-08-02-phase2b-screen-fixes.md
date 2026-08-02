@@ -1080,7 +1080,7 @@ git commit -m "feat: require an explicit AI charge and let users enter contract 
 
 `.modal-actions button:disabled`（1925行）はそのまま残す。
 
-メディアクエリ（2229-2240行）の `.onboarding-body` と `.modal-actions` の上書きを差し替える。`position: fixed` は不要になった。
+メディアクエリの `.onboarding-body` と `.modal-actions` の上書きを差し替える。`position: fixed` は不要になった。
 
 ```css
   .onboarding-body {
@@ -1093,6 +1093,27 @@ git commit -m "feat: require an explicit AI charge and let users enter contract 
     gap: 8px;
   }
 ```
+
+`@media (max-width: 760px)` の `.onboarding-modal` にも手を入れる。ここは1カラムになり、`.onboarding-side` と `.onboarding-main` が2行に積まれる。デスクトップ側と同じく行の分割を明示し、スクロールを `.onboarding-body` だけに閉じ込める。
+
+```css
+  .onboarding-modal {
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    max-height: 100%;
+    grid-template-columns: 1fr;
+    /* State the two-row split explicitly, as the desktop layout does, and keep
+       overflow off the modal itself. */
+    grid-template-rows: auto minmax(0, 1fr);
+    border-radius: 0;
+    overflow: hidden;
+  }
+```
+
+`overflow-y: auto` を `overflow: hidden` へ変える。モーダル自身がスクロールできると、内容が画面高を超えたときにフッターごと流れてしまう。
+
+補足：行を明示しない状態でも、`.onboarding-main` と `.onboarding-body` に `min-height: 0` があるためフッターは流れない（420px 相当で実測して確認済み）。この変更は意図の明示と、モーダル自身がスクロールしうる経路を塞ぐための予防である。
 
 - [ ] **Step 3: `notice` の重複がないことを確認する**
 
