@@ -682,7 +682,14 @@ function SummaryPage({
           />
           {months.length === 0 ? (
             <EmptyState
-              message="AIの利用履歴がまだ読み込まれていません。はじめの準備から履歴を走査すると、月ごとの費用がここに出ます。"
+              // Sessions exist but no month survived: the contract period, not a
+              // missing scan, is why this is empty. Telling the user to scan
+              // again would send them somewhere that cannot fix it.
+              message={
+                data.meta.sessionCount > 0
+                  ? '読み込んだ利用履歴が、入力された契約期間と重なっていません。費用ステップで契約の開始日・終了日を確認してください。'
+                  : 'AIの利用履歴がまだ読み込まれていません。はじめの準備から履歴を走査すると、月ごとの費用がここに出ます。'
+              }
               action={
                 <button className="primary-button" onClick={onOpenOnboarding}>
                   はじめの準備を開く
@@ -1192,8 +1199,13 @@ function PlanningEvidenceSections({
           title="設備・自宅費用の配賦チェック"
           subtitle="原額から私用・未配賦までを残し、二重計上を防ぎます"
         />
+        {/* buildPlanningLedger filters homeCosts and directCosts by taxYear, so
+            an entry dated outside it is not "missing" -- naming the year keeps
+            this from reading as data loss. */}
         {ledger.contributions.length === 0 && (
-          <EmptyState message="設備・自宅費用・その他直接費がまだ入力されていません。はじめの準備の費用ステップで入力すると、当年の費用候補がここに出ます。" />
+          <EmptyState
+            message={`${planning.profile.taxYear}年の設備・自宅費用・その他直接費がまだ入力されていません。はじめの準備の費用ステップで入力すると、この年の費用候補がここに出ます。対象年の外の入力はここには出ません。`}
+          />
         )}
         <dl>
           <div>

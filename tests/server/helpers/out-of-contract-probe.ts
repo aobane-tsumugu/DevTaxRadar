@@ -59,6 +59,11 @@ saveConfiguration({
 const dashboard = buildDashboard()
 process.stdout.write(
   JSON.stringify({
+    guidance: dashboard.guidance.map((item) => ({
+      title: item.title,
+      severity: item.severity,
+    })),
+    monthCount: dashboard.months.length,
     allocations: dashboard.allocations.map((row) => ({
       id: row.id,
       month: row.month,

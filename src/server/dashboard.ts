@@ -363,6 +363,17 @@ export function buildDashboard(): DashboardData {
       return contractCoversMonth(contracts[provider], month)
     }),
   )
+  // Count from ALL observed sessions, not from byProviderMonth: that map is
+  // already restricted to in-contract sessions, so a month the contract removed
+  // entirely has already vanished from it and would never be counted.
+  // Without this the user sees months quietly disappear from the chart, or an
+  // entirely empty chart, with nothing naming the contract period as the reason.
+  const observedMonthKeys = new Set(
+    assigned.map((session) => `${session.provider}:${session.month}`),
+  )
+  const monthsExcludedByContract = [
+    ...new Set([...observedMonthKeys, ...monthlyChargeByKey.keys()]),
+  ].filter((key) => !providerMonthKeys.has(key)).length
 
   const inputs = [...providerMonthKeys].sort().map((key) => {
     const [provider, month] = key.split(':') as [UsageProvider, string]
@@ -588,6 +599,23 @@ export function buildDashboard(): DashboardData {
               severity: 'warning' as const,
             },
           ]),
+      ...(contractsConfigured && monthsExcludedByContract > 0
+        ? [
+            providerMonthKeys.size === 0
+              ? {
+                  title: '契約期間が利用履歴と重なっていません',
+                  description:
+                    '入力された契約期間の中に、利用履歴のある月が1つもありません。そのため配賦する月がなく、月額はどこにも計上されていません。はじめの準備の費用ステップで、契約の開始日・終了日を確認してください。',
+                  severity: 'warning' as const,
+                }
+              : {
+                  title: `契約期間外の${monthsExcludedByContract}か月を配賦から除外しています`,
+                  description:
+                    '入力された契約期間の外にある月は、月額の配賦対象から外しています。除外された月の利用は、配賦明細に「契約期間外」として金額0で残しています。',
+                  severity: 'ok' as const,
+                },
+          ]
+        : []),
       {
         title: `${sessions.length - classifiedSessions}件の未分類利用（セッション単位）`,
         description: 'オンボーディングでプロダクトと作業目的を確認してください',

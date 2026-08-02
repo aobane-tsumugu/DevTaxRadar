@@ -567,7 +567,7 @@ function Onboarding({
                 {busy && (
                   <p className="scan-progress" role="status" aria-live="polite">
                     {scanProgress?.running
-                      ? `${scanProgress.provider === 'codex' ? 'Codex' : 'Claude Code'}の履歴を走査しています。読み込んだファイル数：${scanProgress.filesScanned}`
+                      ? `${scanProgress.provider === 'codex' ? 'Codex' : 'Claude Code'}の履歴を走査しています。走査したファイル数：${scanProgress.filesScanned}`
                       : '履歴を確認しています。'}
                   </p>
                 )}

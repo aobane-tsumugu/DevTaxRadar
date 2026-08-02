@@ -139,7 +139,7 @@ npm run deploy:cloudflare
 - 原額＝業務利用額＋私用、業務利用額＝制作物配賦＋未配賦を検査する金額保存則
 - 税理士へ相談するときに使える、ローカル参照を除いたMarkdown出力
 - 月額、未取得利用率、プロダクト割当のSQLite保存
-- 10万円・20万円と青色申告者向け少額特例の条件ガイダンス
+- 10万円・20万円の金額境界の表示（青色申告者向け少額特例は、要件を別途確認する旨の注記のみ）
 - loopback限定、Origin検査、CSRF token、64 KiB本文上限
 - 合成fixture、ユニット・統合テスト、公開物のprivacy check
 - Pull Request／`main` push時のGitHub Actions CI
