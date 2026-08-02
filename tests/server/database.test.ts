@@ -346,6 +346,221 @@ describe('session storage', () => {
     })
   })
 
+  it('利用者の実データに近い旧スキーマ全体を1回の起動で移行し、provider_settingsは既存の月額を保ったまま契約列を得る', () => {
+    // このリポジトリのユーザーが実際に持つDBは、session_referencesが存在せず、
+    // usage_eventsがメッセージ単位（started_atがない）で、provider_settingsが
+    // provider/monthly_fee_jpyしか持たない、v0.1.0以前のスキーマのまま45,529行の
+    // 実データを抱えている。ここではその状態を、commit 061c534（0e9abb2の直前、
+    // セッション単位への作り直し前の最後のコミット）のsrc/server/database.tsから
+    // 再構成する。個々の移行ガードは他のテストで単独に確認済みだが、実際の起動では
+    // これらが同じ1回のgetDatabase()呼び出しの中で連続して走るため、その連鎖を
+    // 1つのテストで確認する。
+    const databasePath = join(sessionDirectory, 'devtax-radar.db')
+    const raw = new DatabaseSync(databasePath)
+    raw.exec(`
+      CREATE TABLE scans (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        files_seen INTEGER NOT NULL DEFAULT 0,
+        events_written INTEGER NOT NULL DEFAULT 0,
+        malformed_lines INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE usage_events (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        month TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        project_label TEXT,
+        model TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        observed_at TEXT,
+        schema_version TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        UNIQUE(provider, session_key, month, project_key, observed_at)
+      ) STRICT;
+      CREATE TABLE provider_settings (
+        provider TEXT PRIMARY KEY,
+        monthly_fee_jpy INTEGER NOT NULL DEFAULT 0
+      ) STRICT;
+      CREATE TABLE project_mappings (
+        project_key TEXT PRIMARY KEY,
+        product_name TEXT NOT NULL,
+        asset_name TEXT NOT NULL,
+        classification TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE planning_tax_units (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        unit_type TEXT NOT NULL,
+        usage_mode TEXT NOT NULL,
+        revenue_model TEXT NOT NULL,
+        lifecycle_status TEXT NOT NULL,
+        journey_mode TEXT NOT NULL DEFAULT 'early',
+        monetization_status TEXT NOT NULL DEFAULT 'planned',
+        completion_criteria TEXT,
+        predecessor_id TEXT,
+        same_as_external_version TEXT,
+        notes TEXT
+      ) STRICT;
+      CREATE TABLE planning_project_rules (
+        id TEXT PRIMARY KEY,
+        project_key TEXT NOT NULL,
+        provider TEXT,
+        effective_from TEXT NOT NULL,
+        effective_to TEXT,
+        tax_unit_id TEXT NOT NULL REFERENCES planning_tax_units(id),
+        classification TEXT NOT NULL,
+        reason TEXT
+      ) STRICT;
+    `)
+    raw
+      .prepare(
+        `
+      INSERT INTO scans(provider, started_at, completed_at, files_seen, events_written, malformed_lines, status)
+      VALUES ('claude', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:05.000Z', 12, 12, 0, 'complete')
+    `,
+      )
+      .run()
+    raw
+      .prepare(`INSERT INTO provider_settings(provider, monthly_fee_jpy) VALUES ('claude', 30000)`)
+      .run()
+    raw
+      .prepare(`INSERT INTO provider_settings(provider, monthly_fee_jpy) VALUES ('codex', 20000)`)
+      .run()
+    raw
+      .prepare(
+        `
+      INSERT INTO usage_events(
+        provider, month, session_key, project_key, project_label, model,
+        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+        observed_at, schema_version, confidence
+      ) VALUES ('claude', '2026-04', 'legacy_session_1', 'legacy_project_1', '実データ制作物', 'claude-x',
+        1000, 200, 0, 0, '2026-04-05T00:00:00.000Z', 'legacy-v1', 'medium')
+    `,
+      )
+      .run()
+    raw
+      .prepare(
+        `
+      INSERT INTO usage_events(
+        provider, month, session_key, project_key, project_label, model,
+        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+        observed_at, schema_version, confidence
+      ) VALUES ('codex', '2026-04', 'legacy_session_2', 'legacy_project_2', '旧プロダクト', 'codex-x',
+        500, 90, 0, 0, '2026-04-06T00:00:00.000Z', 'legacy-v1', 'medium')
+    `,
+      )
+      .run()
+    raw
+      .prepare(
+        `
+      INSERT INTO planning_tax_units(id, name, unit_type, usage_mode, revenue_model, lifecycle_status)
+      VALUES ('unit-real', '実データ制作物', 'new-software', 'internal', 'undecided', 'idea')
+    `,
+      )
+      .run()
+    raw
+      .prepare(
+        `
+      INSERT INTO planning_project_rules(id, project_key, effective_from, tax_unit_id, classification)
+      VALUES ('rule-real', 'legacy_project_1', '2026-01-01', 'unit-real', 'new-development')
+    `,
+      )
+      .run()
+    raw
+      .prepare(
+        `
+      INSERT INTO project_mappings(project_key, product_name, asset_name, classification)
+      VALUES ('legacy_project_2', '旧プロダクト', '旧資産', 'maintenance')
+    `,
+      )
+      .run()
+    raw.close()
+
+    // dbは既にimport済み（beforeEach）。getDatabase()を初めて呼ぶことで、
+    // 上で作った旧DBファイルに対して起動時の移行ロジックがすべて連続して走る。
+    expect(() => db.getDatabase()).not.toThrow()
+    const started = db.getDatabase()
+
+    // scans: time_zone列が追加され、既存の1行は残る
+    const scanColumns = (
+      started.prepare(`PRAGMA table_info(scans)`).all() as Array<{ name: string }>
+    ).map((column) => column.name)
+    expect(scanColumns).toContain('time_zone')
+    expect((started.prepare(`SELECT COUNT(*) AS n FROM scans`).get() as { n: number }).n).toBe(1)
+
+    // provider_settings: 契約列（開始日・終了日）が追加され、既存のmonthly_fee_jpyは保持される
+    const providerRows = started
+      .prepare(
+        `SELECT provider, monthly_fee_jpy AS amount,
+                contract_started_on AS startedOn, contract_ended_on AS endedOn
+         FROM provider_settings ORDER BY provider`,
+      )
+      .all() as Array<{
+      provider: string
+      amount: number
+      startedOn: string | null
+      endedOn: string | null
+    }>
+    expect(providerRows).toEqual([
+      { provider: 'claude', amount: 30000, startedOn: null, endedOn: null },
+      { provider: 'codex', amount: 20000, startedOn: null, endedOn: null },
+    ])
+
+    // usage_events: メッセージ単位の旧行は作り直しの対象になり、セッション単位の新スキーマになる
+    const usageColumns = (
+      started.prepare(`PRAGMA table_info(usage_events)`).all() as Array<{ name: string }>
+    ).map((column) => column.name)
+    expect(usageColumns).toContain('started_at')
+    expect(usageColumns).toContain('ended_at')
+    expect(usageColumns).toContain('message_count')
+
+    // planning_tax_units: 親テーブルの行は失われない
+    expect(
+      (
+        started
+          .prepare(`SELECT COUNT(*) AS n FROM planning_tax_units WHERE id = 'unit-real'`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(1)
+
+    // planning_project_rules: tax_unit_idがNULL許容の新スキーマへ作り直される。
+    // 子テーブルのDROP+再作成なので、旧NOT NULL時代の行（rule-real）自体は失われる。
+    // データが失われないのは親のplanning_tax_unitsだけ、というのが実装コメントの通りの挙動。
+    const ruleColumns = started
+      .prepare(`PRAGMA table_info(planning_project_rules)`)
+      .all() as Array<{ name: string; notnull: number }>
+    expect(ruleColumns.find((column) => column.name === 'tax_unit_id')?.notnull).toBe(0)
+
+    // project_mappings: planning_project_rulesへ移行され、テーブル自体は削除される
+    const migratedFromMappings = started
+      .prepare(
+        `SELECT tax_unit_id AS taxUnitId, classification, reason
+         FROM planning_project_rules WHERE project_key = 'legacy_project_2'`,
+      )
+      .get() as
+      { taxUnitId: string | null; classification: string; reason: string | null } | undefined
+    expect(migratedFromMappings).toEqual({
+      taxUnitId: null,
+      classification: 'maintenance',
+      reason: '旧設定から移行',
+    })
+    expect(
+      started
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_mappings'`,
+        )
+        .get(),
+    ).toBeUndefined()
+  })
+
   it('再スキャンで消えたセッションの参照が残らない', () => {
     db.replaceProviderSessions(
       'claude',

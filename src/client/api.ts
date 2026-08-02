@@ -115,8 +115,8 @@ export function getDiagnosis(): Promise<Diagnosis> {
   return requestJson('/api/diagnosis')
 }
 
-export function getLedger(year: number): Promise<PlanningLedger> {
-  return requestJson(`/api/ledger?year=${encodeURIComponent(String(year))}`)
+export function getLedger(): Promise<PlanningLedger> {
+  return requestJson('/api/ledger')
 }
 
 export async function getPlanningExport(format: 'markdown' | 'csv' = 'markdown'): Promise<Blob> {

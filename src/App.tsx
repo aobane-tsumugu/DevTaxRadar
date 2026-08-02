@@ -88,7 +88,7 @@ function App() {
         setPlanningState(nextPlanning)
         setDiagnosis(nextDiagnosis)
         setFolders(nextFolders.folders)
-        setLedger(await getLedger(nextPlanning.profile.taxYear))
+        setLedger(await getLedger())
       })
       .catch(() => {
         // The standalone Vite preview intentionally falls back to demo data.
@@ -139,7 +139,7 @@ function App() {
     await savePlanning(activeRuntime.csrfToken, nextPlanning)
     const [nextDiagnosis, nextLedger, nextDashboard] = await Promise.all([
       getDiagnosis(),
-      getLedger(nextPlanning.profile.taxYear),
+      getLedger(),
       getDashboardData(),
     ])
     setPlanningState(nextPlanning)

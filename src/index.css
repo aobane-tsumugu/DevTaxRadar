@@ -1584,14 +1584,12 @@ th.number {
   line-height: 1.65;
 }
 .detected-list,
-.mapping-list,
 .invoice-box {
   margin-top: 22px;
   display: grid;
   gap: 9px;
 }
 .detected-list > label,
-.mapping-row,
 .invoice-box > div {
   padding: 13px;
   display: flex;
@@ -1612,17 +1610,13 @@ th.number {
   cursor: not-allowed;
 }
 .detected-list strong,
-.detected-list small,
-.mapping-list strong,
-.mapping-list small {
+.detected-list small {
   display: block;
 }
-.detected-list strong,
-.mapping-list strong {
+.detected-list strong {
   font-size: 16px;
 }
-.detected-list small,
-.mapping-list small {
+.detected-list small {
   margin-top: 2px;
   color: var(--subtle);
   font:
@@ -1682,11 +1676,6 @@ th.number {
   color: var(--indigo);
   font-size: 24px;
 }
-.mapping-row > span:nth-child(2) {
-  min-width: 170px;
-  max-width: 220px;
-  overflow-wrap: anywhere;
-}
 .mapping-fields {
   margin-left: auto;
   display: grid;
@@ -1738,9 +1727,6 @@ th.number {
 }
 .remaining-projects[open] summary {
   margin-bottom: 8px;
-}
-.remaining-projects .mapping-row {
-  margin-top: 7px;
 }
 .add-link {
   margin-top: 11px;
@@ -1977,7 +1963,6 @@ th.number {
 .empty-setup p + button {
   margin-top: 14px;
 }
-.empty-setup td,
 td > .empty-setup {
   margin-top: 0;
 }
@@ -2312,12 +2297,6 @@ td > .empty-setup {
   .modal-actions {
     gap: 8px;
   }
-  .mapping-row {
-    flex-wrap: wrap;
-  }
-  .mapping-row > span:nth-child(2) {
-    max-width: calc(100% - 52px);
-  }
   .mapping-fields {
     flex-basis: 100%;
     margin: 11px 0 0;
@@ -2546,16 +2525,14 @@ td > .empty-setup {
   background: #f7f8fb;
 }
 .event-action summary,
-.advanced-fields summary,
-.history-rules summary {
+.advanced-fields summary {
   color: var(--indigo-dark);
   cursor: pointer;
   font-size: 16px;
   font-weight: 750;
 }
 .event-action p,
-.advanced-fields p,
-.history-rules > p {
+.advanced-fields p {
   margin: 9px 0 0;
   color: var(--muted);
   font-size: 16px;
@@ -2746,8 +2723,6 @@ td > .empty-setup {
 .tax-unit-editor input,
 .tax-unit-editor select,
 .tax-unit-editor textarea,
-.rule-fields input,
-.rule-fields select,
 .cost-edit-row input,
 .cost-edit-row select {
   width: 100%;
@@ -2760,8 +2735,7 @@ td > .empty-setup {
   background: #fff;
   font-size: 16px;
 }
-.advanced-fields,
-.history-rules {
+.advanced-fields {
   margin-top: 18px;
   padding: 14px;
   border: 1px solid var(--line);
@@ -3047,27 +3021,6 @@ td > .empty-setup {
 .add-record {
   margin-top: 12px;
 }
-.history-rules .mapping-list {
-  margin-top: 13px;
-}
-.rule-fields {
-  margin: -2px 10px 12px 52px;
-  padding: 10px;
-  display: grid;
-  grid-template-columns: 1fr 210px;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-top: 0;
-  border-radius: 0 0 9px 9px;
-  background: #f7f8fb;
-}
-.rule-fields label > span {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--muted);
-  font-size: 16px;
-  font-weight: 700;
-}
 .cost-editor-section {
   margin-top: 20px;
   padding-top: 18px;
@@ -3232,7 +3185,6 @@ td > .empty-setup {
   .compact-record-list small {
     text-align: left;
   }
-  .rule-fields,
   .cost-edit-row,
   .cost-edit-row.home {
     margin-left: 0;
