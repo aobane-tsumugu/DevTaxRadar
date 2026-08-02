@@ -79,6 +79,20 @@ export function saveConfiguration(
   })
 }
 
+export function saveRetention(
+  csrfToken: string,
+  days: number,
+): Promise<{ saved: true; days: number; previousDays?: number }> {
+  return requestJson('/api/retention', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevTax-CSRF': csrfToken,
+    },
+    body: JSON.stringify({ days }),
+  })
+}
+
 export function getPlanning(): Promise<PlanningSnapshot> {
   return requestJson('/api/planning')
 }

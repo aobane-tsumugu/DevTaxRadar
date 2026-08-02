@@ -17,7 +17,7 @@ import type {
   TaxUnitRecord,
 } from '../../planning/types'
 import { diagnosePlanning } from '../../core/diagnosis'
-import { getScanProgress } from '../api'
+import { getScanProgress, saveRetention } from '../api'
 import {
   chargeConfirmationKey,
   invertedContractMessage,
@@ -82,6 +82,8 @@ function Onboarding({
     kind: 'success' | 'error' | 'info'
     message: string
   } | null>(null)
+  const [retentionDays, setRetentionDays] = useState<number | undefined>(undefined)
+  const [retentionBusy, setRetentionBusy] = useState(false)
   const [planningDraft, setPlanningDraft] = useState<PlanningSnapshot>(planning)
   const [selectedHistoryProjects, setSelectedHistoryProjects] = useState<Record<string, boolean>>(
     {},
@@ -160,6 +162,11 @@ function Onboarding({
       }),
     )
   }, [configuration, data.months, planning.profile.taxYear])
+
+  useEffect(() => {
+    const autoDelete = runtime?.retention.claude.autoDelete
+    if (autoDelete?.kind === 'configured') setRetentionDays(autoDelete.days)
+  }, [runtime])
 
   useEffect(() => {
     const fallbackUnit: TaxUnitRecord = {
@@ -334,6 +341,26 @@ function Onboarding({
           : [...current.lifecycleEvents, next],
       }
     })
+  }
+
+  async function applyRetention() {
+    if (!runtime || retentionDays === undefined) return
+    setRetentionBusy(true)
+    setNotice(null)
+    try {
+      const result = await saveRetention(runtime.csrfToken, retentionDays)
+      setNotice({
+        kind: 'success',
+        message: `Claude Codeの履歴の保持期間を${result.days}日にしました。変更前の設定は同じフォルダへバックアップしています。`,
+      })
+    } catch (error) {
+      setNotice({
+        kind: 'error',
+        message: `保持期間を変更できませんでした。${error instanceof Error ? error.message : ''}`,
+      })
+    } finally {
+      setRetentionBusy(false)
+    }
   }
 
   async function advance() {
@@ -564,6 +591,125 @@ function Onboarding({
                     )
                   })}
                 </div>
+                {runtime && (
+                  <details className="retention-box">
+                    <summary>
+                      履歴がいつ消えるかを確認する
+                      {runtime.retention.claude.alreadyLosing && (
+                        <b className="retention-alert">すでに一部が失われています</b>
+                      )}
+                    </summary>
+                    <div className="retention-body">
+                      <p>
+                        Claude Codeは、設定した日数を過ぎた履歴を削除します。削除された履歴はDevTax
+                        Radarからも復元できません。ここでの配賦は、残っている履歴だけを根拠にしています。
+                      </p>
+                      <dl className="retention-facts">
+                        <div>
+                          <dt>いまの設定</dt>
+                          <dd>
+                            {runtime.retention.claude.autoDelete.kind === 'configured'
+                              ? `${runtime.retention.claude.autoDelete.days}日${
+                                  runtime.retention.claude.autoDelete.source === 'default'
+                                    ? '（未設定のため、Claude Codeの既定値）'
+                                    : ''
+                                }`
+                              : runtime.retention.claude.autoDelete.kind === 'unreadable'
+                                ? runtime.retention.claude.autoDelete.reason
+                                : '自動削除の設定はありません'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>残っている最も古い履歴</dt>
+                          <dd>
+                            {runtime.retention.claude.oldestModifiedOn ?? '履歴が見つかりません'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>次に失われる日</dt>
+                          <dd>
+                            {runtime.retention.claude.alreadyLosing
+                              ? `${runtime.retention.claude.nextLossOn}を過ぎており、これより古い履歴はすでにありません`
+                              : runtime.retention.claude.nextLossOn
+                                ? `${runtime.retention.claude.nextLossOn}（あと${runtime.retention.claude.daysUntilNextLoss}日）`
+                                : '判定できません'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Codex</dt>
+                          <dd>
+                            自動削除の設定は見つかりません。最も古い履歴は
+                            {runtime.retention.codex.oldestModifiedOn ?? '見つかりません'}です
+                          </dd>
+                        </div>
+                      </dl>
+                      <p className="retention-guidance">
+                        何日にするかは、ご自身で決めてください。判断の材料は次のとおりです。
+                      </p>
+                      <ul className="retention-guidance-list">
+                        <li>
+                          帳簿書類の法定保存期間は原則7年（欠損金の繰越がある年は10年）です。ただし
+                          これは帳簿書類についての定めで、AIの利用履歴そのものに保存義務があるわけ
+                          ではありません
+                        </li>
+                        <li>
+                          取り込んだあとも元の履歴には価値があります。DevTax
+                          RadarのデータベースはこのPCの利用者が書き換えられるため、自動生成された
+                          元履歴のほうが記録としての性質が強いです
+                        </li>
+                        <li>
+                          長く残すほどディスクを使います。利用状況によっては2桁GBに達することがあります
+                        </li>
+                      </ul>
+                      <p className="retention-caveat">変更する前に、次の点をご確認ください。</p>
+                      <ul className="retention-guidance-list">
+                        <li>
+                          「次に失われる日」は、残っている最も古い履歴の更新日時と保持日数から
+                          見積もった目安です。Claude Codeが実際に削除する基準は公開されていません
+                        </li>
+                        <li>
+                          保存する際はファイルの内容を書き直すため、もとの行の並びやインデントは
+                          保たれません。変更するのは`cleanupPeriodDays`だけで、ほかの設定は変更しません
+                        </li>
+                        <li>
+                          Claude Code自身もこのファイルを書き換えます。読み取りから保存までの間に
+                          別の変更が加わっていた場合、その変更は上書きされることがあります
+                        </li>
+                        <li>
+                          変更前の内容は同じフォルダへバックアップとして残ります。バックアップは
+                          自動では削除されないため、変更するたびに増えていきます
+                        </li>
+                      </ul>
+                      <div className="retention-apply">
+                        <label>
+                          <span>保持する日数</span>
+                          <input
+                            aria-label="Claude Codeの履歴を保持する日数"
+                            type="number"
+                            min="1"
+                            max="36500"
+                            value={retentionDays ?? ''}
+                            onChange={(event) =>
+                              setRetentionDays(
+                                Number.isNaN(event.target.valueAsNumber)
+                                  ? undefined
+                                  : event.target.valueAsNumber,
+                              )
+                            }
+                          />
+                          <span>日</span>
+                        </label>
+                        <button
+                          className="secondary-button"
+                          disabled={retentionBusy || retentionDays === undefined}
+                          onClick={applyRetention}
+                        >
+                          {retentionBusy ? '変更中…' : 'この日数へ変更する'}
+                        </button>
+                      </div>
+                    </div>
+                  </details>
+                )}
                 {busy && (
                   <p className="scan-progress" role="status" aria-live="polite">
                     {scanProgress?.running

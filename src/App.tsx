@@ -457,6 +457,7 @@ function App() {
                 setOnboardingStep(0)
                 setOnboarding(true)
               }}
+              retention={runtime?.retention ?? null}
             />
           ) : page === 'evidence' ? (
             <EvidencePage
@@ -520,6 +521,7 @@ function SummaryPage({
   onOpenEvidence,
   onOpenGuide,
   onOpenOnboarding,
+  retention,
 }: {
   data: DashboardData
   planning: PlanningSnapshot
@@ -529,6 +531,7 @@ function SummaryPage({
   onOpenEvidence: (allocation: Allocation) => void
   onOpenGuide: () => void
   onOpenOnboarding: () => void
+  retention: RuntimeData['retention'] | null
 }) {
   const annualTotal = totals.current + totals.future + totals.review
   const maxMonth = Math.max(
@@ -538,6 +541,24 @@ function SummaryPage({
 
   return (
     <>
+      {retention &&
+        retention.claude.autoDelete.kind === 'configured' &&
+        (retention.claude.alreadyLosing ||
+          (retention.claude.daysUntilNextLoss ?? Infinity) <= 30) && (
+          <div className="retention-banner" role="status">
+            <strong>
+              {retention.claude.alreadyLosing
+                ? 'Claude Codeの古い履歴は、すでに一部が削除されています'
+                : `Claude Codeの最も古い履歴が、あと${retention.claude.daysUntilNextLoss}日で削除されます`}
+            </strong>
+            <span>
+              削除された履歴は復元できません。保持する日数は「はじめの準備」の最初のステップで変更できます。
+            </span>
+            <button className="text-button" onClick={onOpenOnboarding}>
+              はじめの準備を開く →
+            </button>
+          </div>
+        )}
       <section className="preparation-strip" aria-label="記録の準備状況">
         <div>
           <span>準備できた項目</span>
