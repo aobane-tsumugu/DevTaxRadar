@@ -140,6 +140,10 @@ export default function FolderAssignmentPage({
     setSelected({})
   }
 
+  async function deletePeriod(assignment: FolderAssignment) {
+    await onSaveRules(planning.projectRules.filter((rule) => rule.id !== assignment.ruleId))
+  }
+
   async function splitPeriod(folder: FolderSummary) {
     const last = folder.assignments.at(-1)
     const from = last?.effectiveTo
@@ -290,7 +294,12 @@ export default function FolderAssignmentPage({
                   <button
                     type="button"
                     className="text-button"
-                    disabled={busy}
+                    disabled={busy || folder.assignments.length === 0}
+                    title={
+                      folder.assignments.length === 0
+                        ? '先に制作物か作業内容を割り当ててください'
+                        : undefined
+                    }
                     onClick={() => splitPeriod(folder)}
                   >
                     期間を分ける
@@ -344,6 +353,14 @@ export default function FolderAssignmentPage({
                           </select>
                         </label>
                         <small>{assignment.sessionCount}セッション</small>
+                        <button
+                          type="button"
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() => deletePeriod(assignment)}
+                        >
+                          この期間を削除
+                        </button>
                       </li>
                     ))}
                   </ul>
