@@ -56,7 +56,9 @@ function Onboarding({
   onStep: (step: number) => void
   onScan: (providers: ProviderKey[]) => Promise<ScanResult>
   onSave: (configuration: LocalConfiguration) => Promise<void>
-  onSaveRetention: (days: number) => Promise<{ days: number; previousDays?: number }>
+  onSaveRetention: (
+    days: number,
+  ) => Promise<{ days: number; previousDays?: number; backupFileName?: string }>
   onSavePlanning: (planning: PlanningSnapshot) => Promise<void>
   onClose: () => void
   onSaved?: () => void
@@ -106,6 +108,28 @@ function Onboarding({
       ? `${displayMonth(observedHistoryMonths[0])}～${displayMonth(observedHistoryMonths.at(-1))}`
       : '利用時期を確認中'
   const draftDiagnosis = useMemo(() => diagnosePlanning(planningDraft), [planningDraft])
+  const scanNotes = useMemo(() => {
+    if (!lastScanResult) return []
+    const notes: string[] = []
+    for (const [provider, summary] of Object.entries(lastScanResult.providers)) {
+      const label = provider === 'codex' ? 'Codex' : 'Claude Code'
+      const diagnostics = summary?.diagnostics as
+        { nonUtcTimestamps?: number; changedSinceLastScan?: number } | undefined
+      const nonUtc = Number(diagnostics?.nonUtcTimestamps ?? 0)
+      if (nonUtc > 0) {
+        notes.push(
+          `${label}の履歴に、UTC表記でない日時が${nonUtc}件ありました。月の帰属がずれる場合があります。`,
+        )
+      }
+      const changed = Number(diagnostics?.changedSinceLastScan ?? 0)
+      if (changed > 0) {
+        notes.push(
+          `${label}の履歴のうち${changed}件が、前回の取り込みから内容が変わっていました。同じセッションを続ければ変わるのが普通です。身に覚えのない変化がないかだけ確かめてください。`,
+        )
+      }
+    }
+    return notes
+  }, [lastScanResult])
 
   useEffect(() => {
     onboardingBodyRef.current?.scrollTo({ top: 0 })
@@ -364,7 +388,9 @@ function Onboarding({
       const result = await onSaveRetention(retentionDays)
       setNotice({
         kind: 'success',
-        message: `Claude Codeの履歴の保持期間を${result.days}日にしました。変更前の設定は同じフォルダへバックアップしています。`,
+        message: result.backupFileName
+          ? `Claude Codeの履歴の保持期間を${result.days}日にしました。変更前の設定は、同じ場所に ${result.backupFileName} という名前で控えてあります。`
+          : `Claude Codeの履歴の保持期間を${result.days}日にしました。設定ファイルがまだ無かったため、新しく作成しました。`,
       })
     } catch (error) {
       setNotice({
@@ -605,12 +631,16 @@ function Onboarding({
                     )
                   })}
                 </div>
-                {runtime && (
+                {/* Gated on detection: without it, a Codex-only user would be
+                    shown a Claude Code retention setting and one click would
+                    create ~/.claude and a settings file for a tool they do not
+                    have installed. */}
+                {runtime?.retention.claude.detected && (
                   <details className="retention-box">
                     <summary>
                       履歴がいつ消えるかを確認する
                       {runtime.retention.claude.alreadyLosing && (
-                        <b className="retention-alert">すでに一部が失われています</b>
+                        <b className="retention-alert">すでに失われた可能性があります</b>
                       )}
                     </summary>
                     <div className="retention-body">
@@ -643,9 +673,9 @@ function Onboarding({
                           <dt>次に失われる日</dt>
                           <dd>
                             {runtime.retention.claude.alreadyLosing
-                              ? `${runtime.retention.claude.nextLossOn}を過ぎており、これより古い履歴はすでにありません`
+                              ? `${runtime.retention.claude.nextLossOn}を過ぎています。Claude Codeの削除は起動時に行われるため、しばらく起動していなければまだ残っていることもあります`
                               : runtime.retention.claude.nextLossOn
-                                ? `${runtime.retention.claude.nextLossOn}（あと${runtime.retention.claude.daysUntilNextLoss}日）`
+                                ? `${runtime.retention.claude.nextLossOn}ごろ（あと${runtime.retention.claude.daysUntilNextLoss}日の見込み）`
                                 : '判定できません'}
                           </dd>
                         </div>
@@ -653,7 +683,7 @@ function Onboarding({
                           <dt>Codex</dt>
                           <dd>
                             自動削除の設定は見つかりません。最も古い履歴は
-                            {runtime.retention.codex.oldestModifiedOn ?? '見つかりません'}です
+                            {runtime.retention.codex.oldestModifiedOn ?? '見つかりません'}
                           </dd>
                         </div>
                       </dl>
@@ -732,19 +762,11 @@ function Onboarding({
                       : '履歴を確認しています。'}
                   </p>
                 )}
-                {!busy && lastScanResult && (
+                {!busy && lastScanResult && scanNotes.length > 0 && (
                   <p className="scan-note" role="status">
-                    {Object.entries(lastScanResult.providers).map(([provider, summary]) => {
-                      const nonUtc = Number(summary?.diagnostics?.nonUtcTimestamps ?? 0)
-                      if (nonUtc === 0) return null
-                      return (
-                        <span key={provider}>
-                          {provider === 'codex' ? 'Codex' : 'Claude Code'}
-                          の履歴に、UTC表記でない日時が{nonUtc}
-                          件ありました。月の帰属がずれる場合があります。
-                        </span>
-                      )
-                    })}
+                    {scanNotes.map((note) => (
+                      <span key={note}>{note}</span>
+                    ))}
                   </p>
                 )}
                 <div className="privacy-callout">

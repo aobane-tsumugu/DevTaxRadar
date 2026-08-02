@@ -701,28 +701,55 @@ describe('session storage', () => {
     expect(result.changedReferences).toEqual([])
   })
 
-  it('走査していなければ直近の走査のタイムゾーンはnull', () => {
-    expect(db.getLastScanTimeZone()).toBeNull()
+  it('走査していなければ記録されたタイムゾーンは空', () => {
+    expect(db.getLastScanTimeZones()).toEqual({})
   })
 
-  it('走査すると、そのとき記録したタイムゾーンを返す', () => {
+  it('走査すると、そのとき記録したタイムゾーンを provider ごとに返す', () => {
     db.replaceProviderSessions('claude', [session()], diagnostics)
-    expect(db.getLastScanTimeZone()).toBe(resolvedTimeZone())
+    expect(db.getLastScanTimeZones()).toEqual({ claude: resolvedTimeZone() })
   })
 
-  it('複数回走査した場合は最新の走査のタイムゾーンを返す', () => {
+  it('同じ provider を複数回走査した場合は最新の走査のタイムゾーンを返す', () => {
     // replaceProviderSessions always records the process's real zone
     // (resolvedTimeZone() is memoised for the process lifetime -- see
     // src/adapters/localTime.ts), so two distinct values can only be
     // observed here by writing the earlier scan row directly.
-    const database = db.getDatabase()
-    database
+    db.getDatabase()
       .prepare(
         `INSERT INTO scans(provider, started_at, completed_at, time_zone, status)
          VALUES ('claude', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'Old/Zone', 'complete')`,
       )
       .run()
     db.replaceProviderSessions('claude', [session()], diagnostics)
-    expect(db.getLastScanTimeZone()).toBe(resolvedTimeZone())
+    expect(db.getLastScanTimeZones()).toEqual({ claude: resolvedTimeZone() })
+  })
+
+  it('完了していない走査のタイムゾーンは無視する', () => {
+    // A scan row is written with the current zone BEFORE any work happens. If a
+    // killed or failed rescan counted, it would clear the warning while the
+    // stored months are still attributed the old way.
+    db.getDatabase()
+      .prepare(
+        `INSERT INTO scans(provider, started_at, time_zone, status)
+         VALUES ('claude', '2030-01-01T00:00:00.000Z', 'Never/Completed', 'running')`,
+      )
+      .run()
+    expect(db.getLastScanTimeZones()).toEqual({})
+  })
+
+  it('片方の provider だけを走査しても、もう片方の記録は残る', () => {
+    // Scanning Claude alone must not clear the warning for Codex's months.
+    db.getDatabase()
+      .prepare(
+        `INSERT INTO scans(provider, started_at, completed_at, time_zone, status)
+         VALUES ('codex', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'Old/Zone', 'complete')`,
+      )
+      .run()
+    db.replaceProviderSessions('claude', [session()], diagnostics)
+    expect(db.getLastScanTimeZones()).toEqual({
+      claude: resolvedTimeZone(),
+      codex: 'Old/Zone',
+    })
   })
 })

@@ -36,7 +36,10 @@ export function readCleanupPeriod(settingsPath: string): CleanupPeriod {
     return { status: 'unreadable', reason: '設定ファイルのJSONを解析できませんでした。' }
   }
 
-  if (typeof parsed !== 'object' || parsed === null) {
+  // Arrays are rejected here too, matching writeCleanupPeriod. Reporting an
+  // array as "default 30日" would tell the user a period is in force that the
+  // write path would then refuse to change.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { status: 'unreadable', reason: '設定ファイルの中身がオブジェクトではありません。' }
   }
 
@@ -265,7 +268,10 @@ export function writeCleanupPeriod(
   // truncates first, so a crash or a full disk partway through would leave a
   // half-written settings.json -- and Claude Code stops its own cleanup when
   // that file will not parse. A rename within the same directory replaces the
-  // file in one step, so any failure leaves the original untouched.
+  // file in one step, so any failure leaves the original untouched. Note this
+  // is not fsync'd: a power loss immediately after the rename can still lose
+  // the write. Protecting against that is out of proportion for a settings
+  // file that the user can simply set again.
   const temporaryPath = `${settingsPath}.devtax-tmp-${backupSuffix}`
   try {
     mkdirSync(dirname(settingsPath), { recursive: true })

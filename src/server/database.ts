@@ -502,15 +502,25 @@ export function replaceProviderSessions(
   return { changedReferences }
 }
 
-export function getLastScanTimeZone(): string | null {
-  const row = getDatabase()
+/**
+ * Timezones recorded by the most recent COMPLETED scan of each provider.
+ *
+ * Both filters matter. A scan row is inserted with the current zone before any
+ * work happens, so without `status = 'complete'` a rescan that was killed or
+ * failed would clear the warning while the stored months are still attributed
+ * the old way. And a user can scan one provider alone, which must not clear the
+ * warning for the other provider's still-stale months.
+ */
+export function getLastScanTimeZones(): Record<string, string> {
+  const rows = getDatabase()
     .prepare(
-      `SELECT time_zone AS timeZone FROM scans
-       WHERE time_zone IS NOT NULL
-       ORDER BY started_at DESC LIMIT 1`,
+      `SELECT provider, time_zone AS timeZone FROM scans
+       WHERE time_zone IS NOT NULL AND status = 'complete'
+       GROUP BY provider
+       HAVING started_at = MAX(started_at)`,
     )
-    .get() as { timeZone: string } | undefined
-  return row?.timeZone ?? null
+    .all() as Array<{ provider: string; timeZone: string }>
+  return Object.fromEntries(rows.map((row) => [row.provider, row.timeZone]))
 }
 
 export function getUsageOverview(): UsageOverview {

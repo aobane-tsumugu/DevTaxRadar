@@ -116,8 +116,17 @@ export type FileContentSummary = {
  * after that file's rows have all been consumed -- the digest is incomplete
  * until every chunk has passed through the Transform.
  */
-export function fileContentSummary(filePath: string, hash: Hash): FileContentSummary {
-  const stats = statSync(filePath)
+export function fileContentSummary(filePath: string, hash: Hash): FileContentSummary | undefined {
+  // The whole premise of this product is that transcripts get deleted. Claude
+  // Code's own cleanup, or a cloud-sync client, can remove the file between the
+  // read and this stat during a scan that takes tens of seconds. Returning
+  // undefined records "no hash" for that file instead of failing the scan.
+  let stats
+  try {
+    stats = statSync(filePath)
+  } catch {
+    return undefined
+  }
   return {
     contentHash: hash.digest('hex'),
     byteSize: stats.size,

@@ -126,7 +126,9 @@ function App() {
     return result
   }
 
-  async function storeRetention(days: number): Promise<{ days: number; previousDays?: number }> {
+  async function storeRetention(
+    days: number,
+  ): Promise<{ days: number; previousDays?: number; backupFileName?: string }> {
     const activeRuntime = runtime ?? (await getRuntime())
     if (!runtime) setRuntime(activeRuntime)
     const result = await saveRetention(activeRuntime.csrfToken, days)
@@ -562,8 +564,8 @@ function SummaryPage({
           <div className="retention-banner" role="status">
             <strong>
               {retention.claude.alreadyLosing
-                ? 'Claude Codeの古い履歴は、すでに一部が削除されています'
-                : `Claude Codeの最も古い履歴が、あと${retention.claude.daysUntilNextLoss}日で削除されます`}
+                ? 'Claude Codeの古い履歴が、すでに削除されている可能性があります'
+                : `Claude Codeの最も古い履歴が、あと${retention.claude.daysUntilNextLoss}日で削除される見込みです`}
             </strong>
             <span>
               削除された履歴は復元できません。保持する日数は「はじめの準備」の最初のステップで変更できます。

@@ -130,17 +130,20 @@ function normalizeCodexSession(
     sessionKey: privateKey('session', session.sessionId, options.identifierSalt),
     projectKey: privateKey('project', session.cwd, options.identifierSalt),
     projectLabel: options.includeLocalProjectLabel ? localProjectLabel(session.cwd) : undefined,
-    localReference:
-      options.includeLocalReferences && fileSummary
-        ? {
-            nativeSessionId: session.sessionId,
-            sourcePath: session.sourcePath,
-            workingDirectory: session.cwd,
-            contentHash: fileSummary.contentHash,
-            byteSize: fileSummary.byteSize,
-            fileMtime: fileSummary.fileMtime,
-          }
-        : undefined,
+    // The reference survives a missing hash: dropping it would cost this
+    // session its preview and resume command until the next clean scan, which
+    // is a much bigger loss than not recording a digest. An empty hash is
+    // already treated as "not recorded" by the change detection.
+    localReference: options.includeLocalReferences
+      ? {
+          nativeSessionId: session.sessionId,
+          sourcePath: session.sourcePath,
+          workingDirectory: session.cwd,
+          contentHash: fileSummary?.contentHash ?? '',
+          byteSize: fileSummary?.byteSize ?? 0,
+          fileMtime: fileSummary?.fileMtime ?? '',
+        }
+      : undefined,
     model: session.model ?? 'unknown',
     inputTokens: nonNegativeInteger(session.usage.input_tokens),
     cacheReadTokens: nonNegativeInteger(session.usage.cached_input_tokens),

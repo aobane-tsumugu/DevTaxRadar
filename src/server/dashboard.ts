@@ -11,7 +11,7 @@ import type { UsageProvider } from '../adapters/types.ts'
 import { localDateFromTimestamp, resolvedTimeZone } from '../adapters/localTime.js'
 import {
   getConfiguration,
-  getLastScanTimeZone,
+  getLastScanTimeZones,
   getUsageOverview,
   getUsageSessions,
   type UsageSessionRow,
@@ -273,7 +273,10 @@ export function buildDashboard(): DashboardData {
   const sessions = getUsageSessions()
   const overview = getUsageOverview()
   const configuration = getConfiguration()
-  const lastScanTimeZone = getLastScanTimeZone()
+  const lastScanTimeZones = getLastScanTimeZones()
+  const staleTimeZones = [...new Set(Object.values(lastScanTimeZones))].filter(
+    (zone) => zone !== resolvedTimeZone(),
+  )
   const planning = getPlanningSnapshot()
   const taxUnitById = new Map(planning.taxUnits.map((unit) => [unit.id, unit]))
 
@@ -622,11 +625,11 @@ export function buildDashboard(): DashboardData {
                 },
           ]
         : []),
-      ...(lastScanTimeZone && lastScanTimeZone !== resolvedTimeZone()
+      ...(staleTimeZones.length > 0
         ? [
             {
               title: 'タイムゾーンが走査時と変わっています',
-              description: `走査したときは${lastScanTimeZone}、いまは${resolvedTimeZone()}です。月の帰属はPCのローカルタイムで判定するため、月末・月初の利用が別の月へ移っている可能性があります。もう一度走査すると、現在のタイムゾーンで付け直します。`,
+              description: `走査したときは${staleTimeZones.join('・')}、いまは${resolvedTimeZone()}です。月の帰属はPCのローカルタイムで判定するため、月末・月初の利用が別の月へ移っている可能性があります。もう一度走査すると、現在のタイムゾーンで付け直します。`,
               severity: 'warning' as const,
             },
           ]

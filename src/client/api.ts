@@ -82,7 +82,7 @@ export function saveConfiguration(
 export function saveRetention(
   csrfToken: string,
   days: number,
-): Promise<{ saved: true; days: number; previousDays?: number }> {
+): Promise<{ saved: true; days: number; previousDays?: number; backupFileName?: string }> {
   return requestJson('/api/retention', {
     method: 'POST',
     headers: {

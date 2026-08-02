@@ -47,6 +47,10 @@ describe('readCleanupPeriod', () => {
     expect(readCleanupPeriod(path)).toEqual({ status: 'default', days: 30 })
   })
 
+  it('reports an array instead of calling it the default, matching the write path', () => {
+    expect(readCleanupPeriod(writeSettings('[1,2,3]')).status).toBe('unreadable')
+  })
+
   it('reports unparsable JSON instead of guessing', () => {
     const path = writeSettings('{ this is not json')
     const period = readCleanupPeriod(path)
