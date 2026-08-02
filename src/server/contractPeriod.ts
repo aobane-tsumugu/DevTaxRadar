@@ -3,10 +3,7 @@ import type { ProviderContract } from './database.js'
 // 'YYYY-MM-DD' is fixed width, so lexicographic order equals chronological
 // order. No Date object is constructed here: parsing would reintroduce the
 // timezone shift that section 5.1 of the design removed.
-export function contractCoversDate(
-  contract: ProviderContract | undefined,
-  date: string,
-): boolean {
+export function contractCoversDate(contract: ProviderContract | undefined, date: string): boolean {
   if (contract?.startedOn && date < contract.startedOn) return false
   if (contract?.endedOn && date > contract.endedOn) return false
   return true

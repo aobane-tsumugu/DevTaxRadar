@@ -8,12 +8,14 @@ import {
 import type { Allocation, DashboardData, TaxGroup } from '../client/types.js'
 import type { ProjectClassification, TaxUnitRecord } from '../planning/types.js'
 import type { UsageProvider } from '../adapters/types.ts'
+import { localDateFromTimestamp } from '../adapters/localTime.js'
 import {
   getConfiguration,
   getUsageOverview,
   getUsageSessions,
   type UsageSessionRow,
 } from './database.js'
+import { contractCoversDate, contractCoversMonth, hasAnyContractPeriod } from './contractPeriod.js'
 import { getPlanningSnapshot } from './planningRepository.js'
 import { resolveSessionAssignment, type SessionAssignment } from './sessionAssignment.js'
 
@@ -222,6 +224,44 @@ function unobservedAllocation(
   }
 }
 
+function outOfContractAllocation(
+  session: AssignedSession,
+  taxUnitById: Map<string, TaxUnitRecord>,
+): Allocation {
+  return {
+    id: `out-of-contract-${session.provider}-${session.sessionKey}`,
+    month: displayBillingMonth(session.month),
+    provider: providerLabel[session.provider],
+    product: displayProject(
+      session.projectKey,
+      session.projectLabel,
+      session.assignment.taxUnitId,
+      taxUnitById,
+    ),
+    asset: '対象外',
+    stage: '契約期間外',
+    usageRate: 0,
+    amount: 0,
+    group: 'review',
+    taxCandidate: '契約期間外',
+    confidence: 'C',
+    rule: '契約期間外の利用は月額の配賦対象から除外',
+    reason:
+      '入力された契約期間の外で使われたセッションです。この月の月額には含めていません。契約期間が誤っていれば、はじめの準備の費用ステップで直せます。',
+    missing: '契約の開始日・終了日が正しいか確認してください。',
+    session: {
+      date: session.startedAt,
+      id: '契約期間外',
+      folder: safeLocalLabel(session.projectLabel, `Project ${session.projectKey.slice(-6)}`),
+      branch: '対象外',
+      model: session.model ?? '不明',
+      tokens: 0,
+      classification: '契約期間外',
+      manualEdit: '契約期間の入力',
+    },
+  }
+}
+
 export function buildDashboard(): DashboardData {
   const sessions = getUsageSessions()
   const overview = getUsageOverview()
@@ -234,13 +274,26 @@ export function buildDashboard(): DashboardData {
     assignment: resolveSessionAssignment(session, planning.projectRules),
   }))
 
+  const contracts = configuration.contracts
+  const contractsConfigured = hasAnyContractPeriod(contracts)
+  // A session whose timestamp cannot be read is kept inside the contract:
+  // dropping money from the allocation because of an unparsable timestamp
+  // would be a worse failure than including it.
+  const withinContract = (session: AssignedSession): boolean => {
+    const startedOn = localDateFromTimestamp(session.startedAt)
+    if (startedOn === undefined) return true
+    return contractCoversDate(contracts[session.provider], startedOn)
+  }
+  const coveredSessions = assigned.filter(withinContract)
+  const outOfContractSessions = assigned.filter((session) => !withinContract(session))
+
   const classifiedSessions = assigned.filter(
     (session) => session.assignment.classification !== 'unclassified',
   ).length
   const mappedSessions = assigned.filter((session) => session.assignment.ruleId !== null).length
 
   const groups = new Map<string, ProjectMonthGroup>()
-  for (const session of assigned) {
+  for (const session of coveredSessions) {
     // Same JSON.stringify encoding as groupKey() below: taxUnitId is a
     // user-entered identifier that may contain any character, so joining
     // with ':' here would risk merging two distinct classification groups
@@ -298,7 +351,12 @@ export function buildDashboard(): DashboardData {
       charge.amountJpy,
     ]),
   )
-  const providerMonthKeys = new Set([...byProviderMonth.keys(), ...monthlyChargeByKey.keys()])
+  const providerMonthKeys = new Set(
+    [...byProviderMonth.keys(), ...monthlyChargeByKey.keys()].filter((key) => {
+      const [provider, month] = key.split(':') as [UsageProvider, string]
+      return contractCoversMonth(contracts[provider], month)
+    }),
+  )
 
   const inputs = [...providerMonthKeys].sort().map((key) => {
     const [provider, month] = key.split(':') as [UsageProvider, string]
@@ -344,6 +402,10 @@ export function buildDashboard(): DashboardData {
       if (!group) continue
       allocations.push(allocationForGroup(group, line, taxUnitById))
     }
+  }
+
+  for (const session of outOfContractSessions) {
+    allocations.push(outOfContractAllocation(session, taxUnitById))
   }
 
   const monthLabels = [...new Set(inputs.map((input) => input.billingMonth))].sort()
@@ -510,6 +572,16 @@ export function buildDashboard(): DashboardData {
     boundaries,
     assets,
     guidance: [
+      ...(contractsConfigured
+        ? []
+        : [
+            {
+              title: '契約期間が未入力です',
+              description:
+                '契約期間が未入力のため、履歴のある全月へ同額を適用しています。はじめの準備の費用ステップで契約の開始日（解約済みなら終了日も）を入力すると、契約外の月を配賦から外せます。',
+              severity: 'warning' as const,
+            },
+          ]),
       {
         title: `${sessions.length - classifiedSessions}件の未分類利用（セッション単位）`,
         description: 'オンボーディングでプロダクトと作業目的を確認してください',

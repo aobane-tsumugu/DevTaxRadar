@@ -200,7 +200,13 @@ describe('local server boundary', () => {
         },
       ],
       contracts: {
-        claude: { startedOn: '2026-04-01' },
+        // Task 2 note: chosen to predate both configured months (2025-04 and
+        // 2026-04) so contract enforcement (added in Task 2) does not exclude
+        // either from the dashboard assertions below -- this block exercises
+        // config round-tripping, not contract-period filtering. That behavior
+        // is covered separately further down with a contract set after both
+        // sessions' dates.
+        claude: { startedOn: '2025-01-01' },
         codex: {},
       },
       unobservedRatio: 0.1,
@@ -385,6 +391,41 @@ describe('local server boundary', () => {
     expect(serializedDashboard).not.toContain('C:/Synthetic')
     expect(serializedDashboard).not.toContain('SYNTHETIC_PRIVATE_PROMPT_MUST_NOT_ESCAPE')
     expect(serializedDashboard).not.toContain('synthetic-claude-session-1')
+
+    const laterContractResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify({
+        ...configuration,
+        contracts: { claude: { startedOn: '2030-01-01' }, codex: { startedOn: '2030-01-01' } },
+      }),
+    })
+    expect(laterContractResponse.status).toBe(200)
+
+    const contractDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
+      async (response) => await response.json(),
+    )) as { allocations: Array<{ amount: number; taxCandidate: string }> }
+    // Every synthetic session predates the contract, so no money is allocated
+    // and every session still shows up as an explained zero-yen line.
+    expect(contractDashboard.allocations.every((row) => row.amount === 0)).toBe(true)
+    expect(contractDashboard.allocations.some((row) => row.taxCandidate === '契約期間外')).toBe(
+      true,
+    )
+
+    const restoreConfigurationResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify(configuration),
+    })
+    expect(restoreConfigurationResponse.status).toBe(200)
 
     const duplicateChargeResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: 'POST',
