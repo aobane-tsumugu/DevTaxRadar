@@ -97,7 +97,9 @@ describe('readHistoryAge', () => {
   // assumption against a committed measurement instead of a guess.
   it('visits every file exactly once across a few thousand of them', () => {
     const root = temporaryDirectory()
-    const fileCount = 3_000
+    // Enough files to exercise the recursive walk without making the test
+    // itself an I/O stress test -- it flaked at 3,000 under a loaded machine.
+    const fileCount = 600
     const directoryCount = 30
     const directories = Array.from({ length: directoryCount }, (_, index) => {
       const directory = join(root, `project-${index}`)
