@@ -5,6 +5,17 @@ export type LocalSessionReference = {
   nativeSessionId: string
   sourcePath: string
   workingDirectory: string
+  /**
+   * SHA-256 (hex) of the whole transcript file at import time. Lets a later
+   * scan warn "the original history changed since we recorded it". This is
+   * not tamper-proofing against the user themselves -- the same OS user
+   * account can rewrite this hash just as easily as the transcript. It only
+   * shows that records made on this machine stay internally consistent.
+   */
+  contentHash: string
+  byteSize: number
+  /** ISO timestamp, from a single statSync alongside byteSize. */
+  fileMtime: string
 }
 
 export type NormalizedUsage = {

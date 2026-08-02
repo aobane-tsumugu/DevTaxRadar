@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { LocalSessionReference } from '../../src/adapters/types.ts'
 import type { UsageSession } from '../../src/server/sessionAggregation.ts'
 
 const temporaryDirectories: string[] = []
@@ -87,6 +88,18 @@ function session(overrides: Partial<UsageSession> = {}): UsageSession {
   }
 }
 
+function localReference(overrides: Partial<LocalSessionReference> = {}): LocalSessionReference {
+  return {
+    nativeSessionId: 'native-1',
+    sourcePath: '/tmp/a.jsonl',
+    workingDirectory: '/tmp/work',
+    contentHash: 'hash-1',
+    byteSize: 100,
+    fileMtime: '2026-07-15T10:00:00.000Z',
+    ...overrides,
+  }
+}
+
 describe('session storage', () => {
   let sessionDirectory: string
   let db: typeof import('../../src/server/database.ts')
@@ -130,11 +143,7 @@ describe('session storage', () => {
       'claude',
       [
         session({
-          localReference: {
-            nativeSessionId: 'native-1',
-            sourcePath: '/tmp/a.jsonl',
-            workingDirectory: '/tmp/work',
-          },
+          localReference: localReference(),
         }),
       ],
       diagnostics,
@@ -567,20 +576,22 @@ describe('session storage', () => {
       [
         session({
           sessionKey: 'session_a',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-a',
             sourcePath: '/a.jsonl',
             workingDirectory: '/work/a',
-          },
+            contentHash: 'hash-a',
+          }),
         }),
         session({
           sessionKey: 'session_b',
           projectKey: 'project_b',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-b',
             sourcePath: '/b.jsonl',
             workingDirectory: '/work/b',
-          },
+            contentHash: 'hash-b',
+          }),
         }),
       ],
       diagnostics,
@@ -595,11 +606,12 @@ describe('session storage', () => {
           provider: 'codex',
           sessionKey: 'session_c',
           projectKey: 'project_c',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-c',
             sourcePath: '/c.jsonl',
             workingDirectory: '/work/c',
-          },
+            contentHash: 'hash-c',
+          }),
         }),
       ],
       diagnostics,
@@ -610,11 +622,12 @@ describe('session storage', () => {
       [
         session({
           sessionKey: 'session_a',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-a',
             sourcePath: '/a.jsonl',
             workingDirectory: '/work/a',
-          },
+            contentHash: 'hash-a',
+          }),
         }),
       ],
       diagnostics,
@@ -627,5 +640,63 @@ describe('session storage', () => {
     expect(db.getSessionReference('codex', 'session_c')).toMatchObject({
       nativeSessionId: 'native-c',
     })
+  })
+
+  it('取り込み後に元ファイルの内容が変わると、次の走査で件数として検出する', () => {
+    db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-original' }) })],
+      diagnostics,
+    )
+
+    const unchanged = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-original' }) })],
+      diagnostics,
+    )
+    expect(unchanged.changedReferences).toEqual([])
+
+    const changed = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-tampered' }) })],
+      diagnostics,
+    )
+    expect(changed.changedReferences).toEqual([
+      {
+        provider: 'claude',
+        sessionKey: 'session_a',
+        previousHash: 'hash-original',
+        currentHash: 'hash-tampered',
+      },
+    ])
+  })
+
+  it('マイグレーション直後の既定値（空文字）は変更として扱わない', () => {
+    // Simulates a row written before content_hash existed: the migration's
+    // ALTER TABLE default is '', not a real prior hash. The next scan must
+    // not report that as "changed since last scan".
+    const insertLegacyReference = db.getDatabase().prepare(`
+      INSERT INTO session_references(
+        provider, session_key, native_session_id, source_path,
+        working_directory, content_hash, byte_size, file_mtime, captured_at
+      ) VALUES ('claude', 'session_a', 'native-legacy', '/legacy.jsonl', '/work/legacy', '', 0, '', ?)
+    `)
+    insertLegacyReference.run(new Date().toISOString())
+
+    const result = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-first-real' }) })],
+      diagnostics,
+    )
+    expect(result.changedReferences).toEqual([])
+  })
+
+  it('初めて記録するセッションは変更として扱わない', () => {
+    const result = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-new' }) })],
+      diagnostics,
+    )
+    expect(result.changedReferences).toEqual([])
   })
 })

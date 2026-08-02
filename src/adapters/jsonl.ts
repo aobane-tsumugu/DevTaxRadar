@@ -1,8 +1,10 @@
 /// <reference types="node" />
 
-import { createReadStream } from 'node:fs'
+import type { Hash } from 'node:crypto'
+import { createReadStream, statSync } from 'node:fs'
 import { opendir } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
+import { Transform } from 'node:stream'
 import { extname, join } from 'node:path'
 
 import type { AdapterDiagnostics } from './types.ts'
@@ -37,17 +39,31 @@ export async function* discoverJsonlFiles(
 export async function* readJsonlObjects(
   filePath: string,
   diagnostics: AdapterDiagnostics,
+  hash?: Hash,
 ): AsyncGenerator<Record<string, unknown>> {
-  const stream = createReadStream(filePath, {
-    encoding: 'utf8',
-    flags: 'r',
-  })
-  stream.on('error', () => {
+  const source = createReadStream(filePath, { flags: 'r' })
+  source.on('error', () => {
     diagnostics.ioErrors += 1
   })
 
+  // A Transform in the pipe chain sees every byte without switching the source
+  // into flowing mode, which a bare 'data' listener would do -- that would race
+  // readline for the same chunks. This keeps the file read exactly once, and
+  // readline decodes the Buffer chunks it receives as utf8 by default, so line
+  // splitting is unaffected by dropping `encoding` from createReadStream.
+  const input = hash
+    ? source.pipe(
+        new Transform({
+          transform(chunk, _encoding, callback) {
+            hash.update(chunk)
+            callback(null, chunk)
+          },
+        }),
+      )
+    : source
+
   const lines = createInterface({
-    input: stream,
+    input,
     crlfDelay: Number.POSITIVE_INFINITY,
   })
 
@@ -75,7 +91,28 @@ export async function* readJsonlObjects(
     // The stream error listener increments ioErrors without exposing file paths.
   } finally {
     lines.close()
-    stream.destroy()
+    source.destroy()
+  }
+}
+
+export type FileContentSummary = {
+  contentHash: string
+  byteSize: number
+  fileMtime: string
+}
+
+/**
+ * Finalizes the digest that `hash` accumulated while readJsonlObjects streamed
+ * `filePath` through it, alongside one statSync for size and mtime. Call only
+ * after that file's rows have all been consumed -- the digest is incomplete
+ * until every chunk has passed through the Transform.
+ */
+export function fileContentSummary(filePath: string, hash: Hash): FileContentSummary {
+  const stats = statSync(filePath)
+  return {
+    contentHash: hash.digest('hex'),
+    byteSize: stats.size,
+    fileMtime: stats.mtime.toISOString(),
   }
 }
 

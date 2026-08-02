@@ -1,12 +1,16 @@
 /// <reference types="node" />
 
+import { createHash } from 'node:crypto'
+
 import { localProjectLabel, privateKey } from './identifiers.ts'
 import {
   childRecord,
   discoverJsonlFiles,
+  fileContentSummary,
   nonNegativeInteger,
   readJsonlObjects,
   stringValue,
+  type FileContentSummary,
 } from './jsonl.ts'
 import { localMonthFromTimestamp } from './localTime.ts'
 import {
@@ -38,8 +42,14 @@ export async function readCodexHistory(
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
     options.onFileScanned?.()
     const session: CodexSession = { sourcePath: filePath }
+    // The Transform inside readJsonlObjects hashes every byte as it streams
+    // past on its way to the line splitter, so the file is read exactly once
+    // even though both the parsed rows and the digest are needed. A Codex
+    // session file yields at most one event, so the digest can be finalized
+    // right after the loop, before that event is built.
+    const hash = options.includeLocalReferences ? createHash('sha256') : undefined
 
-    for await (const row of readJsonlObjects(filePath, diagnostics)) {
+    for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
       if (consumeSessionMetadata(row, session) || consumeModel(row, session)) {
         continue
       }
@@ -49,7 +59,8 @@ export async function readCodexHistory(
       diagnostics.unsupportedLines += 1
     }
 
-    const event = normalizeCodexSession(session, options, diagnostics)
+    const fileSummary = hash ? fileContentSummary(filePath, hash) : undefined
+    const event = normalizeCodexSession(session, options, diagnostics, fileSummary)
     if (event) events.push(event)
   }
 
@@ -96,6 +107,7 @@ function normalizeCodexSession(
   session: CodexSession,
   options: AdapterOptions,
   diagnostics: AdapterResult['diagnostics'],
+  fileSummary: FileContentSummary | undefined,
 ): NormalizedUsage | undefined {
   const month = localMonthFromTimestamp(session.timestamp)
   if (!session.sessionId || !session.cwd || !month || !session.usage || !session.timestamp) {
@@ -110,13 +122,17 @@ function normalizeCodexSession(
     sessionKey: privateKey('session', session.sessionId, options.identifierSalt),
     projectKey: privateKey('project', session.cwd, options.identifierSalt),
     projectLabel: options.includeLocalProjectLabel ? localProjectLabel(session.cwd) : undefined,
-    localReference: options.includeLocalReferences
-      ? {
-          nativeSessionId: session.sessionId,
-          sourcePath: session.sourcePath,
-          workingDirectory: session.cwd,
-        }
-      : undefined,
+    localReference:
+      options.includeLocalReferences && fileSummary
+        ? {
+            nativeSessionId: session.sessionId,
+            sourcePath: session.sourcePath,
+            workingDirectory: session.cwd,
+            contentHash: fileSummary.contentHash,
+            byteSize: fileSummary.byteSize,
+            fileMtime: fileSummary.fileMtime,
+          }
+        : undefined,
     model: session.model ?? 'unknown',
     inputTokens: nonNegativeInteger(session.usage.input_tokens),
     cacheReadTokens: nonNegativeInteger(session.usage.cached_input_tokens),

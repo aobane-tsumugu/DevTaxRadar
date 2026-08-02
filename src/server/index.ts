@@ -372,7 +372,7 @@ app.post('/api/scan', async (request, reply) => {
       const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
       const sessions = aggregateSessions(result.events, aggregationDiagnostics)
 
-      replaceProviderSessions(provider, sessions, {
+      const { changedReferences } = replaceProviderSessions(provider, sessions, {
         filesSeen: result.diagnostics.filesDiscovered,
         malformedLines: result.diagnostics.malformedJsonLines,
       })
@@ -381,6 +381,10 @@ app.post('/api/scan', async (request, reply) => {
         diagnostics: {
           ...result.diagnostics,
           nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
+          // Only the count crosses this boundary. The changed sessions'
+          // native IDs, paths and hashes stay inside session_references --
+          // see the "no hash or path in API responses" privacy rule.
+          changedSinceLastScan: changedReferences.length,
         },
       }
     }

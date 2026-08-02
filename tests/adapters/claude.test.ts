@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -57,5 +59,23 @@ describe('Claude Code local history adapter', () => {
     expect(reference?.nativeSessionId).toBeTruthy()
     expect(reference?.sourcePath).toContain('.jsonl')
     expect(reference?.workingDirectory).toBeTruthy()
+  })
+
+  it('opt-inするとファイル全体のSHA-256とサイズと更新日時を返す', async () => {
+    const root = resolve('fixtures/claude')
+    const result = await readClaudeHistory(root, {
+      identifierSalt: SALT,
+      includeLocalReferences: true,
+    })
+    const reference = result.events[0]?.localReference
+    const filePath = reference?.sourcePath
+    expect(filePath).toBeTruthy()
+
+    const expectedHash = createHash('sha256').update(readFileSync(filePath!)).digest('hex')
+    const expectedStats = statSync(filePath!)
+
+    expect(reference?.contentHash).toBe(expectedHash)
+    expect(reference?.byteSize).toBe(expectedStats.size)
+    expect(reference?.fileMtime).toBe(expectedStats.mtime.toISOString())
   })
 })

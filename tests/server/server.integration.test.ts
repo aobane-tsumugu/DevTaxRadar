@@ -256,6 +256,19 @@ describe('local server boundary', () => {
       body: JSON.stringify({ providers: ['claude', 'codex'] }),
     })
     expect(scanResponse.status).toBe(200)
+    const scanBody = (await scanResponse.json()) as {
+      providers: Record<string, { diagnostics: Record<string, unknown> }>
+    }
+    // First import of these fixtures: nothing existed before, so nothing counts
+    // as "changed since last scan" yet.
+    expect(scanBody.providers.claude?.diagnostics.changedSinceLastScan).toBe(0)
+    expect(scanBody.providers.codex?.diagnostics.changedSinceLastScan).toBe(0)
+    const serializedScan = JSON.stringify(scanBody)
+    // Only the changed-reference count may cross this boundary -- never the
+    // hash itself (a bare 64-hex-char SHA-256 digest) or the source file name.
+    expect(serializedScan).not.toMatch(/\b[0-9a-f]{64}\b/i)
+    expect(serializedScan).not.toContain('synthetic-history.jsonl')
+    expect(serializedScan).not.toContain('synthetic-session.jsonl')
 
     const unconfiguredDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
       async (response) => await response.json(),
@@ -843,10 +856,11 @@ describe('セッション単位のダッシュボード集計', () => {
     expect(augustClaudeTotal).toBe(100_000)
   })
 
-  it('生のセッションID・絶対パス・作業ディレクトリはどのAPIレスポンスにも現れない', async () => {
+  it('生のセッションID・絶対パス・作業ディレクトリ・コンテンツハッシュはどのAPIレスポンスにも現れない', async () => {
     const rawNativeSessionId = 'RAW-SESSION-ID-SHOULD-NOT-LEAK'
     const rawSourcePath = 'C:/RAW-PATH-SHOULD-NOT-LEAK/transcript.jsonl'
     const rawWorkingDirectory = 'C:/RAW-CWD-SHOULD-NOT-LEAK'
+    const rawContentHash = 'raw0hash0should0not0leak0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
     replaceProviderSessions(
       'claude',
@@ -869,6 +883,9 @@ describe('セッション単位のダッシュボード集計', () => {
             nativeSessionId: rawNativeSessionId,
             sourcePath: rawSourcePath,
             workingDirectory: rawWorkingDirectory,
+            contentHash: rawContentHash,
+            byteSize: 12_345,
+            fileMtime: '2026-09-05T09:00:00.000Z',
           },
         },
       ],
@@ -894,7 +911,7 @@ describe('セッション単位のダッシュボード集計', () => {
       ),
     )
 
-    for (const raw of [rawNativeSessionId, rawSourcePath, rawWorkingDirectory]) {
+    for (const raw of [rawNativeSessionId, rawSourcePath, rawWorkingDirectory, rawContentHash]) {
       expect(dashboardBody).not.toContain(raw)
       expect(ledgerBody).not.toContain(raw)
       expect(diagnosisBody).not.toContain(raw)
