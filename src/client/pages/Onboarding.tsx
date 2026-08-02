@@ -51,9 +51,14 @@ function Onboarding({
   const isDemoData = data.meta.source === 'demo'
   const apiUnavailable = !runtime
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(['claude', 'codex'])
-  const [claudeCharge, setClaudeCharge] = useState(30000)
-  const [codexCharge, setCodexCharge] = useState(30000)
+  const [claudeCharge, setClaudeCharge] = useState<number | undefined>(undefined)
+  const [codexCharge, setCodexCharge] = useState<number | undefined>(undefined)
   const [monthlyCharges, setMonthlyCharges] = useState<LocalConfiguration['monthlyCharges']>([])
+  const [contracts, setContracts] = useState<LocalConfiguration['contracts']>({
+    claude: {},
+    codex: {},
+  })
+  const [chargeConfirmPending, setChargeConfirmPending] = useState(false)
   const [unobservedPercent, setUnobservedPercent] = useState(10)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{
@@ -93,8 +98,9 @@ function Onboarding({
 
   useEffect(() => {
     if (!configuration) return
-    setClaudeCharge(configuration.charges.claude)
-    setCodexCharge(configuration.charges.codex)
+    setClaudeCharge(configuration.charges.claude > 0 ? configuration.charges.claude : undefined)
+    setCodexCharge(configuration.charges.codex > 0 ? configuration.charges.codex : undefined)
+    setContracts(configuration.contracts)
     setUnobservedPercent(Math.round(configuration.unobservedRatio * 100))
     const saved = new Map(
       configuration.monthlyCharges.map((charge) => [
@@ -138,13 +144,14 @@ function Onboarding({
     )
   }
 
-  function updateProviderCharge(provider: ProviderKey, amount: number) {
-    const normalized = Math.max(0, amount || 0)
+  function updateProviderCharge(provider: ProviderKey, amount: number | undefined) {
+    const normalized = amount === undefined ? undefined : Math.max(0, amount)
     if (provider === 'claude') setClaudeCharge(normalized)
     else setCodexCharge(normalized)
+    setChargeConfirmPending(false)
     setMonthlyCharges((current) =>
       current.map((charge) =>
-        charge.provider === provider ? { ...charge, amountJpy: normalized } : charge,
+        charge.provider === provider ? { ...charge, amountJpy: normalized ?? 0 } : charge,
       ),
     )
   }
@@ -349,6 +356,36 @@ function Onboarding({
       onStep(4)
       return
     }
+    const invalidContract = (['claude', 'codex'] as ProviderKey[]).find((provider) => {
+      const contract = contracts[provider]
+      return Boolean(
+        contract.startedOn && contract.endedOn && contract.startedOn > contract.endedOn,
+      )
+    })
+    if (invalidContract) {
+      setNotice({
+        kind: 'error',
+        message: `${invalidContract === 'claude' ? 'Claude Code' : 'Codex'}の契約終了日は、開始日以降にしてください。`,
+      })
+      return
+    }
+    const missingCharges = (['claude', 'codex'] as ProviderKey[]).filter(
+      (provider) =>
+        selectedProviders.includes(provider) &&
+        (provider === 'claude' ? claudeCharge : codexCharge) === undefined,
+    )
+    if (missingCharges.length > 0 && !chargeConfirmPending) {
+      setChargeConfirmPending(true)
+      setNotice({
+        kind: 'error',
+        message: `${missingCharges
+          .map((provider) => (provider === 'claude' ? 'Claude Code' : 'Codex'))
+          .join(
+            'と',
+          )}の月額が未入力のため、配賦額は0円になります。このまま進める場合は、もう一度「保存する」を押してください。`,
+      })
+      return
+    }
     if (apiUnavailable) {
       onClose()
       return
@@ -357,13 +394,11 @@ function Onboarding({
     try {
       await onSave({
         charges: {
-          claude: Math.max(0, Math.round(claudeCharge)),
-          codex: Math.max(0, Math.round(codexCharge)),
+          claude: Math.max(0, Math.round(claudeCharge ?? 0)),
+          codex: Math.max(0, Math.round(codexCharge ?? 0)),
         },
         monthlyCharges,
-        // Temporary passthrough to keep typecheck green; Task 3 replaces this
-        // with real contract period input fields on this screen.
-        contracts: configuration?.contracts ?? { claude: {}, codex: {} },
+        contracts,
         unobservedRatio: Math.min(95, Math.max(0, unobservedPercent)) / 100,
       })
       await onSavePlanning(planningDraft)
@@ -985,9 +1020,15 @@ function Onboarding({
                     aria-label="Claude Code 月額"
                     type="number"
                     min="0"
-                    value={claudeCharge}
+                    placeholder="未入力"
+                    value={claudeCharge ?? ''}
                     onChange={(event) =>
-                      updateProviderCharge('claude', event.target.valueAsNumber || 0)
+                      updateProviderCharge(
+                        'claude',
+                        Number.isNaN(event.target.valueAsNumber)
+                          ? undefined
+                          : event.target.valueAsNumber,
+                      )
                     }
                   />
                   <span>円</span>
@@ -999,13 +1040,72 @@ function Onboarding({
                     aria-label="Codex 月額"
                     type="number"
                     min="0"
-                    value={codexCharge}
+                    placeholder="未入力"
+                    value={codexCharge ?? ''}
                     onChange={(event) =>
-                      updateProviderCharge('codex', event.target.valueAsNumber || 0)
+                      updateProviderCharge(
+                        'codex',
+                        Number.isNaN(event.target.valueAsNumber)
+                          ? undefined
+                          : event.target.valueAsNumber,
+                      )
                     }
                   />
                   <span>円</span>
                 </div>
+              </div>
+              <div className="contract-fields">
+                <div className="contract-heading">
+                  <strong>契約期間</strong>
+                  <small>
+                    入力すると、契約していない月を配賦から外せます。未入力のままでも構いません。その場合は履歴のある全月へ同額を適用します。日割りは行いません。
+                  </small>
+                </div>
+                {(
+                  [
+                    ['claude', 'Claude Code'],
+                    ['codex', 'Codex'],
+                  ] as const
+                ).map(([provider, label]) => (
+                  <div className="contract-row" key={provider}>
+                    <strong>{label}</strong>
+                    <label>
+                      <span>開始日</span>
+                      <input
+                        aria-label={`${label} 契約開始日`}
+                        type="date"
+                        value={contracts[provider].startedOn ?? ''}
+                        onChange={(event) =>
+                          setContracts((current) => ({
+                            ...current,
+                            [provider]: {
+                              ...current[provider],
+                              startedOn: event.target.value || undefined,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>終了日</span>
+                      <input
+                        aria-label={`${label} 契約終了日`}
+                        type="date"
+                        value={contracts[provider].endedOn ?? ''}
+                        onChange={(event) =>
+                          setContracts((current) => ({
+                            ...current,
+                            [provider]: {
+                              ...current[provider],
+                              endedOn: event.target.value || undefined,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                    <small>解約していない場合、終了日は空のままにしてください。</small>
+                  </div>
+                ))}
               </div>
               {monthlyCharges.length > 0 && (
                 <details className="monthly-charges">
