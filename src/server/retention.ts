@@ -1,5 +1,14 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, extname, join } from 'node:path'
 import { localDateFromTimestamp } from '../adapters/localTime.js'
 
 // Claude Code deletes transcripts older than cleanupPeriodDays. The key is
@@ -174,4 +183,74 @@ export function forecastNextLoss(
     daysUntilNextLoss: Math.max(0, remaining),
     alreadyLosing: remaining <= 0,
   }
+}
+
+export type RetentionWriteResult =
+  | { ok: true; backupPath: string; previousDays?: number; days: number }
+  | { ok: false; reason: string }
+
+/**
+ * Rewrites cleanupPeriodDays in the Claude Code settings file, preserving
+ * every other key. Claude Code itself stops its own transcript cleanup when
+ * this file fails to parse, so a broken write is doubly harmful -- a backup
+ * is taken before the file is touched, and any parse failure aborts without
+ * writing anything.
+ */
+export function writeCleanupPeriod(
+  settingsPath: string,
+  days: number,
+  backupSuffix: string,
+): RetentionWriteResult {
+  const backupPath = `${settingsPath}.devtax-backup-${backupSuffix}`
+
+  let existing: Record<string, unknown> = {}
+  if (existsSync(settingsPath)) {
+    let raw: string
+    try {
+      raw = readFileSync(settingsPath, 'utf8')
+    } catch {
+      return { ok: false, reason: '設定ファイルを読み取れませんでした。権限を確認してください。' }
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      // Claude Code stops its own cleanup when this file fails to parse, so
+      // overwriting a broken file would hide a problem the user needs to fix.
+      return {
+        ok: false,
+        reason:
+          '設定ファイルのJSONを解析できなかったため、書き換えを中止しました。手で修正してから、もう一度お試しください。',
+      }
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {
+        ok: false,
+        reason: '設定ファイルの中身がオブジェクトではないため、書き換えを中止しました。',
+      }
+    }
+    existing = parsed as Record<string, unknown>
+
+    try {
+      copyFileSync(settingsPath, backupPath)
+    } catch {
+      return { ok: false, reason: 'バックアップを作成できなかったため、書き換えを中止しました。' }
+    }
+  }
+
+  const previous = existing.cleanupPeriodDays
+  const previousDays = typeof previous === 'number' ? previous : undefined
+
+  try {
+    mkdirSync(dirname(settingsPath), { recursive: true })
+    writeFileSync(
+      settingsPath,
+      `${JSON.stringify({ ...existing, cleanupPeriodDays: days }, null, 2)}\n`,
+      'utf8',
+    )
+  } catch {
+    return { ok: false, reason: '設定ファイルへ書き込めませんでした。権限を確認してください。' }
+  }
+
+  return { ok: true, backupPath, previousDays, days }
 }

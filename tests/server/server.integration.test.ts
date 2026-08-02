@@ -1,6 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -150,6 +158,42 @@ describe('local server boundary', () => {
     const serializedRuntime = JSON.stringify(runtime)
     expect(serializedRuntime).not.toContain('.claude')
     expect(serializedRuntime).not.toContain('.codex')
+
+    const retentionResponse = await fetch(`http://127.0.0.1:${port}/api/retention`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify({ days: 180 }),
+    })
+    expect(retentionResponse.status).toBe(200)
+    expect(await retentionResponse.json()).toMatchObject({ saved: true, days: 180 })
+
+    const settingsAfter = JSON.parse(readFileSync(claudeSettingsPath, 'utf8')) as Record<
+      string,
+      unknown
+    >
+    expect(settingsAfter.cleanupPeriodDays).toBe(180)
+
+    const withoutCsrf = await fetch(`http://127.0.0.1:${port}/api/retention`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ days: 180 }),
+    })
+    expect(withoutCsrf.status).toBe(403)
+
+    const invalidDays = await fetch(`http://127.0.0.1:${port}/api/retention`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify({ days: 0 }),
+    })
+    expect(invalidDays.status).toBe(400)
 
     const idleProgress = (await fetch(`http://127.0.0.1:${port}/api/scan/progress`).then(
       async (response) => await response.json(),

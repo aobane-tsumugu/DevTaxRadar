@@ -9,7 +9,12 @@ import { localDateFromTimestamp } from '../adapters/localTime.js'
 import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
 import { buildDashboard } from './dashboard.js'
 import { getClaudeSettingsPath, getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
-import { forecastNextLoss, readCleanupPeriod, readHistoryAgeCached } from './retention.js'
+import {
+  forecastNextLoss,
+  readCleanupPeriod,
+  readHistoryAgeCached,
+  writeCleanupPeriod,
+} from './retention.js'
 import { beginScan, finishScan, readScanProgress, reportScannedFile } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
@@ -287,6 +292,31 @@ app.post('/api/config', async (request, reply) => {
   }
   saveConfiguration(parsed.data)
   return { saved: true }
+})
+
+const retentionRequestSchema = z
+  .object({
+    // No upper bound suggestion is offered by the product: the right length
+    // depends on the user's bookkeeping, not on anything we can infer.
+    days: z.number().int().min(1).max(36500),
+  })
+  .strict()
+
+app.post('/api/retention', async (request, reply) => {
+  const parsed = retentionRequestSchema.safeParse(request.body)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+
+  const suffix = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '')
+  const result = writeCleanupPeriod(getClaudeSettingsPath(), parsed.data.days, suffix)
+
+  if (!result.ok) {
+    await reply.code(409).send({ error: 'retention_write_failed', message: result.reason })
+    return
+  }
+  return { saved: true, days: result.days, previousDays: result.previousDays }
 })
 
 const scanRequestSchema = z.object({
