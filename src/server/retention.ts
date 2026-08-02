@@ -161,7 +161,10 @@ export function forecastNextLoss(
   period: CleanupPeriod,
   today: string,
 ): RetentionForecast {
-  if (age.oldestModifiedOn === undefined || period.status === 'unreadable') {
+  // An empty `today` means the caller could not resolve the local date. Report
+  // no forecast rather than arithmetic on an unparsable date, which would put
+  // NaN into the API response.
+  if (age.oldestModifiedOn === undefined || period.status === 'unreadable' || today === '') {
     return { alreadyLosing: false }
   }
   const nextLossOn = addDays(age.oldestModifiedOn, period.days)

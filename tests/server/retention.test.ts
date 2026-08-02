@@ -204,6 +204,11 @@ describe('forecastNextLoss', () => {
     expect(forecastNextLoss(age, period, '2028-02-01').nextLossOn).toBe('2028-02-29')
   })
 
+  it('reports no forecast when the local date could not be resolved', () => {
+    const age = { oldestModifiedOn: '2026-07-20', fileCount: 3 }
+    expect(forecastNextLoss(age, period, '')).toEqual({ alreadyLosing: false })
+  })
+
   it('cannot forecast when the settings file is unreadable', () => {
     const age = { oldestModifiedOn: '2026-07-20', fileCount: 3 }
     const unreadable = { status: 'unreadable' as const, reason: 'JSONを解析できません' }

@@ -557,6 +557,12 @@ describe('セッション単位のダッシュボード集計', () => {
       env: {
         ...process.env,
         PORT: String(testPort),
+        // /api/runtime now walks the whole transcript tree to date the oldest
+        // file. Without an isolated home this test would walk the developer's
+        // real history -- gigabytes on some machines -- making its runtime
+        // depend on whose machine it runs on.
+        HOME: dataDirectory,
+        USERPROFILE: dataDirectory,
         DEVTAX_RADAR_DATA_DIR: dataDirectory,
         // This block doesn't assert on retention, but /api/runtime always
         // reads it -- without this override it would fall through to the
