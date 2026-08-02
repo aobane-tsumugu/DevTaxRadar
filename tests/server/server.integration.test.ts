@@ -113,6 +113,11 @@ describe('local server boundary', () => {
       telemetry: false,
     })
 
+    const idleProgress = (await fetch(`http://127.0.0.1:${port}/api/scan/progress`).then(
+      async (response) => await response.json(),
+    )) as { running: boolean; provider: string | null; filesScanned: number }
+    expect(idleProgress).toEqual({ running: false, provider: null, filesScanned: 0 })
+
     const nonLoopbackAddress = Object.values(networkInterfaces())
       .flat()
       .find(

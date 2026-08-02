@@ -4,6 +4,7 @@ import type {
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
+  ScanProgress,
   ScanResult,
 } from '../types'
 import type {
@@ -16,6 +17,7 @@ import type {
   TaxUnitRecord,
 } from '../../planning/types'
 import { diagnosePlanning } from '../../core/diagnosis'
+import { getScanProgress } from '../api'
 import {
   chargeConfirmationKey,
   invertedContractMessage,
@@ -75,6 +77,7 @@ function Onboarding({
   const [confirmedMissingCharges, setConfirmedMissingCharges] = useState<string | null>(null)
   const [unobservedPercent, setUnobservedPercent] = useState(10)
   const [busy, setBusy] = useState(false)
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'success' | 'error' | 'info'
     message: string
@@ -102,6 +105,28 @@ function Onboarding({
   useEffect(() => {
     onboardingBodyRef.current?.scrollTo({ top: 0 })
   }, [step])
+
+  useEffect(() => {
+    if (!busy || step !== 0 || apiUnavailable) {
+      setScanProgress(null)
+      return
+    }
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      getScanProgress()
+        .then((progress) => {
+          if (!cancelled) setScanProgress(progress)
+        })
+        .catch(() => {
+          // The scan itself reports its own failure; a missed progress poll
+          // must not replace that message with a less useful one.
+        })
+    }, 700)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [apiUnavailable, busy, step])
 
   useEffect(() => {
     if (!runtime) return
@@ -539,6 +564,13 @@ function Onboarding({
                     )
                   })}
                 </div>
+                {busy && (
+                  <p className="scan-progress" role="status" aria-live="polite">
+                    {scanProgress?.running
+                      ? `${scanProgress.provider === 'codex' ? 'Codex' : 'Claude Code'}の履歴を走査しています。読み込んだファイル数：${scanProgress.filesScanned}`
+                      : '履歴を確認しています。'}
+                  </p>
+                )}
                 <div className="privacy-callout">
                   <span>⌂</span>
                   <p>
@@ -1854,7 +1886,9 @@ function Onboarding({
               >
                 {busy
                   ? step === 0
-                    ? '履歴を確認中…'
+                    ? scanProgress?.running
+                      ? `走査中… ${scanProgress.filesScanned}ファイル`
+                      : '履歴を確認中…'
                     : '保存中…'
                   : step === 0
                     ? apiUnavailable

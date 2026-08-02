@@ -2,6 +2,7 @@ import type {
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
+  ScanProgress,
   ScanResult,
   FolderSummary,
   SessionSummary,
@@ -58,6 +59,10 @@ export function scanHistory(csrfToken: string, providers: ProviderKey[]): Promis
     },
     body: JSON.stringify({ providers }),
   })
+}
+
+export function getScanProgress(): Promise<ScanProgress> {
+  return requestJson('/api/scan/progress')
 }
 
 export function saveConfiguration(

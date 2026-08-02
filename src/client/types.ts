@@ -105,6 +105,12 @@ export type LocalConfiguration = {
   unobservedRatio: number
 }
 
+export type ScanProgress = {
+  running: boolean
+  provider: ProviderKey | null
+  filesScanned: number
+}
+
 export type ScanResult = {
   completedAt: string
   providers: Partial<

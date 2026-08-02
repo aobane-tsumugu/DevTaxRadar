@@ -8,6 +8,7 @@ import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
 import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
 import { buildDashboard } from './dashboard.js'
 import { getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
+import { beginScan, finishScan, readScanProgress, reportScannedFile } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
 
@@ -262,6 +263,8 @@ const scanRequestSchema = z.object({
     .default(['claude', 'codex']),
 })
 
+app.get('/api/scan/progress', async () => readScanProgress())
+
 app.post('/api/scan', async (request, reply) => {
   const parsed = scanRequestSchema.safeParse(request.body ?? {})
   if (!parsed.success) {
@@ -276,34 +279,41 @@ app.post('/api/scan', async (request, reply) => {
   const identifierSalt = getIdentifierSalt()
   const results: Record<string, unknown> = {}
 
-  for (const provider of parsed.data.providers) {
-    const result =
-      provider === 'claude'
-        ? await readClaudeHistory(paths.claude, {
-            identifierSalt,
-            includeLocalProjectLabel: true,
-            includeLocalReferences: true,
-          })
-        : await readCodexHistory(paths.codex, {
-            identifierSalt,
-            includeLocalProjectLabel: true,
-            includeLocalReferences: true,
-          })
+  try {
+    for (const provider of parsed.data.providers) {
+      beginScan(provider)
+      const result =
+        provider === 'claude'
+          ? await readClaudeHistory(paths.claude, {
+              identifierSalt,
+              includeLocalProjectLabel: true,
+              includeLocalReferences: true,
+              onFileScanned: reportScannedFile,
+            })
+          : await readCodexHistory(paths.codex, {
+              identifierSalt,
+              includeLocalProjectLabel: true,
+              includeLocalReferences: true,
+              onFileScanned: reportScannedFile,
+            })
 
-    const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
-    const sessions = aggregateSessions(result.events, aggregationDiagnostics)
+      const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
+      const sessions = aggregateSessions(result.events, aggregationDiagnostics)
 
-    replaceProviderSessions(provider, sessions, {
-      filesSeen: result.diagnostics.filesDiscovered,
-      malformedLines: result.diagnostics.malformedJsonLines,
-    })
-    results[provider] = {
-      events: sessions.length,
-      diagnostics: {
-        ...result.diagnostics,
-        nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
-      },
+      replaceProviderSessions(provider, sessions, {
+        filesSeen: result.diagnostics.filesDiscovered,
+        malformedLines: result.diagnostics.malformedJsonLines,
+      })
+      results[provider] = {
+        events: sessions.length,
+        diagnostics: {
+          ...result.diagnostics,
+          nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
+        },
+      }
     }
+  } finally {
+    finishScan()
   }
 
   return {

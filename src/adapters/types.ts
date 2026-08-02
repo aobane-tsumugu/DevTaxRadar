@@ -61,6 +61,11 @@ export type AdapterOptions = {
    * the working directory so the app can offer resume. Never leaves this PC.
    */
   includeLocalReferences?: boolean
+  /**
+   * Called once per discovered file, after it has been read. Used only to
+   * report a count to the progress endpoint -- never passed a file path.
+   */
+  onFileScanned?: () => void
 }
 
 export function createDiagnostics(): AdapterDiagnostics {
