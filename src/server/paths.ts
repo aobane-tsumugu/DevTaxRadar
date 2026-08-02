@@ -26,6 +26,12 @@ export function getDefaultHistoryPaths(): { claude: string; codex: string } {
   }
 }
 
+export function getClaudeSettingsPath(): string {
+  // Overridable so the write path can be exercised against a temporary copy.
+  // Never point this at a real settings.json in a test.
+  return process.env.DEVTAX_RADAR_CLAUDE_SETTINGS ?? join(homedir(), '.claude', 'settings.json')
+}
+
 export function getIdentifierSalt(): string {
   const directory = getAppDataDirectory()
   const path = join(directory, 'identifier-salt')
