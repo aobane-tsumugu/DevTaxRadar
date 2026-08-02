@@ -692,6 +692,23 @@ describe('session storage', () => {
     expect(result.changedReferences).toEqual([])
   })
 
+  it('今回ハッシュを取れなかった場合も変更として扱わない', () => {
+    // A file removed between the read and the stat, or a partial read, leaves
+    // an empty hash. Reporting that as a content change would hide a deletion
+    // behind a message that says changes are normal.
+    db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-recorded' }) })],
+      diagnostics,
+    )
+    const result = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: '' }) })],
+      diagnostics,
+    )
+    expect(result.changedReferences).toEqual([])
+  })
+
   it('初めて記録するセッションは変更として扱わない', () => {
     const result = db.replaceProviderSessions(
       'claude',

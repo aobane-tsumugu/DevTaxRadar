@@ -460,9 +460,15 @@ export function replaceProviderSessions(
           capturedAt,
         )
         const previousHash = previousHashes.get(item.sessionKey)
+        // An empty hash on either side means "not recorded", not "changed".
+        // Previously empty: the row predates hashing. Currently empty: this
+        // scan could not hash the file (a partial read, or the file vanished
+        // between the read and the stat). Calling that a content change would
+        // put a deletion behind a message that says changes are normal.
         if (
           previousHash !== undefined &&
           previousHash !== '' &&
+          item.localReference.contentHash !== '' &&
           previousHash !== item.localReference.contentHash
         ) {
           changedReferences.push({
