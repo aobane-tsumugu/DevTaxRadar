@@ -51,8 +51,7 @@ button {
 button:focus-visible,
 select:focus-visible,
 input:focus-visible,
-a:focus-visible,
-tbody tr:focus-visible {
+a:focus-visible {
   outline: 3px solid rgba(81, 92, 198, 0.28);
   outline-offset: 2px;
 }
@@ -1156,8 +1155,10 @@ td {
   color: #535d70;
   border-bottom: 1px solid #edf0f4;
 }
+/* The row itself is no longer clickable -- the month cell holds the button --
+   so it must not offer a pointer cursor. The hover tint stays: it helps read
+   across a wide table. */
 tbody tr {
-  cursor: pointer;
   transition: background 0.15s;
 }
 tbody tr:hover,
@@ -1166,9 +1167,6 @@ tbody tr.selected-row {
 }
 tbody tr.selected-row {
   box-shadow: inset 3px 0 var(--indigo);
-}
-tbody tr:focus-visible {
-  outline-offset: -3px;
 }
 .row-open-button {
   padding: 0;

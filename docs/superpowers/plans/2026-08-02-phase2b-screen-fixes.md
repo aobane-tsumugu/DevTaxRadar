@@ -1506,11 +1506,13 @@ Expected: PASS
 
 - [ ] **Step 7: I7 を直す**
 
-`src/App.tsx:966-968` の `<p className="scope-warning">` を差し替える。直接費・設備・自宅費用は既に入力・保存できるため、事実に合わせる。
+`src/App.tsx:966-968` の `<p className="scope-warning">` を差し替える。
+
+事実確認：`src/server/dashboard.ts` の資産カード生成部は `outsource: 0, other: 0` を固定値で返し、`total` は `aiCost` と同じ AI 配賦額である。`buildPlanningLedger` は `buildDashboard` から一度も呼ばれておらず、`/api/ledger` と Markdown 出力の経路にしかない。したがって「外注費・その他直接費もここに含まれる」と書くのは誤りである。旧文言の「入力は未実装」も誤りで、入力と保存は実装済みである。正しいのは「入力はできるが、このカードの金額にはまだ合算していない」。
 
 ```tsx
             <p className="scope-warning">
-              ここに出るのはAIサブスクの配賦額と、費用台帳へ入力済みの外注費・その他直接費だけです。10万円等の境界は、資産全体の取得価額で再確認してください。
+              このカードの金額はAIサブスクの配賦額だけです。入力済みの外注費・その他直接費・設備の償却費は、費用台帳とMarkdown出力には出ますが、この金額にはまだ合算していません。10万円等の境界は、資産全体の取得価額で確認してください。
             </p>
 ```
 
@@ -1539,6 +1541,8 @@ Expected: PASS
 ```
 
 分類の `<select>` に付いている `onClick={(event) => event.stopPropagation()}`（914行）は、行の `onClick` が無くなったため不要になる。削除する。
+
+行そのものが押せなくなったため、`src/index.css` の `tbody tr` から `cursor: pointer` を外す。ホバーの背景色（`tbody tr:hover`）は、横に長い表を読むための手がかりとして残す。`tabIndex` を外したことで `tbody tr:focus-visible` は発火しなくなるため、51行目付近のセレクタリストからと、1170行目付近のルールから、どちらも削除する。
 
 `src/index.css` へボタンのスタイルを足す。表の見た目を変えないよう、リンク調にする。
 
