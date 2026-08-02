@@ -309,14 +309,23 @@ app.post('/api/retention', async (request, reply) => {
     return
   }
 
-  const suffix = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '')
+  // Milliseconds included and the trailing Z kept, so two writes a moment
+  // apart get distinct backups and the timestamp reads unambiguously as UTC.
+  const suffix = new Date().toISOString().replace(/[-:.]/g, '')
   const result = writeCleanupPeriod(getClaudeSettingsPath(), parsed.data.days, suffix)
 
   if (!result.ok) {
     await reply.code(409).send({ error: 'retention_write_failed', message: result.reason })
     return
   }
-  return { saved: true, days: result.days, previousDays: result.previousDays }
+  // backupFileName is a file name, never a path. The screen tells the user the
+  // backup sits beside their settings file; it must not print where that is.
+  return {
+    saved: true,
+    days: result.days,
+    previousDays: result.previousDays,
+    backupFileName: result.backupFileName,
+  }
 })
 
 const scanRequestSchema = z.object({

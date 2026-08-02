@@ -1,14 +1,17 @@
 import {
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, extname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { localDateFromTimestamp } from '../adapters/localTime.js'
 
 // Claude Code deletes transcripts older than cleanupPeriodDays. The key is
@@ -186,7 +189,10 @@ export function forecastNextLoss(
 }
 
 export type RetentionWriteResult =
-  | { ok: true; backupPath: string; previousDays?: number; days: number }
+  // backupFileName is the file name only, never a path: the API surfaces it so
+  // the screen can tell the user a backup exists without leaking where.
+  // It is absent when there was no existing file to back up.
+  | { ok: true; backupFileName?: string; previousDays?: number; days: number }
   | { ok: false; reason: string }
 
 /**
@@ -201,7 +207,9 @@ export function writeCleanupPeriod(
   days: number,
   backupSuffix: string,
 ): RetentionWriteResult {
-  const backupPath = `${settingsPath}.devtax-backup-${backupSuffix}`
+  const basePath = `${settingsPath}.devtax-backup-${backupSuffix}`
+  let backupPath = basePath
+  let backupFileName: string | undefined
 
   let existing: Record<string, unknown> = {}
   if (existsSync(settingsPath)) {
@@ -231,26 +239,55 @@ export function writeCleanupPeriod(
     }
     existing = parsed as Record<string, unknown>
 
-    try {
-      copyFileSync(settingsPath, backupPath)
-    } catch {
+    // COPYFILE_EXCL so a second write in the same second cannot overwrite the
+    // first backup -- that would leave a "backup" of the already-changed file
+    // and destroy the only copy of the original value.
+    let created = false
+    for (let attempt = 0; attempt < 100 && !created; attempt += 1) {
+      backupPath = attempt === 0 ? basePath : `${basePath}-${attempt}`
+      try {
+        copyFileSync(settingsPath, backupPath, constants.COPYFILE_EXCL)
+        created = true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') break
+      }
+    }
+    if (!created) {
       return { ok: false, reason: 'バックアップを作成できなかったため、書き換えを中止しました。' }
     }
+    backupFileName = basename(backupPath)
   }
 
   const previous = existing.cleanupPeriodDays
   const previousDays = typeof previous === 'number' ? previous : undefined
 
+  // Write to a sibling temp file and rename over the original. writeFileSync
+  // truncates first, so a crash or a full disk partway through would leave a
+  // half-written settings.json -- and Claude Code stops its own cleanup when
+  // that file will not parse. A rename within the same directory replaces the
+  // file in one step, so any failure leaves the original untouched.
+  const temporaryPath = `${settingsPath}.devtax-tmp-${backupSuffix}`
   try {
     mkdirSync(dirname(settingsPath), { recursive: true })
     writeFileSync(
-      settingsPath,
+      temporaryPath,
       `${JSON.stringify({ ...existing, cleanupPeriodDays: days }, null, 2)}\n`,
       'utf8',
     )
+    renameSync(temporaryPath, settingsPath)
   } catch {
-    return { ok: false, reason: '設定ファイルへ書き込めませんでした。権限を確認してください。' }
+    try {
+      rmSync(temporaryPath, { force: true })
+    } catch {
+      // The temp file is already gone, or cannot be removed. Either way the
+      // original is intact, which is what the message below promises.
+    }
+    return {
+      ok: false,
+      reason:
+        '設定ファイルへ書き込めませんでした。元のファイルは変更していません。権限とディスクの空き容量を確認してください。',
+    }
   }
 
-  return { ok: true, backupPath, previousDays, days }
+  return { ok: true, backupFileName, previousDays, days }
 }
