@@ -1,5 +1,18 @@
-import type { LocalConfiguration, ProviderKey, RuntimeData, ScanResult } from './types'
-import type { Diagnosis, PlanningLedger, PlanningSnapshot } from '../planning/types'
+import type {
+  LocalConfiguration,
+  ProviderKey,
+  RuntimeData,
+  ScanResult,
+  FolderSummary,
+  SessionSummary,
+  SessionDetail,
+} from './types'
+import type {
+  Diagnosis,
+  PlanningLedger,
+  PlanningSnapshot,
+  ProjectRuleRecord,
+} from '../planning/types'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -12,8 +25,14 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`
     try {
-      const payload = (await response.json()) as { error?: string }
-      if (payload.error) detail = payload.error
+      const payload = (await response.json()) as { error?: string; message?: string }
+      // `message` is the specific, human-readable reason (e.g. a dangling
+      // taxUnitId or a reversed period from PUT /api/planning/rules).
+      // `error` is a machine-readable code (e.g. "invalid_request") meant
+      // for branching, not for showing to the user -- fall back to it only
+      // when the server had nothing more specific to say.
+      if (payload.message) detail = payload.message
+      else if (payload.error) detail = payload.error
     } catch {
       // Keep the HTTP status when the response is not JSON.
     }
@@ -73,6 +92,20 @@ export function savePlanning(
   })
 }
 
+export function savePlanningRules(
+  csrfToken: string,
+  rules: ProjectRuleRecord[],
+): Promise<{ saved: true }> {
+  return requestJson('/api/planning/rules', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevTax-CSRF': csrfToken,
+    },
+    body: JSON.stringify({ rules }),
+  })
+}
+
 export function getDiagnosis(): Promise<Diagnosis> {
   return requestJson('/api/diagnosis')
 }
@@ -87,4 +120,21 @@ export async function getPlanningExport(format: 'markdown' | 'csv' = 'markdown')
   })
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
   return response.blob()
+}
+
+export function getFolders(): Promise<{ folders: FolderSummary[] }> {
+  return requestJson('/api/folders')
+}
+
+export function getSessions(projectKey: string): Promise<{ sessions: SessionSummary[] }> {
+  return requestJson(`/api/sessions?projectKey=${encodeURIComponent(projectKey)}`)
+}
+
+export function getSessionDetail(
+  provider: ProviderKey,
+  sessionKey: string,
+): Promise<SessionDetail> {
+  return requestJson(
+    `/api/sessions/detail?provider=${provider}&sessionKey=${encodeURIComponent(sessionKey)}`,
+  )
 }

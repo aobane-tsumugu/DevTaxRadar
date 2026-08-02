@@ -8,7 +8,7 @@ import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
 import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
 import { buildDashboard } from './dashboard.js'
 import { getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
-import { csrfToken, protectMutation } from './security.js'
+import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
 
 const host = '127.0.0.1'
@@ -18,6 +18,7 @@ const app = Fastify({
   bodyLimit: 64 * 1024,
 })
 
+app.addHook('preHandler', createLoopbackHostGuard(port))
 app.addHook('preHandler', protectMutation)
 
 app.get('/api/health', async () => ({
@@ -45,6 +46,72 @@ app.get('/api/dashboard', async () => {
   return buildDashboard()
 })
 
+app.get('/api/folders', async () => {
+  const { buildFolderSummaries } = await import('./folders.js')
+  return { folders: buildFolderSummaries() }
+})
+
+app.get('/api/sessions', async (request, reply) => {
+  const parsed = z.object({ projectKey: z.string().min(1).max(120) }).safeParse(request.query)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+  const { getSessionsForProject } = await import('./database.js')
+  const sessions = getSessionsForProject(parsed.data.projectKey).map((session) => ({
+    provider: session.provider,
+    sessionKey: session.sessionKey,
+    month: session.month,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    messageCount: session.messageCount,
+    model: session.model,
+    weightedTokens:
+      session.inputTokens +
+      session.outputTokens +
+      session.cacheReadTokens +
+      session.cacheWriteTokens,
+  }))
+  return { sessions }
+})
+
+app.get('/api/sessions/detail', async (request, reply) => {
+  const parsed = z
+    .object({
+      provider: z.enum(['claude', 'codex']),
+      sessionKey: z.string().min(1).max(120),
+    })
+    .safeParse(request.query)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+
+  const [{ getSessionReference }, { buildResumeCommand, readSessionPreview }] = await Promise.all([
+    import('./database.js'),
+    import('./sessionPreview.js'),
+  ])
+  const reference = getSessionReference(parsed.data.provider, parsed.data.sessionKey)
+  if (!reference) {
+    return { available: false }
+  }
+
+  const transcriptExists = existsSync(reference.sourcePath)
+  return {
+    available: true,
+    transcriptExists,
+    preview: transcriptExists
+      ? await readSessionPreview(reference.sourcePath, parsed.data.provider)
+      : undefined,
+    resume: buildResumeCommand(
+      parsed.data.provider,
+      reference.nativeSessionId,
+      reference.workingDirectory,
+      existsSync(reference.workingDirectory),
+    ),
+  }
+})
+
 app.get('/api/config', async () => getConfiguration())
 
 app.get('/api/planning', async () => {
@@ -63,6 +130,28 @@ app.put('/api/planning', async (request, reply) => {
     return
   }
   savePlanningSnapshot(parsed.data)
+  return { saved: true }
+})
+
+app.put('/api/planning/rules', async (request, reply) => {
+  const { projectRulesSchema, replaceProjectRules, PlanningValidationError } =
+    await import('./planningRepository.js')
+  const parsed = projectRulesSchema.safeParse(request.body)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+  try {
+    replaceProjectRules(parsed.data.rules)
+  } catch (error) {
+    const message =
+      error instanceof PlanningValidationError ? error.message : 'ルールを保存できませんでした。'
+    await reply.code(400).send({
+      error: 'invalid_request',
+      message,
+    })
+    return
+  }
   return { saved: true }
 })
 

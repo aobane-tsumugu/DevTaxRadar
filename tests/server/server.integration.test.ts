@@ -547,6 +547,30 @@ describe('セッション単位のダッシュボード集計', () => {
     ).toBe(true)
   })
 
+  it('配賦明細の行が元のフォルダと月を持つ', async () => {
+    const dashboard = await getJson('/api/dashboard')
+    const row = dashboard.allocations.find(
+      (item: { stage: string }) => item.stage !== '未取得' && item.stage !== '1円未満調整',
+    )
+    expect(row.projectKey).toBeTruthy()
+    expect(row.monthKey).toMatch(/^\d{4}-\d{2}$/)
+  })
+
+  it('配賦明細の行は割り当てられた制作物のtaxUnitIdを持つ', async () => {
+    // Guards the server half of the reclassify-from-evidence contract: the
+    // client only knows which product currently governs an allocation row
+    // because dashboard.ts puts taxUnitId on the row. If a future change to
+    // dashboard.ts drops this field, reclassifying a folder from the
+    // allocation table would silently fall back to detaching its product
+    // (see App.tsx's reclassifyAllocation).
+    const dashboard = await getJson('/api/dashboard')
+    const row = dashboard.allocations.find(
+      (item: { product: string }) => item.product === '統合テスト用アプリ',
+    )
+    expect(row).toBeTruthy()
+    expect(row.taxUnitId).toBe('tax-unit-integration')
+  })
+
   it('月の途中でルールが切り替わるフォルダは、その月に分類の異なる2行を生む', async () => {
     // One folder, two sessions in the same month: one comfortably in the
     // first half, one comfortably in the second half. Times are chosen far
@@ -704,6 +728,7 @@ describe('セッション単位のダッシュボード集計', () => {
     const dashboardBody = JSON.stringify(await getJson('/api/dashboard'))
     const ledgerBody = JSON.stringify(await getJson('/api/ledger'))
     const diagnosisBody = JSON.stringify(await getJson('/api/diagnosis'))
+    const foldersBody = JSON.stringify(await getJson('/api/folders'))
     const exportBody = JSON.stringify(
       await fetch(`http://127.0.0.1:${testPort}/api/export?format=markdown`).then((response) =>
         response.text(),
@@ -714,7 +739,65 @@ describe('セッション単位のダッシュボード集計', () => {
       expect(dashboardBody).not.toContain(raw)
       expect(ledgerBody).not.toContain(raw)
       expect(diagnosisBody).not.toContain(raw)
+      expect(foldersBody).not.toContain(raw)
       expect(exportBody).not.toContain(raw)
     }
+  })
+
+  it('セッション一覧に生の識別子が出ない', async () => {
+    // Query the project seeded by the privacy-guard test just above, which is
+    // the one with a live session_references row containing the raw markers
+    // (project_integration_a's session was already wiped by later
+    // replaceProviderSessions('claude', ...) calls, which replace every
+    // claude row on each call -- querying it here would pass vacuously on an
+    // empty list and prove nothing).
+    const response = await getJson(
+      `/api/sessions?projectKey=${encodeURIComponent('project_privacy_guard')}`,
+    )
+    expect(response.sessions).toHaveLength(1)
+    const serialized = JSON.stringify(response)
+    expect(serialized).not.toContain('RAW-SESSION-ID-SHOULD-NOT-LEAK')
+    expect(serialized).not.toContain('RAW-PATH-SHOULD-NOT-LEAK')
+    expect(serialized).not.toContain('RAW-CWD-SHOULD-NOT-LEAK')
+  })
+
+  it('GET /api/folders はフォルダ一覧の形で返す', async () => {
+    const response = await getJson('/api/folders')
+    expect(Array.isArray(response.folders)).toBe(true)
+    expect(response.folders[0]).toEqual(
+      expect.objectContaining({
+        projectKey: expect.any(String),
+        label: expect.any(String),
+        sessionCount: expect.any(Number),
+      }),
+    )
+  })
+
+  it('GET /api/sessions はセッション一覧の形で返す', async () => {
+    // replaceProviderSessions replaces all claude rows on every call, so by
+    // this point only the session seeded by the privacy-guard test above
+    // (the most recent replaceProviderSessions('claude', ...) call) survives.
+    const response = await getJson(
+      `/api/sessions?projectKey=${encodeURIComponent('project_privacy_guard')}`,
+    )
+    expect(Array.isArray(response.sessions)).toBe(true)
+    expect(response.sessions[0]).toEqual(
+      expect.objectContaining({
+        provider: 'claude',
+        sessionKey: 'session_privacy_guard',
+      }),
+    )
+  })
+
+  it('GET /api/sessions/detail はセッション詳細の形で返す', async () => {
+    const response = await getJson(
+      `/api/sessions/detail?provider=claude&sessionKey=${encodeURIComponent('session_privacy_guard')}`,
+    )
+    expect(response).toEqual(
+      expect.objectContaining({
+        available: true,
+        transcriptExists: false,
+      }),
+    )
   })
 })

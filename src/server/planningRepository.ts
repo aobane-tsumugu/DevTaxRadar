@@ -5,6 +5,7 @@ import {
   type Diagnosis,
   type PlanningLedger,
   type PlanningSnapshot,
+  type ProjectRuleRecord,
 } from '../planning/types.js'
 import { getDatabase } from './database.js'
 
@@ -76,6 +77,17 @@ const projectRuleSchema = z.object({
   ]),
   reason: z.string().trim().max(1_000).optional(),
 })
+
+export const projectRulesSchema = z.object({
+  rules: z.array(projectRuleSchema).max(5_000),
+})
+
+export class PlanningValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PlanningValidationError'
+  }
+}
 
 const lifecycleEventSchema = z.object({
   id: identifier,
@@ -638,6 +650,55 @@ export function savePlanningSnapshot(
         item.createdAt,
         item.confirmedAt ?? null,
       )
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+export function replaceProjectRules(
+  rules: ProjectRuleRecord[],
+  db: DatabaseSync = getDatabase(),
+): void {
+  const unitIds = new Set(
+    (db.prepare('SELECT id FROM planning_tax_units').all() as Array<{ id: string }>).map(
+      (row) => row.id,
+    ),
+  )
+  const seenIds = new Set<string>()
+  for (const rule of rules) {
+    if (seenIds.has(rule.id)) {
+      throw new PlanningValidationError(`同じIDのルールが重複しています: ${rule.id}`)
+    }
+    seenIds.add(rule.id)
+    if (rule.taxUnitId && !unitIds.has(rule.taxUnitId)) {
+      throw new PlanningValidationError(`未登録の制作物を指すルールです: ${rule.id}`)
+    }
+    if (rule.effectiveTo && rule.effectiveTo < rule.effectiveFrom) {
+      throw new PlanningValidationError(`終了日が開始日より前のルールです: ${rule.id}`)
+    }
+  }
+
+  const insert = db.prepare(`INSERT INTO planning_project_rules(id, project_key,
+    provider, effective_from, effective_to, tax_unit_id, classification, reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.exec('DELETE FROM planning_project_rules')
+    for (const rule of rules) {
+      insert.run(
+        rule.id,
+        rule.projectKey,
+        rule.provider ?? null,
+        rule.effectiveFrom,
+        rule.effectiveTo ?? null,
+        rule.taxUnitId ?? null,
+        rule.classification,
+        rule.reason ?? null,
+      )
+    }
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')

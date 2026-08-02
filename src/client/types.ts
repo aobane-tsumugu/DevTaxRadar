@@ -1,3 +1,5 @@
+import type { ProjectClassification } from '../planning/types.js'
+
 export type TaxGroup = 'current' | 'future' | 'review'
 
 export type Allocation = {
@@ -15,6 +17,10 @@ export type Allocation = {
   rule: string
   reason: string
   missing: string
+  projectKey?: string
+  monthKey?: string
+  classification?: ProjectClassification
+  taxUnitId?: string
   session: {
     date: string
     id: string
@@ -104,4 +110,51 @@ export type ScanResult = {
       }
     >
   >
+}
+
+export type FolderAssignment = {
+  ruleId: string
+  taxUnitId?: string
+  taxUnitName?: string
+  classification: ProjectClassification
+  effectiveFrom: string
+  effectiveTo?: string
+  provider?: ProviderKey
+  sessionCount: number
+}
+
+export type FolderSummary = {
+  projectKey: string
+  label: string
+  sessionCount: number
+  messageCount: number
+  firstUsedOn: string
+  lastUsedOn: string
+  providers: ProviderKey[]
+  assignments: FolderAssignment[]
+  unassignedSessionCount: number
+}
+
+export type SessionSummary = {
+  provider: ProviderKey
+  sessionKey: string
+  month: string
+  startedAt: string
+  endedAt: string
+  messageCount: number
+  model: string | null
+  weightedTokens: number
+}
+
+export type SessionDetail = {
+  available: boolean
+  transcriptExists?: boolean
+  preview?: string
+  resume?: {
+    command: string
+    changeDirectory?: string
+    resume: string
+    workingDirectoryExists: boolean
+    changeDirectoryOmittedReason?: 'not-found' | 'unquotable-path'
+  }
 }

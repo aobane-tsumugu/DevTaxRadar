@@ -80,7 +80,7 @@ const classificationView: Record<
   },
 }
 
-function safeLocalLabel(value: string | null, fallback: string): string {
+export function safeLocalLabel(value: string | null, fallback: string): string {
   if (!value) return fallback
   const finalSegment = value.split(/[\\/]/).filter(Boolean).at(-1) ?? fallback
   const cleaned = finalSegment
@@ -168,6 +168,10 @@ function allocationForGroup(
     missing: taxUnit
       ? '供用状況と証拠を月次確認してください。'
       : 'プロダクト、資産単位、作業目的を選択してください。',
+    projectKey: group.projectKey,
+    monthKey: group.month,
+    classification: group.classification,
+    taxUnitId: group.taxUnitId ?? undefined,
     session: {
       date: `${group.firstStartedAt.slice(0, 10)} 〜 ${group.lastEndedAt.slice(0, 10)}`,
       id: `${group.provider === 'codex' ? 'cdx' : 'cld'}-••••-${group.projectKey.slice(-4)}`,

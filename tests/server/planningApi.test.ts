@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { PlanningSnapshot } from '../../src/planning/types.js'
+import { emptyPlanningSnapshot } from '../../src/planning/types.js'
 
 const children: ChildProcess[] = []
 const directories: string[] = []
@@ -85,6 +86,44 @@ function snapshot(): PlanningSnapshot {
     evidence: [],
     decisions: [],
   }
+}
+
+async function startServer(): Promise<{
+  port: number
+  csrfToken: string
+}> {
+  const testPort = await port()
+  const data = mkdtempSync(join(tmpdir(), 'devtax-planning-api-'))
+  directories.push(data)
+  const child = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
+    cwd: resolve('.'),
+    stdio: 'ignore',
+    env: { ...process.env, PORT: String(testPort), DEVTAX_RADAR_DATA_DIR: data },
+  })
+  children.push(child)
+  const { csrfToken } = await runtime(testPort)
+  return { port: testPort, csrfToken }
+}
+
+async function put(
+  url: string,
+  body: unknown,
+  config: { port: number; csrfToken: string },
+): Promise<Response> {
+  return fetch(`http://127.0.0.1:${config.port}${url}`, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/json',
+      origin: `http://127.0.0.1:${config.port}`,
+      'x-devtax-csrf': config.csrfToken,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
+async function getJson(url: string, config: { port: number }): Promise<unknown> {
+  const response = await fetch(`http://127.0.0.1:${config.port}${url}`)
+  return response.json()
 }
 
 afterEach(async () => {
@@ -181,6 +220,95 @@ describe('planning HTTP API', () => {
 
     const badExport = await fetch(`http://127.0.0.1:${testPort}/api/export?format=csv`)
     expect(badExport.status).toBe(400)
+  }, 20_000)
+
+  it('ルールだけを置き換えられる', async () => {
+    const config = await startServer()
+    await put(
+      '/api/planning',
+      {
+        ...emptyPlanningSnapshot(2026),
+        taxUnits: [
+          {
+            id: 'unit-rules-api',
+            name: 'ルールAPI用',
+            unitType: 'new-software',
+            usageMode: 'external',
+            revenueModel: 'sales',
+            lifecycleStatus: 'developing',
+          },
+        ],
+      },
+      config,
+    )
+
+    const response = await put(
+      '/api/planning/rules',
+      {
+        rules: [
+          {
+            id: 'rule-api-1',
+            projectKey: 'project_rules_api_0001',
+            effectiveFrom: '2026-01-01',
+            taxUnitId: 'unit-rules-api',
+            classification: 'new-development',
+          },
+        ],
+      },
+      config,
+    )
+    expect(response.status).toBe(200)
+
+    const snapshot = await getJson('/api/planning', config)
+    expect((snapshot as PlanningSnapshot).projectRules).toHaveLength(1)
+    expect((snapshot as PlanningSnapshot).taxUnits).toHaveLength(1)
+  }, 20_000)
+
+  it('存在しない制作物を指すルールを拒否する', async () => {
+    const config = await startServer()
+    const response = await put(
+      '/api/planning/rules',
+      {
+        rules: [
+          {
+            id: 'rule-api-orphan',
+            projectKey: 'project_rules_api_0002',
+            effectiveFrom: '2026-01-01',
+            taxUnitId: 'unit-does-not-exist',
+            classification: 'new-development',
+          },
+        ],
+      },
+      config,
+    )
+    expect(response.status).toBe(400)
+  }, 20_000)
+
+  it('重複するルールIDを拒否する', async () => {
+    const config = await startServer()
+    const response = await put(
+      '/api/planning/rules',
+      {
+        rules: [
+          {
+            id: 'rule-api-dup',
+            projectKey: 'project_rules_api_0003',
+            effectiveFrom: '2026-01-01',
+            classification: 'new-development',
+          },
+          {
+            id: 'rule-api-dup',
+            projectKey: 'project_rules_api_0004',
+            effectiveFrom: '2026-02-01',
+            classification: 'maintenance',
+          },
+        ],
+      },
+      config,
+    )
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { message?: string }
+    expect(body.message).toContain('同じIDのルールが重複しています')
   }, 20_000)
 
   it('設定APIはmappingsを受け付けない', async () => {
