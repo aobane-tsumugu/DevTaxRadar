@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { focusableElements, trapAction } from '../../src/client/focusTrap.ts'
+import { createFocusTrap, focusableElements, trapAction } from '../../src/client/focusTrap.ts'
 
 function buildContainer(): HTMLElement {
   document.body.innerHTML = `
@@ -92,5 +92,88 @@ describe('trapAction', () => {
     const middle = document.getElementById('middle')
     expect(trapAction('Tab', false, container, middle)).toBe('ignore')
     expect(trapAction('Enter', false, container, middle)).toBe('ignore')
+  })
+})
+
+describe('createFocusTrap', () => {
+  beforeEach(buildContainer)
+
+  function press(key: string, shiftKey = false): void {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true }))
+  }
+
+  it('moves focus into the container when installed', () => {
+    const container = document.getElementById('modal') as HTMLElement
+    const teardown = createFocusTrap(container, () => {})
+    expect(document.activeElement?.id).toBe('first')
+    teardown()
+  })
+
+  it('calls onClose on Escape', () => {
+    const container = document.getElementById('modal') as HTMLElement
+    let closed = 0
+    const teardown = createFocusTrap(container, () => {
+      closed += 1
+    })
+    press('Escape')
+    expect(closed).toBe(1)
+    teardown()
+  })
+
+  it('wraps forward from the last element and backward from the first', () => {
+    const container = document.getElementById('modal') as HTMLElement
+    const teardown = createFocusTrap(container, () => {})
+
+    document.getElementById('last')?.focus()
+    press('Tab')
+    expect(document.activeElement?.id).toBe('first')
+
+    press('Tab', true)
+    expect(document.activeElement?.id).toBe('last')
+    teardown()
+  })
+
+  it('pulls focus back when it escaped to the page behind', () => {
+    const container = document.getElementById('modal') as HTMLElement
+    const teardown = createFocusTrap(container, () => {})
+
+    document.getElementById('outside')?.focus()
+    expect(document.activeElement?.id).toBe('outside')
+    press('Tab')
+    expect(document.activeElement?.id).toBe('first')
+    teardown()
+  })
+
+  it('leaves the middle of the sequence to the browser', () => {
+    const container = document.getElementById('modal') as HTMLElement
+    const teardown = createFocusTrap(container, () => {})
+
+    document.getElementById('middle')?.focus()
+    press('Tab')
+    expect(document.activeElement?.id).toBe('middle')
+    teardown()
+  })
+
+  it('returns focus to the opener on teardown, not to wherever focus drifted', () => {
+    const opener = document.getElementById('outside') as HTMLElement
+    opener.focus()
+    const container = document.getElementById('modal') as HTMLElement
+    const teardown = createFocusTrap(container, () => {})
+
+    document.getElementById('last')?.focus()
+    teardown()
+
+    expect(document.activeElement?.id).toBe('outside')
+  })
+
+  it('stops handling keys after teardown', () => {
+    const container = document.getElementById('modal') as HTMLElement
+    let closed = 0
+    const teardown = createFocusTrap(container, () => {
+      closed += 1
+    })
+    teardown()
+    press('Escape')
+    expect(closed).toBe(0)
   })
 })

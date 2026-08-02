@@ -24,7 +24,7 @@ import {
   needsChargeConfirmation,
   providerWithInvertedContract,
 } from '../chargeGuard'
-import { focusableElements, trapAction } from '../focusTrap.js'
+import { createFocusTrap } from '../focusTrap.js'
 import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
 
 function Onboarding({
@@ -84,6 +84,7 @@ function Onboarding({
   )
   const onboardingBodyRef = useRef<HTMLDivElement>(null)
   const modalRef = useRef<HTMLElement>(null)
+  const onCloseRef = useRef(onClose)
   const rankedProducts = data.products
     .map((product, index) => ({ product, index }))
     .sort((left, right) => right.product.sessions - left.product.sessions)
@@ -151,32 +152,19 @@ function Onboarding({
   }, [data.products, planning])
 
   useEffect(() => {
+    onCloseRef.current = onClose
+  })
+
+  useEffect(() => {
     const container = modalRef.current
     if (!container) return
-    const previouslyFocused = document.activeElement
-    focusableElements(container)[0]?.focus()
-
-    function onKeyDown(event: KeyboardEvent) {
-      const modal = modalRef.current
-      if (!modal) return
-      const action = trapAction(event.key, event.shiftKey, modal, document.activeElement)
-      if (action === 'ignore') return
-      event.preventDefault()
-      if (action === 'close') {
-        onClose()
-        return
-      }
-      const elements = focusableElements(modal)
-      if (action === 'wrap-forward') elements[0]?.focus()
-      else elements.at(-1)?.focus()
-    }
-
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus()
-    }
-  }, [onClose])
+    // Install the trap once, for the modal's whole lifetime. onClose is a fresh
+    // inline function on every App render, so depending on it would tear the
+    // trap down and rebuild it at every wizard step -- and the focus restored
+    // on close would then be whatever was focused at the last step change
+    // rather than the button that opened the modal.
+    return createFocusTrap(container, () => onCloseRef.current())
+  }, [])
 
   function toggleProvider(provider: ProviderKey) {
     setSelectedProviders((current) =>

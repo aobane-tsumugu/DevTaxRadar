@@ -71,3 +71,35 @@ export function trapAction(
   if (shiftKey && activeElement === elements[0]) return 'wrap-backward'
   return 'ignore'
 }
+
+/**
+ * Confines keyboard focus to `container` until the returned teardown runs, and
+ * calls `onClose` on Escape. Teardown returns focus to whatever was focused
+ * when the trap was installed.
+ *
+ * The listener sits on `document`, not on `container`, so a Tab pressed after
+ * focus has already escaped to the page behind still gets pulled back.
+ */
+export function createFocusTrap(container: HTMLElement, onClose: () => void): () => void {
+  const previouslyFocused = document.activeElement
+  focusableElements(container)[0]?.focus()
+
+  function onKeyDown(event: KeyboardEvent) {
+    const action = trapAction(event.key, event.shiftKey, container, document.activeElement)
+    if (action === 'ignore') return
+    event.preventDefault()
+    if (action === 'close') {
+      onClose()
+      return
+    }
+    const elements = focusableElements(container)
+    if (action === 'wrap-forward') elements[0]?.focus()
+    else elements.at(-1)?.focus()
+  }
+
+  document.addEventListener('keydown', onKeyDown)
+  return () => {
+    document.removeEventListener('keydown', onKeyDown)
+    if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus()
+  }
+}
