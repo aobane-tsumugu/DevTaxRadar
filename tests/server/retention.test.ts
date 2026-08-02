@@ -112,6 +112,30 @@ describe('forecastNextLoss', () => {
     })
   })
 
+  // The most warning-worthy day of all: the oldest transcript expires today.
+  it('treats the expiry day itself as already losing', () => {
+    const age = { oldestModifiedOn: '2026-07-03', fileCount: 3 }
+    expect(forecastNextLoss(age, period, '2026-08-02')).toEqual({
+      nextLossOn: '2026-08-02',
+      daysUntilNextLoss: 0,
+      alreadyLosing: true,
+    })
+  })
+
+  it('still has one day left on the day before expiry', () => {
+    const age = { oldestModifiedOn: '2026-07-04', fileCount: 3 }
+    expect(forecastNextLoss(age, period, '2026-08-02')).toEqual({
+      nextLossOn: '2026-08-03',
+      daysUntilNextLoss: 1,
+      alreadyLosing: false,
+    })
+  })
+
+  it('crosses a leap day without drifting', () => {
+    const age = { oldestModifiedOn: '2028-01-30', fileCount: 1 }
+    expect(forecastNextLoss(age, period, '2028-02-01').nextLossOn).toBe('2028-02-29')
+  })
+
   it('cannot forecast when the settings file is unreadable', () => {
     const age = { oldestModifiedOn: '2026-07-20', fileCount: 3 }
     const unreadable = { status: 'unreadable' as const, reason: 'JSONを解析できません' }

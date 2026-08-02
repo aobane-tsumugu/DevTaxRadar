@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { localDateFromTimestamp } from '../adapters/localTime.js'
 
@@ -49,8 +49,21 @@ export type HistoryAge = {
 export function readHistoryAge(rootDirectory: string): HistoryAge {
   let oldestMs: number | undefined
   let fileCount = 0
+  // On Windows a directory junction reports isDirectory() === true, so a
+  // junction pointing at an ancestor would recurse forever. Track resolved
+  // paths and visit each real directory once.
+  const visited = new Set<string>()
 
   function walk(directory: string): void {
+    let resolved: string
+    try {
+      resolved = realpathSync(directory)
+    } catch {
+      return
+    }
+    if (visited.has(resolved)) return
+    visited.add(resolved)
+
     let entries
     try {
       entries = readdirSync(directory, { withFileTypes: true })
@@ -71,6 +84,9 @@ export function readHistoryAge(rootDirectory: string): HistoryAge {
         continue
       }
       fileCount += 1
+      // mtime is the closest signal available. Claude Code is closed source, so
+      // whether its cleanup keys off mtime cannot be verified from here -- the
+      // forecast is an estimate, and the screen says so.
       if (oldestMs === undefined || stats.mtimeMs < oldestMs) oldestMs = stats.mtimeMs
     }
   }
