@@ -1229,7 +1229,7 @@ function Onboarding({
                 <div className="cost-editor-section">
                   <div className="cost-editor-heading">
                     <div>
-                      <h4>PC・DGXなど</h4>
+                      <h4>パソコン・GPU機器など</h4>
                       <p>
                         10万円の境界だけで決めず、使い始めた日・耐用年数・私用転用も記録します。
                       </p>
@@ -1282,7 +1282,7 @@ function Onboarding({
                         >
                           <option value="pc">パソコン</option>
                           <option value="gpu">GPU機器</option>
-                          <option value="dgx">DGX</option>
+                          <option value="dgx">AI開発用ワークステーション</option>
                           <option value="server">サーバー</option>
                           <option value="desk">机</option>
                           <option value="peripheral">周辺機器</option>

@@ -89,7 +89,7 @@ export const demoPlanning: PlanningSnapshot = {
   equipment: [
     {
       id: 'equipment-dgx',
-      name: 'DGX Spark',
+      name: 'GPU機器',
       equipmentType: 'dgx',
       acquisitionCostJpy: 650000,
       acquiredOn: '2026-07-20',
@@ -143,7 +143,7 @@ export const demoPlanning: PlanningSnapshot = {
       method: 'watt-hour',
       businessUseRatio: 0.22,
       basis: '機器消費電力 × 稼働時間 ÷ 月使用量',
-      rationale: 'DGXとPCの仕様・稼働記録から算出',
+      rationale: '設備の仕様・稼働記録から算出',
       taxUnitId: 'tax-unit-mixed',
       projectAllocationRatio: 0.6,
       treatment: 'shared',
@@ -191,7 +191,7 @@ export const demoDiagnosis: Diagnosis = {
   currentPosition: [
     '自分の実作業で使う制作物と、外部公開を目指す制作物の両方があります。',
     '執筆アシスタントは自己利用開始済み、DevTax Radarは公開前の開発中です。',
-    'PC・DGXと自宅費用の按分根拠を登録済みですが、未添付の証拠があります。',
+    '設備と自宅費用の按分根拠を登録済みですが、未添付の証拠があります。',
   ],
   immediateActions: [
     {

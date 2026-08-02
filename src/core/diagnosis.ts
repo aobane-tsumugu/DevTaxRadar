@@ -238,7 +238,7 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
     addAction(immediateActions, {
       id: 'review-equipment',
       priority: 'medium',
-      title: 'PC・GPU・DGX等の利用状況を確認する',
+      title: 'パソコン・GPU機器等の利用状況を確認する',
       reason: '該当する設備があれば、購入、転用、利用割合と役割を記録します。',
       trigger: 'now',
     })

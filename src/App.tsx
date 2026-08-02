@@ -1126,7 +1126,7 @@ function PlanningEvidenceSections({
         </article>
         <article className="panel ledger-card">
           <PanelHeading
-            title="PC・DGX等"
+            title="パソコン・GPU機器等"
             subtitle={`${planning.equipment.length}件 · 業務割合と制作物割合を分離`}
           />
           <ul className="compact-record-list">
@@ -1324,7 +1324,7 @@ const TAX_GUIDE_ITEMS = [
   {
     term: 'このMVPで未計算のものは？',
     answer:
-      'PC・DGX、家賃・電気・通信、直接費は概算候補を計算します。交通費、暗号資産益との所得集計、最終的な償却額や税額はまだ確定しません。',
+      '設備、家賃・電気・通信、直接費は概算候補を計算します。交通費、暗号資産益との所得集計、最終的な償却額や税額はまだ確定しません。',
     example:
       '私用から転用したPCの未償却残高や耐用年数が未入力なら、無理に計算せず「要確認」として残します。',
     check:

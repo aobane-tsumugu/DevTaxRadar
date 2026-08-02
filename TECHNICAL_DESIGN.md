@@ -310,7 +310,7 @@ Dashboard projection / export
 - `PlanningProfile`: 年分、早期診断／事後整理、所得・申告候補、収益化状況
 - `TaxUnitRecord`: 制作物・改良計画、自己利用／外部提供／混合、状態、完成条件
 - `LifecycleEventRecord`: 開発開始、評価、自分利用開始、外部公開、販売、改良、廃止、中止
-- `EquipmentRecord`: PC・DGX等、取得・転用・業務割合・期間償却候補
+- `EquipmentRecord`: パソコン・GPU機器等、取得・転用・業務割合・期間償却候補
 - `HomeCostRecord`: 家賃・電気・通信費、按分方式、式、理由、有効期間
 - `DirectCostRecord`: 外注・素材・クラウド等の制作物直接費
 - `EvidenceRecord`: Gitを必須としない参照・メモと証拠強度
