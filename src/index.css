@@ -1479,6 +1479,12 @@ th.number {
   background: #fff;
   box-shadow: 0 30px 90px rgba(9, 13, 26, 0.34);
 }
+.onboarding-main {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
 .modal-close {
   position: absolute;
   z-index: 2;
@@ -1551,8 +1557,7 @@ th.number {
 .onboarding-body {
   min-width: 0;
   min-height: 0;
-  padding: 46px 48px 96px;
-  position: relative;
+  padding: 46px 48px 32px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1948,16 +1953,17 @@ th.number {
   text-align: center;
   font-size: 16px;
 }
+.onboarding-footer {
+  padding: 14px 48px 18px;
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
 .modal-actions {
-  position: absolute;
-  z-index: 3;
-  left: 48px;
-  right: 48px;
-  bottom: 22px;
-  padding-top: 12px;
   display: flex;
   justify-content: space-between;
-  background: linear-gradient(transparent, #fff 24%);
+  gap: 12px;
 }
 .modal-actions button:disabled {
   opacity: 0.6;
@@ -2264,15 +2270,13 @@ th.number {
     font-size: 16px;
   }
   .onboarding-body {
-    padding: 28px 21px 92px;
+    padding: 28px 21px 24px;
+  }
+  .onboarding-footer {
+    padding: 12px 21px 14px;
   }
   .modal-actions {
-    position: fixed;
-    left: 21px;
-    right: 21px;
-    bottom: 13px;
-    padding: 11px 0;
-    background: #fff;
+    gap: 8px;
   }
   .mapping-row {
     flex-wrap: wrap;
