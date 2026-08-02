@@ -556,7 +556,10 @@ function outOfContractAllocation(
   taxUnitById: Map<string, TaxUnitRecord>,
 ): Allocation {
   return {
-    id: `out-of-contract-${session.provider}-${session.sessionKey}`,
+    // sessionKey alone is not unique: sessionAggregation splits a session that
+    // crosses a month boundary into one row per month, so two rows can share it.
+    // React keys off Allocation.id, and a duplicate id silently drops a row.
+    id: `out-of-contract-${session.provider}-${session.month}-${session.projectKey}-${session.sessionKey}`,
     month: displayBillingMonth(session.month),
     provider: providerLabel[session.provider],
     product: displayProject(
@@ -577,7 +580,10 @@ function outOfContractAllocation(
       '入力された契約期間の外で使われたセッションです。この月の月額には含めていません。契約期間が誤っていれば、はじめの準備の費用ステップで直せます。',
     missing: '契約の開始日・終了日が正しいか確認してください。',
     session: {
-      date: session.startedAt,
+      // The exclusion decision is made on the local date, so show that date.
+      // The raw ISO timestamp would display a UTC calendar day that can differ
+      // from the day the rule actually used.
+      date: localDateFromTimestamp(session.startedAt) ?? session.month,
       id: '契約期間外',
       folder: safeLocalLabel(session.projectLabel, `Project ${session.projectKey.slice(-6)}`),
       branch: '対象外',
