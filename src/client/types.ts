@@ -89,6 +89,11 @@ export type RuntimeData = {
   }
 }
 
+export type ProviderContract = {
+  startedOn?: string
+  endedOn?: string
+}
+
 export type LocalConfiguration = {
   charges: Record<ProviderKey, number>
   monthlyCharges: Array<{
@@ -96,6 +101,7 @@ export type LocalConfiguration = {
     month: string
     amountJpy: number
   }>
+  contracts: Record<ProviderKey, ProviderContract>
   unobservedRatio: number
 }
 

@@ -22,6 +22,11 @@ type UsageOverview = {
   recentScans: Array<Record<string, string | number | null>>
 }
 
+export type ProviderContract = {
+  startedOn?: string // 'YYYY-MM-DD'
+  endedOn?: string // 'YYYY-MM-DD'
+}
+
 export type LocalConfiguration = {
   charges: { claude: number; codex: number }
   monthlyCharges: Array<{
@@ -29,6 +34,7 @@ export type LocalConfiguration = {
     month: string
     amountJpy: number
   }>
+  contracts: { claude: ProviderContract; codex: ProviderContract }
   unobservedRatio: number
 }
 
@@ -109,7 +115,9 @@ export function getDatabase(): DatabaseSync {
 
     CREATE TABLE IF NOT EXISTS provider_settings (
       provider TEXT PRIMARY KEY,
-      monthly_fee_jpy INTEGER NOT NULL DEFAULT 0
+      monthly_fee_jpy INTEGER NOT NULL DEFAULT 0,
+      contract_started_on TEXT,
+      contract_ended_on TEXT
     ) STRICT;
 
     INSERT OR IGNORE INTO provider_settings(provider, monthly_fee_jpy)
@@ -290,6 +298,18 @@ export function getDatabase(): DatabaseSync {
   )
   if (!scanColumns.has('time_zone')) {
     database.exec('ALTER TABLE scans ADD COLUMN time_zone TEXT')
+  }
+
+  const providerSettingsColumns = new Set(
+    (database.prepare(`PRAGMA table_info(provider_settings)`).all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  )
+  if (!providerSettingsColumns.has('contract_started_on')) {
+    database.exec('ALTER TABLE provider_settings ADD COLUMN contract_started_on TEXT')
+  }
+  if (!providerSettingsColumns.has('contract_ended_on')) {
+    database.exec('ALTER TABLE provider_settings ADD COLUMN contract_ended_on TEXT')
   }
 
   // Legacy config-driven classification. project_mappings.product_name was a
@@ -526,16 +546,28 @@ export function getSessionReference(
 
 export function getConfiguration(): LocalConfiguration {
   const db = getDatabase()
-  const charges = Object.fromEntries(
-    (
-      db
-        .prepare('SELECT provider, monthly_fee_jpy AS amount FROM provider_settings')
-        .all() as Array<{
-        provider: string
-        amount: number
-      }>
-    ).map((row) => [row.provider, row.amount]),
-  )
+  const providerRows = db
+    .prepare(
+      `SELECT provider, monthly_fee_jpy AS amount,
+              contract_started_on AS startedOn, contract_ended_on AS endedOn
+       FROM provider_settings`,
+    )
+    .all() as Array<{
+    provider: string
+    amount: number
+    startedOn: string | null
+    endedOn: string | null
+  }>
+  const byProvider = new Map(providerRows.map((row) => [row.provider, row]))
+
+  function contractFor(provider: 'claude' | 'codex'): ProviderContract {
+    const row = byProvider.get(provider)
+    const contract: ProviderContract = {}
+    if (row?.startedOn) contract.startedOn = row.startedOn
+    if (row?.endedOn) contract.endedOn = row.endedOn
+    return contract
+  }
+
   const ratioRow = db
     .prepare(
       `
@@ -555,10 +587,11 @@ export function getConfiguration(): LocalConfiguration {
 
   return {
     charges: {
-      claude: Number(charges.claude ?? 0),
-      codex: Number(charges.codex ?? 0),
+      claude: Number(byProvider.get('claude')?.amount ?? 0),
+      codex: Number(byProvider.get('codex')?.amount ?? 0),
     },
     monthlyCharges,
+    contracts: { claude: contractFor('claude'), codex: contractFor('codex') },
     unobservedRatio: Number(ratioRow?.value ?? 0.1),
   }
 }
@@ -566,7 +599,9 @@ export function getConfiguration(): LocalConfiguration {
 export function saveConfiguration(configuration: LocalConfiguration): void {
   const db = getDatabase()
   const updateCharge = db.prepare(`
-    UPDATE provider_settings SET monthly_fee_jpy = ? WHERE provider = ?
+    UPDATE provider_settings
+    SET monthly_fee_jpy = ?, contract_started_on = ?, contract_ended_on = ?
+    WHERE provider = ?
   `)
   const insertMonthlyCharge = db.prepare(`
     INSERT INTO provider_month_charges(provider, month, amount_jpy)
@@ -575,8 +610,15 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
 
   db.exec('BEGIN IMMEDIATE')
   try {
-    updateCharge.run(configuration.charges.claude, 'claude')
-    updateCharge.run(configuration.charges.codex, 'codex')
+    for (const provider of ['claude', 'codex'] as const) {
+      const contract = configuration.contracts[provider]
+      updateCharge.run(
+        configuration.charges[provider],
+        contract?.startedOn ?? null,
+        contract?.endedOn ?? null,
+        provider,
+      )
+    }
     db.prepare(
       `
       INSERT INTO app_settings(key, value) VALUES ('unobserved_ratio', ?)

@@ -199,6 +199,10 @@ describe('local server boundary', () => {
           amountJpy: 120_000,
         },
       ],
+      contracts: {
+        claude: { startedOn: '2026-04-01' },
+        codex: {},
+      },
       unobservedRatio: 0.1,
     }
     const saveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
@@ -219,6 +223,7 @@ describe('local server boundary', () => {
     expect(storedConfiguration).toEqual({
       charges: configuration.charges,
       monthlyCharges: configuration.monthlyCharges,
+      contracts: configuration.contracts,
       unobservedRatio: configuration.unobservedRatio,
     })
 
@@ -394,6 +399,20 @@ describe('local server boundary', () => {
       }),
     })
     expect(duplicateChargeResponse.status).toBe(400)
+
+    const invalidContractResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify({
+        ...configuration,
+        contracts: { claude: { startedOn: '2026-07-01', endedOn: '2026-06-30' }, codex: {} },
+      }),
+    })
+    expect(invalidContractResponse.status).toBe(400)
 
     if (existsSync(resolve('dist/index.html'))) {
       const staticResponse = await fetch(`http://127.0.0.1:${port}/`)
@@ -617,6 +636,7 @@ describe('セッション単位のダッシュボード集計', () => {
     databaseModule.saveConfiguration({
       charges: { claude: 0, codex: 0 },
       monthlyCharges: [{ provider: 'claude', month: '2026-08', amountJpy: 100_000 }],
+      contracts: { claude: {}, codex: {} },
       unobservedRatio: 0.1,
     })
 

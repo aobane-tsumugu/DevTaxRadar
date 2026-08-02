@@ -361,6 +361,9 @@ function Onboarding({
           codex: Math.max(0, Math.round(codexCharge)),
         },
         monthlyCharges,
+        // Temporary passthrough to keep typecheck green; Task 3 replaces this
+        // with real contract period input fields on this screen.
+        contracts: configuration?.contracts ?? { claude: {}, codex: {} },
         unobservedRatio: Math.min(95, Math.max(0, unobservedPercent)) / 100,
       })
       await onSavePlanning(planningDraft)

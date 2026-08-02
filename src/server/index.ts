@@ -185,6 +185,22 @@ app.get('/api/export', async (request, reply) => {
     .send(planningMarkdown(snapshot, diagnosePlanning(snapshot), buildPlanningLedger(snapshot)))
 })
 
+const contractDateSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, {
+  message: '日付は YYYY-MM-DD で入力してください。',
+})
+
+const providerContractSchema = z
+  .object({
+    startedOn: contractDateSchema.optional(),
+    endedOn: contractDateSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (contract) =>
+      !contract.startedOn || !contract.endedOn || contract.startedOn <= contract.endedOn,
+    { message: '契約終了日は開始日以降にしてください。' },
+  )
+
 const configurationSchema = z
   .object({
     charges: z.object({
@@ -201,6 +217,13 @@ const configurationSchema = z
       )
       .max(240)
       .default([]),
+    contracts: z
+      .object({
+        claude: providerContractSchema,
+        codex: providerContractSchema,
+      })
+      .strict()
+      .default({ claude: {}, codex: {} }),
     unobservedRatio: z.number().min(0).max(0.95),
   })
   .strict()
