@@ -24,6 +24,7 @@ import {
   needsChargeConfirmation,
   providerWithInvertedContract,
 } from '../chargeGuard'
+import { focusableElements, trapAction } from '../focusTrap.js'
 import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
 
 function Onboarding({
@@ -82,6 +83,7 @@ function Onboarding({
     {},
   )
   const onboardingBodyRef = useRef<HTMLDivElement>(null)
+  const modalRef = useRef<HTMLElement>(null)
   const rankedProducts = data.products
     .map((product, index) => ({ product, index }))
     .sort((left, right) => right.product.sessions - left.product.sessions)
@@ -147,6 +149,34 @@ function Onboarding({
     const next = planning.taxUnits.length > 0 ? planning : { ...planning, taxUnits: [fallbackUnit] }
     setPlanningDraft(next)
   }, [data.products, planning])
+
+  useEffect(() => {
+    const container = modalRef.current
+    if (!container) return
+    const previouslyFocused = document.activeElement
+    focusableElements(container)[0]?.focus()
+
+    function onKeyDown(event: KeyboardEvent) {
+      const modal = modalRef.current
+      if (!modal) return
+      const action = trapAction(event.key, event.shiftKey, modal, document.activeElement)
+      if (action === 'ignore') return
+      event.preventDefault()
+      if (action === 'close') {
+        onClose()
+        return
+      }
+      const elements = focusableElements(modal)
+      if (action === 'wrap-forward') elements[0]?.focus()
+      else elements.at(-1)?.focus()
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus()
+    }
+  }, [onClose])
 
   function toggleProvider(provider: ProviderKey) {
     setSelectedProviders((current) =>
@@ -448,6 +478,7 @@ function Onboarding({
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-title"
+        ref={modalRef}
       >
         <button className="modal-close" aria-label="閉じる" onClick={onClose}>
           ×
