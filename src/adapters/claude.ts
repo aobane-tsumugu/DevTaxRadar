@@ -40,12 +40,18 @@ export async function readClaudeHistory(
     // real contentHash/byteSize/fileMtime are patched onto every event from
     // this file below -- not built inline while rows are still streaming.
     const hash = options.includeLocalReferences ? createHash('sha256') : undefined
+    const ioErrorsBefore = diagnostics.ioErrors
     const fileEvents: NormalizedUsage[] = []
     for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
       const event = normalizeClaudeRow(row, filePath, options, seenMessages, diagnostics)
       if (event) fileEvents.push(event)
     }
-    if (hash) {
+    // A read that failed part way through leaves the hash covering only the
+    // bytes that arrived. Recording that as the file's hash would make the next
+    // scan report a change that never happened, so leave it empty -- which the
+    // change detection already treats as "not recorded".
+    const readCompletely = diagnostics.ioErrors === ioErrorsBefore
+    if (hash && readCompletely) {
       const summary = fileContentSummary(filePath, hash)
       for (const event of fileEvents) {
         if (event.localReference) {

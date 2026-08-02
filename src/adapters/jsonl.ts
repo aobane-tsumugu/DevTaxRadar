@@ -42,25 +42,34 @@ export async function* readJsonlObjects(
   hash?: Hash,
 ): AsyncGenerator<Record<string, unknown>> {
   const source = createReadStream(filePath, { flags: 'r' })
-  source.on('error', () => {
-    diagnostics.ioErrors += 1
-  })
 
   // A Transform in the pipe chain sees every byte without switching the source
   // into flowing mode, which a bare 'data' listener would do -- that would race
   // readline for the same chunks. This keeps the file read exactly once, and
   // readline decodes the Buffer chunks it receives as utf8 by default, so line
   // splitting is unaffected by dropping `encoding` from createReadStream.
-  const input = hash
-    ? source.pipe(
-        new Transform({
-          transform(chunk, _encoding, callback) {
-            hash.update(chunk)
-            callback(null, chunk)
-          },
-        }),
-      )
-    : source
+  const tap = hash
+    ? new Transform({
+        transform(chunk, _encoding, callback) {
+          hash.update(chunk)
+          callback(null, chunk)
+        },
+      })
+    : undefined
+
+  source.on('error', () => {
+    diagnostics.ioErrors += 1
+    // .pipe() does not forward errors. Without this the Transform would stay
+    // open with no more data and no 'end', and readline's `for await` would
+    // wait forever -- hanging the whole scan on one unreadable file (an
+    // antivirus lock, a cloud-sync placeholder, a transcript still being
+    // written). end() flushes and closes the readable side, which readline
+    // sees as EOF, so the loop finishes and the scan moves to the next file.
+    // destroy() is not enough: it leaves the iterator waiting.
+    tap?.end()
+  })
+
+  const input = tap ? source.pipe(tap) : source
 
   const lines = createInterface({
     input,

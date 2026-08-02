@@ -48,6 +48,7 @@ export async function readCodexHistory(
     // session file yields at most one event, so the digest can be finalized
     // right after the loop, before that event is built.
     const hash = options.includeLocalReferences ? createHash('sha256') : undefined
+    const ioErrorsBefore = diagnostics.ioErrors
 
     for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
       if (consumeSessionMetadata(row, session) || consumeModel(row, session)) {
@@ -59,7 +60,14 @@ export async function readCodexHistory(
       diagnostics.unsupportedLines += 1
     }
 
-    const fileSummary = hash ? fileContentSummary(filePath, hash) : undefined
+    // A read that failed part way through leaves the hash covering only the
+    // bytes that arrived. Recording that as the file's hash would make the next
+    // scan report a change that never happened, so leave it out -- which the
+    // change detection already treats as "not recorded".
+    const fileSummary =
+      hash && diagnostics.ioErrors === ioErrorsBefore
+        ? fileContentSummary(filePath, hash)
+        : undefined
     const event = normalizeCodexSession(session, options, diagnostics, fileSummary)
     if (event) events.push(event)
   }

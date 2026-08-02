@@ -68,3 +68,30 @@ describe('readJsonlObjects content hashing', () => {
     expect(rows).toEqual([{ a: 1 }])
   })
 })
+
+describe('readJsonlObjects error handling', () => {
+  it('terminates instead of hanging when the file cannot be read', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'devtax-hash-'))
+    temporaryDirectories.push(directory)
+    const missing = join(directory, 'not-there.jsonl')
+    const diagnostics = emptyDiagnostics()
+    const hash = createHash('sha256')
+
+    // A hang here is the failure mode this guards: .pipe() does not forward the
+    // source's error to the Transform, so without an explicit destroy the
+    // readline loop would await a stream that never ends, and /api/scan would
+    // never return. The timeout turns that hang into a failed assertion.
+    const rows: Record<string, unknown>[] = []
+    await Promise.race([
+      (async () => {
+        for await (const row of readJsonlObjects(missing, diagnostics, hash)) rows.push(row)
+      })(),
+      new Promise((_resolve, reject) =>
+        setTimeout(() => reject(new Error('readJsonlObjects did not terminate')), 3_000),
+      ),
+    ])
+
+    expect(rows).toEqual([])
+    expect(diagnostics.ioErrors).toBeGreaterThan(0)
+  })
+})
