@@ -25,6 +25,7 @@ import {
   providerWithInvertedContract,
 } from '../chargeGuard'
 import { createFocusTrap } from '../focusTrap.js'
+import { displayMonth } from '../monthLabel.js'
 import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
 
 function Onboarding({
@@ -94,7 +95,7 @@ function Onboarding({
     .sort()
   const historyRangeText =
     observedHistoryMonths.length > 0
-      ? `${observedHistoryMonths[0]}月～${observedHistoryMonths.at(-1)}月`
+      ? `${displayMonth(observedHistoryMonths[0])}～${displayMonth(observedHistoryMonths.at(-1))}`
       : '利用時期を確認中'
   const draftDiagnosis = useMemo(() => diagnosePlanning(planningDraft), [planningDraft])
 
@@ -712,12 +713,12 @@ function Onboarding({
                               履歴上：
                               {product.firstObservedAt?.slice(0, 10) ||
                                 (product.firstObservedMonth
-                                  ? `${product.firstObservedMonth}月`
+                                  ? displayMonth(product.firstObservedMonth)
                                   : '開始時期不明')}{' '}
                               ～{' '}
                               {product.lastObservedAt?.slice(0, 10) ||
                                 (product.lastObservedMonth
-                                  ? `${product.lastObservedMonth}月`
+                                  ? displayMonth(product.lastObservedMonth)
                                   : '終了時期不明')}
                             </small>
                           </span>

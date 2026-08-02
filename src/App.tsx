@@ -690,7 +690,11 @@ function SummaryPage({
           <div
             className="bar-chart"
             role="img"
-            aria-label="2026年4月から7月までの費用配賦積み上げグラフ"
+            aria-label={
+              months.length > 0
+                ? `${months[0].label}から${months.at(-1)?.label}までの費用配賦積み上げグラフ`
+                : '費用配賦積み上げグラフ（対象の月がありません）'
+            }
           >
             <div className="axis-label top">{yen.format(maxMonth)}</div>
             <div className="axis-label middle">{yen.format(Math.round(maxMonth / 2))}</div>
@@ -876,21 +880,16 @@ function EvidencePage({
             </thead>
             <tbody>
               {allocations.map((row) => (
-                <tr
-                  key={row.id}
-                  className={active?.id === row.id ? 'selected-row' : ''}
-                  onClick={() => onSelect(row)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      onSelect(row)
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${row.month} ${row.provider} ${row.product}、配賦額${yen.format(row.amount)}の根拠を表示`}
-                >
-                  <td>{row.month}</td>
+                <tr key={row.id} className={active?.id === row.id ? 'selected-row' : ''}>
+                  <td>
+                    <button
+                      className="row-open-button"
+                      onClick={() => onSelect(row)}
+                      aria-label={`${row.month} ${row.provider} ${row.product}、配賦額${yen.format(row.amount)}の根拠を表示`}
+                    >
+                      {row.month}
+                    </button>
+                  </td>
                   <td>
                     <span className={`provider-logo ${row.provider === 'Codex' ? 'codex' : ''}`}>
                       {row.provider === 'Codex' ? 'O' : 'C'}
@@ -911,7 +910,6 @@ function EvidencePage({
                       <select
                         value={row.classification ?? 'unclassified'}
                         disabled={busy}
-                        onClick={(event) => event.stopPropagation()}
                         onChange={(event) =>
                           onReclassify(row, event.target.value as ProjectClassification)
                         }
@@ -964,7 +962,7 @@ function EvidencePage({
               </div>
             </dl>
             <p className="scope-warning">
-              AI以外の直接費入力は未実装です。10万円等の境界は、実際の資産全体の取得価額で再確認してください。
+              ここに出るのはAIサブスクの配賦額と、費用台帳へ入力済みの外注費・その他直接費だけです。10万円等の境界は、資産全体の取得価額で再確認してください。
             </p>
             <div className="asset-progress">
               <div>

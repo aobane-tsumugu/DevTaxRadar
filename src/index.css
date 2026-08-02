@@ -1170,6 +1170,20 @@ tbody tr.selected-row {
 tbody tr:focus-visible {
   outline-offset: -3px;
 }
+.row-open-button {
+  padding: 0;
+  color: var(--indigo-dark);
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.row-open-button:hover {
+  text-decoration-thickness: 2px;
+}
 td.number,
 th.number {
   text-align: right;
