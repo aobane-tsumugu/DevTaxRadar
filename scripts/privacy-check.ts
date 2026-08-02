@@ -82,6 +82,13 @@ function visit(path: string): void {
   if (releaseSurface && /(?:[a-z]:\/users\/[^./\s]+|\/users\/[^./\s]+)\//i.test(content)) {
     findings.push(`${file}: contains an absolute user-home path`)
   }
+
+  // session_references isolates raw identifiers (design doc 4.2/11): its
+  // column names must never surface in a shipped/exported artifact, since
+  // their presence would signal the underlying values leaked alongside them.
+  if (releaseSurface && /(native_session_id|source_path|content_hash)/.test(content)) {
+    findings.push(`${file}: contains a session_references column name`)
+  }
 }
 
 visit(root)

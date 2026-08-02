@@ -5,9 +5,16 @@ import fastifyStatic from '@fastify/static'
 import Fastify from 'fastify'
 import { z } from 'zod'
 import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
+import { localDateFromTimestamp } from '../adapters/localTime.js'
 import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
 import { buildDashboard } from './dashboard.js'
-import { getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
+import { getClaudeSettingsPath, getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
+import {
+  forecastNextLoss,
+  readCleanupPeriod,
+  readHistoryAgeCached,
+  writeCleanupPeriod,
+} from './retention.js'
 import { beginScan, finishScan, readScanProgress, reportScannedFile } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
@@ -29,11 +36,42 @@ app.get('/api/health', async () => ({
 
 app.get('/api/runtime', async () => {
   const historyPaths = getDefaultHistoryPaths()
+  const today = localDateFromTimestamp(new Date().toISOString()) ?? ''
+
+  const claudeAge = readHistoryAgeCached(historyPaths.claude)
+  const claudePeriod = readCleanupPeriod(getClaudeSettingsPath())
+  const claudeForecast = forecastNextLoss(claudeAge, claudePeriod, today)
+
+  // Codex has no retention setting today (see the note in paths.ts). Report
+  // the age anyway so the screen keeps showing it if one ever lands.
+  const codexAge = readHistoryAgeCached(historyPaths.codex)
+
   return {
     csrfToken,
     providers: {
       claude: { detected: existsSync(historyPaths.claude) },
       codex: { detected: existsSync(historyPaths.codex) },
+    },
+    retention: {
+      claude: {
+        detected: existsSync(historyPaths.claude),
+        fileCount: claudeAge.fileCount,
+        oldestModifiedOn: claudeAge.oldestModifiedOn,
+        autoDelete:
+          claudePeriod.status === 'unreadable'
+            ? { kind: 'unreadable' as const, reason: claudePeriod.reason }
+            : { kind: 'configured' as const, days: claudePeriod.days, source: claudePeriod.status },
+        nextLossOn: claudeForecast.nextLossOn,
+        daysUntilNextLoss: claudeForecast.daysUntilNextLoss,
+        alreadyLosing: claudeForecast.alreadyLosing,
+      },
+      codex: {
+        detected: existsSync(historyPaths.codex),
+        fileCount: codexAge.fileCount,
+        oldestModifiedOn: codexAge.oldestModifiedOn,
+        autoDelete: { kind: 'none' as const },
+        alreadyLosing: false,
+      },
     },
     privacy: {
       localOnly: true,
@@ -256,6 +294,40 @@ app.post('/api/config', async (request, reply) => {
   return { saved: true }
 })
 
+const retentionRequestSchema = z
+  .object({
+    // No upper bound suggestion is offered by the product: the right length
+    // depends on the user's bookkeeping, not on anything we can infer.
+    days: z.number().int().min(1).max(36500),
+  })
+  .strict()
+
+app.post('/api/retention', async (request, reply) => {
+  const parsed = retentionRequestSchema.safeParse(request.body)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+
+  // Milliseconds included and the trailing Z kept, so two writes a moment
+  // apart get distinct backups and the timestamp reads unambiguously as UTC.
+  const suffix = new Date().toISOString().replace(/[-:.]/g, '')
+  const result = writeCleanupPeriod(getClaudeSettingsPath(), parsed.data.days, suffix)
+
+  if (!result.ok) {
+    await reply.code(409).send({ error: 'retention_write_failed', message: result.reason })
+    return
+  }
+  // backupFileName is a file name, never a path. The screen tells the user the
+  // backup sits beside their settings file; it must not print where that is.
+  return {
+    saved: true,
+    days: result.days,
+    previousDays: result.previousDays,
+    backupFileName: result.backupFileName,
+  }
+})
+
 const scanRequestSchema = z.object({
   providers: z
     .array(z.enum(['claude', 'codex']))
@@ -300,7 +372,7 @@ app.post('/api/scan', async (request, reply) => {
       const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
       const sessions = aggregateSessions(result.events, aggregationDiagnostics)
 
-      replaceProviderSessions(provider, sessions, {
+      const { changedReferences } = replaceProviderSessions(provider, sessions, {
         filesSeen: result.diagnostics.filesDiscovered,
         malformedLines: result.diagnostics.malformedJsonLines,
       })
@@ -309,6 +381,10 @@ app.post('/api/scan', async (request, reply) => {
         diagnostics: {
           ...result.diagnostics,
           nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
+          // Only the count crosses this boundary. The changed sessions'
+          // native IDs, paths and hashes stay inside session_references --
+          // see the "no hash or path in API responses" privacy rule.
+          changedSinceLastScan: changedReferences.length,
         },
       }
     }

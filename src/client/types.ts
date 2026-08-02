@@ -79,9 +79,23 @@ export type DashboardData = {
 
 export type ProviderKey = 'claude' | 'codex'
 
+export type ProviderRetention = {
+  detected: boolean
+  fileCount: number
+  oldestModifiedOn?: string
+  autoDelete:
+    | { kind: 'configured'; days: number; source: 'explicit' | 'default' }
+    | { kind: 'unreadable'; reason: string }
+    | { kind: 'none' }
+  nextLossOn?: string
+  daysUntilNextLoss?: number
+  alreadyLosing: boolean
+}
+
 export type RuntimeData = {
   csrfToken: string
   providers: Record<ProviderKey, { detected: boolean }>
+  retention: Record<ProviderKey, ProviderRetention>
   privacy?: {
     localOnly: boolean
     promptBodiesExtracted: boolean

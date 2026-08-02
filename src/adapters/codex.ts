@@ -1,12 +1,16 @@
 /// <reference types="node" />
 
+import { createHash } from 'node:crypto'
+
 import { localProjectLabel, privateKey } from './identifiers.ts'
 import {
   childRecord,
   discoverJsonlFiles,
+  fileContentSummary,
   nonNegativeInteger,
   readJsonlObjects,
   stringValue,
+  type FileContentSummary,
 } from './jsonl.ts'
 import { localMonthFromTimestamp } from './localTime.ts'
 import {
@@ -38,8 +42,15 @@ export async function readCodexHistory(
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
     options.onFileScanned?.()
     const session: CodexSession = { sourcePath: filePath }
+    // The Transform inside readJsonlObjects hashes every byte as it streams
+    // past on its way to the line splitter, so the file is read exactly once
+    // even though both the parsed rows and the digest are needed. A Codex
+    // session file yields at most one event, so the digest can be finalized
+    // right after the loop, before that event is built.
+    const hash = options.includeLocalReferences ? createHash('sha256') : undefined
+    const ioErrorsBefore = diagnostics.ioErrors
 
-    for await (const row of readJsonlObjects(filePath, diagnostics)) {
+    for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
       if (consumeSessionMetadata(row, session) || consumeModel(row, session)) {
         continue
       }
@@ -49,7 +60,15 @@ export async function readCodexHistory(
       diagnostics.unsupportedLines += 1
     }
 
-    const event = normalizeCodexSession(session, options, diagnostics)
+    // A read that failed part way through leaves the hash covering only the
+    // bytes that arrived. Recording that as the file's hash would make the next
+    // scan report a change that never happened, so leave it out -- which the
+    // change detection already treats as "not recorded".
+    const fileSummary =
+      hash && diagnostics.ioErrors === ioErrorsBefore
+        ? fileContentSummary(filePath, hash)
+        : undefined
+    const event = normalizeCodexSession(session, options, diagnostics, fileSummary)
     if (event) events.push(event)
   }
 
@@ -96,6 +115,7 @@ function normalizeCodexSession(
   session: CodexSession,
   options: AdapterOptions,
   diagnostics: AdapterResult['diagnostics'],
+  fileSummary: FileContentSummary | undefined,
 ): NormalizedUsage | undefined {
   const month = localMonthFromTimestamp(session.timestamp)
   if (!session.sessionId || !session.cwd || !month || !session.usage || !session.timestamp) {
@@ -110,11 +130,18 @@ function normalizeCodexSession(
     sessionKey: privateKey('session', session.sessionId, options.identifierSalt),
     projectKey: privateKey('project', session.cwd, options.identifierSalt),
     projectLabel: options.includeLocalProjectLabel ? localProjectLabel(session.cwd) : undefined,
+    // The reference survives a missing hash: dropping it would cost this
+    // session its preview and resume command until the next clean scan, which
+    // is a much bigger loss than not recording a digest. An empty hash is
+    // already treated as "not recorded" by the change detection.
     localReference: options.includeLocalReferences
       ? {
           nativeSessionId: session.sessionId,
           sourcePath: session.sourcePath,
           workingDirectory: session.cwd,
+          contentHash: fileSummary?.contentHash ?? '',
+          byteSize: fileSummary?.byteSize ?? 0,
+          fileMtime: fileSummary?.fileMtime ?? '',
         }
       : undefined,
     model: session.model ?? 'unknown',

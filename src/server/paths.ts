@@ -26,6 +26,17 @@ export function getDefaultHistoryPaths(): { claude: string; codex: string } {
   }
 }
 
+export function getClaudeSettingsPath(): string {
+  // Overridable so the write path can be exercised against a temporary copy.
+  // Never point this at a real settings.json in a test.
+  return process.env.DEVTAX_RADAR_CLAUDE_SETTINGS ?? join(homedir(), '.claude', 'settings.json')
+}
+
+// There is intentionally no getCodexSettingsPath(): Codex has no transcript
+// retention/cleanup setting today. The request for one is open as
+// openai/codex issue #6015. When that lands, add a settings path and a
+// reader alongside readCleanupPeriod in retention.ts.
+
 export function getIdentifierSalt(): string {
   const directory = getAppDataDirectory()
   const path = join(directory, 'identifier-salt')

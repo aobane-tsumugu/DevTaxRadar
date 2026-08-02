@@ -109,6 +109,9 @@ export function getDatabase(): DatabaseSync {
       native_session_id TEXT NOT NULL,
       source_path TEXT NOT NULL,
       working_directory TEXT NOT NULL,
+      content_hash TEXT NOT NULL DEFAULT '',
+      byte_size INTEGER NOT NULL DEFAULT 0,
+      file_mtime TEXT NOT NULL DEFAULT '',
       captured_at TEXT NOT NULL,
       PRIMARY KEY(provider, session_key)
     ) STRICT;
@@ -312,6 +315,21 @@ export function getDatabase(): DatabaseSync {
     database.exec('ALTER TABLE provider_settings ADD COLUMN contract_ended_on TEXT')
   }
 
+  const sessionReferenceColumns = new Set(
+    (
+      database.prepare(`PRAGMA table_info(session_references)`).all() as Array<{ name: string }>
+    ).map((column) => column.name),
+  )
+  if (!sessionReferenceColumns.has('content_hash')) {
+    database.exec(`ALTER TABLE session_references ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`)
+  }
+  if (!sessionReferenceColumns.has('byte_size')) {
+    database.exec('ALTER TABLE session_references ADD COLUMN byte_size INTEGER NOT NULL DEFAULT 0')
+  }
+  if (!sessionReferenceColumns.has('file_mtime')) {
+    database.exec(`ALTER TABLE session_references ADD COLUMN file_mtime TEXT NOT NULL DEFAULT ''`)
+  }
+
   // Legacy config-driven classification. project_mappings.product_name was a
   // display label typed against a folder, not a confirmed tax unit, so only
   // the classification is carried over. tax_unit_id is left NULL; assigning
@@ -335,11 +353,18 @@ export function getDatabase(): DatabaseSync {
   return database
 }
 
+export type ReferenceChange = {
+  provider: UsageProvider
+  sessionKey: string
+  previousHash: string
+  currentHash: string
+}
+
 export function replaceProviderSessions(
   provider: UsageProvider,
   sessions: UsageSession[],
   diagnostics: { filesSeen: number; malformedLines: number },
-): void {
+): { changedReferences: ReferenceChange[] } {
   const db = getDatabase()
   const insertScan = db.prepare(`
     INSERT INTO scans(provider, started_at, time_zone, status)
@@ -347,6 +372,23 @@ export function replaceProviderSessions(
   `)
   const scanResult = insertScan.run(provider, new Date().toISOString(), resolvedTimeZone())
   const scanId = Number(scanResult.lastInsertRowid)
+
+  // Read before the DELETE below overwrites session_references, so the
+  // previous content_hash for each session key is still available to diff
+  // against the freshly computed one. An empty string is the default left by
+  // the migration for rows recorded before hashing existed -- that is not a
+  // change, just a gap in history, so it must not be reported as one.
+  const previousHashes = new Map(
+    (
+      db
+        .prepare(
+          `SELECT session_key AS sessionKey, content_hash AS contentHash
+                  FROM session_references WHERE provider = ?`,
+        )
+        .all(provider) as Array<{ sessionKey: string; contentHash: string }>
+    ).map((row) => [row.sessionKey, row.contentHash]),
+  )
+  const changedReferences: ReferenceChange[] = []
 
   const insertSession = db.prepare(`
     INSERT INTO usage_events(
@@ -370,12 +412,15 @@ export function replaceProviderSessions(
   const insertReference = db.prepare(`
     INSERT INTO session_references(
       provider, session_key, native_session_id, source_path,
-      working_directory, captured_at
-    ) VALUES (?, ?, ?, ?, ?, ?)
+      working_directory, content_hash, byte_size, file_mtime, captured_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(provider, session_key) DO UPDATE SET
       native_session_id = excluded.native_session_id,
       source_path = excluded.source_path,
       working_directory = excluded.working_directory,
+      content_hash = excluded.content_hash,
+      byte_size = excluded.byte_size,
+      file_mtime = excluded.file_mtime,
       captured_at = excluded.captured_at
   `)
   const capturedAt = new Date().toISOString()
@@ -409,8 +454,30 @@ export function replaceProviderSessions(
           item.localReference.nativeSessionId,
           item.localReference.sourcePath,
           item.localReference.workingDirectory,
+          item.localReference.contentHash,
+          item.localReference.byteSize,
+          item.localReference.fileMtime,
           capturedAt,
         )
+        const previousHash = previousHashes.get(item.sessionKey)
+        // An empty hash on either side means "not recorded", not "changed".
+        // Previously empty: the row predates hashing. Currently empty: this
+        // scan could not hash the file (a partial read, or the file vanished
+        // between the read and the stat). Calling that a content change would
+        // put a deletion behind a message that says changes are normal.
+        if (
+          previousHash !== undefined &&
+          previousHash !== '' &&
+          item.localReference.contentHash !== '' &&
+          previousHash !== item.localReference.contentHash
+        ) {
+          changedReferences.push({
+            provider: item.provider,
+            sessionKey: item.sessionKey,
+            previousHash,
+            currentHash: item.localReference.contentHash,
+          })
+        }
       }
     }
     db.exec('COMMIT')
@@ -437,6 +504,29 @@ export function replaceProviderSessions(
     ).run(new Date().toISOString(), scanId)
     throw error
   }
+
+  return { changedReferences }
+}
+
+/**
+ * Timezones recorded by the most recent COMPLETED scan of each provider.
+ *
+ * Both filters matter. A scan row is inserted with the current zone before any
+ * work happens, so without `status = 'complete'` a rescan that was killed or
+ * failed would clear the warning while the stored months are still attributed
+ * the old way. And a user can scan one provider alone, which must not clear the
+ * warning for the other provider's still-stale months.
+ */
+export function getLastScanTimeZones(): Record<string, string> {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT provider, time_zone AS timeZone FROM scans
+       WHERE time_zone IS NOT NULL AND status = 'complete'
+       GROUP BY provider
+       HAVING started_at = MAX(started_at)`,
+    )
+    .all() as Array<{ provider: string; timeZone: string }>
+  return Object.fromEntries(rows.map((row) => [row.provider, row.timeZone]))
 }
 
 export function getUsageOverview(): UsageOverview {

@@ -76,6 +76,11 @@ export function aggregateSessions(
     if (event.observedAt < current.startedAt) current.startedAt = event.observedAt
     if (event.observedAt > current.endedAt) current.endedAt = event.observedAt
     current.projectLabel ??= event.projectLabel
+    // First file wins. A session's rows normally live in one transcript file,
+    // so this records that file's hash. If a session were ever split across two
+    // files, only the first one discovered would be covered by change
+    // detection -- the walk order is not chronological, so which one that is
+    // is not defined.
     current.localReference ??= event.localReference
   }
 

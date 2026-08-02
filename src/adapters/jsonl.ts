@@ -1,8 +1,10 @@
 /// <reference types="node" />
 
-import { createReadStream } from 'node:fs'
+import type { Hash } from 'node:crypto'
+import { createReadStream, statSync } from 'node:fs'
 import { opendir } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
+import { Transform } from 'node:stream'
 import { extname, join } from 'node:path'
 
 import type { AdapterDiagnostics } from './types.ts'
@@ -37,17 +39,40 @@ export async function* discoverJsonlFiles(
 export async function* readJsonlObjects(
   filePath: string,
   diagnostics: AdapterDiagnostics,
+  hash?: Hash,
 ): AsyncGenerator<Record<string, unknown>> {
-  const stream = createReadStream(filePath, {
-    encoding: 'utf8',
-    flags: 'r',
-  })
-  stream.on('error', () => {
+  const source = createReadStream(filePath, { flags: 'r' })
+
+  // A Transform in the pipe chain sees every byte without switching the source
+  // into flowing mode, which a bare 'data' listener would do -- that would race
+  // readline for the same chunks. This keeps the file read exactly once, and
+  // readline decodes the Buffer chunks it receives as utf8 by default, so line
+  // splitting is unaffected by dropping `encoding` from createReadStream.
+  const tap = hash
+    ? new Transform({
+        transform(chunk, _encoding, callback) {
+          hash.update(chunk)
+          callback(null, chunk)
+        },
+      })
+    : undefined
+
+  source.on('error', () => {
     diagnostics.ioErrors += 1
+    // .pipe() does not forward errors. Without this the Transform would stay
+    // open with no more data and no 'end', and readline's `for await` would
+    // wait forever -- hanging the whole scan on one unreadable file (an
+    // antivirus lock, a cloud-sync placeholder, a transcript still being
+    // written). end() flushes and closes the readable side, which readline
+    // sees as EOF, so the loop finishes and the scan moves to the next file.
+    // destroy() is not enough: it leaves the iterator waiting.
+    tap?.end()
   })
 
+  const input = tap ? source.pipe(tap) : source
+
   const lines = createInterface({
-    input: stream,
+    input,
     crlfDelay: Number.POSITIVE_INFINITY,
   })
 
@@ -75,7 +100,37 @@ export async function* readJsonlObjects(
     // The stream error listener increments ioErrors without exposing file paths.
   } finally {
     lines.close()
-    stream.destroy()
+    source.destroy()
+  }
+}
+
+export type FileContentSummary = {
+  contentHash: string
+  byteSize: number
+  fileMtime: string
+}
+
+/**
+ * Finalizes the digest that `hash` accumulated while readJsonlObjects streamed
+ * `filePath` through it, alongside one statSync for size and mtime. Call only
+ * after that file's rows have all been consumed -- the digest is incomplete
+ * until every chunk has passed through the Transform.
+ */
+export function fileContentSummary(filePath: string, hash: Hash): FileContentSummary | undefined {
+  // The whole premise of this product is that transcripts get deleted. Claude
+  // Code's own cleanup, or a cloud-sync client, can remove the file between the
+  // read and this stat during a scan that takes tens of seconds. Returning
+  // undefined records "no hash" for that file instead of failing the scan.
+  let stats
+  try {
+    stats = statSync(filePath)
+  } catch {
+    return undefined
+  }
+  return {
+    contentHash: hash.digest('hex'),
+    byteSize: stats.size,
+    fileMtime: stats.mtime.toISOString(),
   }
 }
 

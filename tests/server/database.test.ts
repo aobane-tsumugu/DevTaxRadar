@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolvedTimeZone } from '../../src/adapters/localTime.ts'
+import type { LocalSessionReference } from '../../src/adapters/types.ts'
 import type { UsageSession } from '../../src/server/sessionAggregation.ts'
 
 const temporaryDirectories: string[] = []
@@ -87,6 +89,18 @@ function session(overrides: Partial<UsageSession> = {}): UsageSession {
   }
 }
 
+function localReference(overrides: Partial<LocalSessionReference> = {}): LocalSessionReference {
+  return {
+    nativeSessionId: 'native-1',
+    sourcePath: '/tmp/a.jsonl',
+    workingDirectory: '/tmp/work',
+    contentHash: 'hash-1',
+    byteSize: 100,
+    fileMtime: '2026-07-15T10:00:00.000Z',
+    ...overrides,
+  }
+}
+
 describe('session storage', () => {
   let sessionDirectory: string
   let db: typeof import('../../src/server/database.ts')
@@ -130,11 +144,7 @@ describe('session storage', () => {
       'claude',
       [
         session({
-          localReference: {
-            nativeSessionId: 'native-1',
-            sourcePath: '/tmp/a.jsonl',
-            workingDirectory: '/tmp/work',
-          },
+          localReference: localReference(),
         }),
       ],
       diagnostics,
@@ -567,20 +577,22 @@ describe('session storage', () => {
       [
         session({
           sessionKey: 'session_a',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-a',
             sourcePath: '/a.jsonl',
             workingDirectory: '/work/a',
-          },
+            contentHash: 'hash-a',
+          }),
         }),
         session({
           sessionKey: 'session_b',
           projectKey: 'project_b',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-b',
             sourcePath: '/b.jsonl',
             workingDirectory: '/work/b',
-          },
+            contentHash: 'hash-b',
+          }),
         }),
       ],
       diagnostics,
@@ -595,11 +607,12 @@ describe('session storage', () => {
           provider: 'codex',
           sessionKey: 'session_c',
           projectKey: 'project_c',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-c',
             sourcePath: '/c.jsonl',
             workingDirectory: '/work/c',
-          },
+            contentHash: 'hash-c',
+          }),
         }),
       ],
       diagnostics,
@@ -610,11 +623,12 @@ describe('session storage', () => {
       [
         session({
           sessionKey: 'session_a',
-          localReference: {
+          localReference: localReference({
             nativeSessionId: 'native-a',
             sourcePath: '/a.jsonl',
             workingDirectory: '/work/a',
-          },
+            contentHash: 'hash-a',
+          }),
         }),
       ],
       diagnostics,
@@ -626,6 +640,133 @@ describe('session storage', () => {
     expect(db.getSessionReference('claude', 'session_b')).toBeUndefined()
     expect(db.getSessionReference('codex', 'session_c')).toMatchObject({
       nativeSessionId: 'native-c',
+    })
+  })
+
+  it('取り込み後に元ファイルの内容が変わると、次の走査で件数として検出する', () => {
+    db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-original' }) })],
+      diagnostics,
+    )
+
+    const unchanged = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-original' }) })],
+      diagnostics,
+    )
+    expect(unchanged.changedReferences).toEqual([])
+
+    const changed = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-tampered' }) })],
+      diagnostics,
+    )
+    expect(changed.changedReferences).toEqual([
+      {
+        provider: 'claude',
+        sessionKey: 'session_a',
+        previousHash: 'hash-original',
+        currentHash: 'hash-tampered',
+      },
+    ])
+  })
+
+  it('マイグレーション直後の既定値（空文字）は変更として扱わない', () => {
+    // Simulates a row written before content_hash existed: the migration's
+    // ALTER TABLE default is '', not a real prior hash. The next scan must
+    // not report that as "changed since last scan".
+    const insertLegacyReference = db.getDatabase().prepare(`
+      INSERT INTO session_references(
+        provider, session_key, native_session_id, source_path,
+        working_directory, content_hash, byte_size, file_mtime, captured_at
+      ) VALUES ('claude', 'session_a', 'native-legacy', '/legacy.jsonl', '/work/legacy', '', 0, '', ?)
+    `)
+    insertLegacyReference.run(new Date().toISOString())
+
+    const result = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-first-real' }) })],
+      diagnostics,
+    )
+    expect(result.changedReferences).toEqual([])
+  })
+
+  it('今回ハッシュを取れなかった場合も変更として扱わない', () => {
+    // A file removed between the read and the stat, or a partial read, leaves
+    // an empty hash. Reporting that as a content change would hide a deletion
+    // behind a message that says changes are normal.
+    db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-recorded' }) })],
+      diagnostics,
+    )
+    const result = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: '' }) })],
+      diagnostics,
+    )
+    expect(result.changedReferences).toEqual([])
+  })
+
+  it('初めて記録するセッションは変更として扱わない', () => {
+    const result = db.replaceProviderSessions(
+      'claude',
+      [session({ localReference: localReference({ contentHash: 'hash-new' }) })],
+      diagnostics,
+    )
+    expect(result.changedReferences).toEqual([])
+  })
+
+  it('走査していなければ記録されたタイムゾーンは空', () => {
+    expect(db.getLastScanTimeZones()).toEqual({})
+  })
+
+  it('走査すると、そのとき記録したタイムゾーンを provider ごとに返す', () => {
+    db.replaceProviderSessions('claude', [session()], diagnostics)
+    expect(db.getLastScanTimeZones()).toEqual({ claude: resolvedTimeZone() })
+  })
+
+  it('同じ provider を複数回走査した場合は最新の走査のタイムゾーンを返す', () => {
+    // replaceProviderSessions always records the process's real zone
+    // (resolvedTimeZone() is memoised for the process lifetime -- see
+    // src/adapters/localTime.ts), so two distinct values can only be
+    // observed here by writing the earlier scan row directly.
+    db.getDatabase()
+      .prepare(
+        `INSERT INTO scans(provider, started_at, completed_at, time_zone, status)
+         VALUES ('claude', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'Old/Zone', 'complete')`,
+      )
+      .run()
+    db.replaceProviderSessions('claude', [session()], diagnostics)
+    expect(db.getLastScanTimeZones()).toEqual({ claude: resolvedTimeZone() })
+  })
+
+  it('完了していない走査のタイムゾーンは無視する', () => {
+    // A scan row is written with the current zone BEFORE any work happens. If a
+    // killed or failed rescan counted, it would clear the warning while the
+    // stored months are still attributed the old way.
+    db.getDatabase()
+      .prepare(
+        `INSERT INTO scans(provider, started_at, time_zone, status)
+         VALUES ('claude', '2030-01-01T00:00:00.000Z', 'Never/Completed', 'running')`,
+      )
+      .run()
+    expect(db.getLastScanTimeZones()).toEqual({})
+  })
+
+  it('片方の provider だけを走査しても、もう片方の記録は残る', () => {
+    // Scanning Claude alone must not clear the warning for Codex's months.
+    db.getDatabase()
+      .prepare(
+        `INSERT INTO scans(provider, started_at, completed_at, time_zone, status)
+         VALUES ('codex', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'Old/Zone', 'complete')`,
+      )
+      .run()
+    db.replaceProviderSessions('claude', [session()], diagnostics)
+    expect(db.getLastScanTimeZones()).toEqual({
+      claude: resolvedTimeZone(),
+      codex: 'Old/Zone',
     })
   })
 })

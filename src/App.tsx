@@ -20,6 +20,7 @@ import {
   savePlanning,
   savePlanningRules,
   saveConfiguration,
+  saveRetention,
   scanHistory,
 } from './client/api'
 import type {
@@ -122,6 +123,20 @@ function App() {
     setData(nextDashboard)
     setConfiguration(nextConfiguration)
     setFolders(nextFolders.folders)
+    return result
+  }
+
+  async function storeRetention(
+    days: number,
+  ): Promise<{ days: number; previousDays?: number; backupFileName?: string }> {
+    const activeRuntime = runtime ?? (await getRuntime())
+    if (!runtime) setRuntime(activeRuntime)
+    const result = await saveRetention(activeRuntime.csrfToken, days)
+    // Refetch: the retention box and the summary banner both read from
+    // `runtime`. Without this they keep showing the old period, contradicting
+    // the success message -- and reopening the box would offer to re-apply the
+    // value the user just replaced.
+    setRuntime(await getRuntime())
     return result
   }
 
@@ -457,6 +472,7 @@ function App() {
                 setOnboardingStep(0)
                 setOnboarding(true)
               }}
+              retention={runtime?.retention ?? null}
             />
           ) : page === 'evidence' ? (
             <EvidencePage
@@ -497,6 +513,7 @@ function App() {
           onStep={setOnboardingStep}
           onScan={runScan}
           onSave={storeConfiguration}
+          onSaveRetention={storeRetention}
           onSavePlanning={storePlanning}
           onClose={() => {
             setOnboarding(false)
@@ -520,6 +537,7 @@ function SummaryPage({
   onOpenEvidence,
   onOpenGuide,
   onOpenOnboarding,
+  retention,
 }: {
   data: DashboardData
   planning: PlanningSnapshot
@@ -529,6 +547,7 @@ function SummaryPage({
   onOpenEvidence: (allocation: Allocation) => void
   onOpenGuide: () => void
   onOpenOnboarding: () => void
+  retention: RuntimeData['retention'] | null
 }) {
   const annualTotal = totals.current + totals.future + totals.review
   const maxMonth = Math.max(
@@ -538,6 +557,24 @@ function SummaryPage({
 
   return (
     <>
+      {retention &&
+        retention.claude.autoDelete.kind === 'configured' &&
+        (retention.claude.alreadyLosing ||
+          (retention.claude.daysUntilNextLoss ?? Infinity) <= 30) && (
+          <div className="retention-banner" role="status">
+            <strong>
+              {retention.claude.alreadyLosing
+                ? 'Claude Codeの古い履歴が、すでに削除されている可能性があります'
+                : `Claude Codeの最も古い履歴が、あと${retention.claude.daysUntilNextLoss}日で削除される見込みです`}
+            </strong>
+            <span>
+              削除された履歴は復元できません。保持する日数は「はじめの準備」の最初のステップで変更できます。
+            </span>
+            <button className="text-button" onClick={onOpenOnboarding}>
+              はじめの準備を開く →
+            </button>
+          </div>
+        )}
       <section className="preparation-strip" aria-label="記録の準備状況">
         <div>
           <span>準備できた項目</span>
