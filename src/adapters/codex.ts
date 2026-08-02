@@ -36,6 +36,7 @@ export async function readCodexHistory(
   const events: NormalizedUsage[] = []
 
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
+    options.onFileScanned?.()
     const session: CodexSession = { sourcePath: filePath }
 
     for await (const row of readJsonlObjects(filePath, diagnostics)) {

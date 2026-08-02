@@ -19,5 +19,12 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "src/server/**/*.ts", "src/adapters/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "vite.config.ts",
+    "src/server/**/*.ts",
+    "src/adapters/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": ["tests/client/**"]
 }

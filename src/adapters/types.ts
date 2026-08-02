@@ -61,6 +61,13 @@ export type AdapterOptions = {
    * the working directory so the app can offer resume. Never leaves this PC.
    */
   includeLocalReferences?: boolean
+  /**
+   * Called once per discovered file, before that file is read, so a file that
+   * turns out to be unreadable is still counted and the number only ever goes
+   * up. Used only to report a count to the progress endpoint -- it takes no
+   * arguments, so a file path cannot travel through it.
+   */
+  onFileScanned?: () => void
 }
 
 export function createDiagnostics(): AdapterDiagnostics {

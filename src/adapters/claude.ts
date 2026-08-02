@@ -28,6 +28,7 @@ export async function readClaudeHistory(
   const seenMessages = new Set<string>()
 
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
+    options.onFileScanned?.()
     for await (const row of readJsonlObjects(filePath, diagnostics)) {
       const event = normalizeClaudeRow(row, filePath, options, seenMessages, diagnostics)
       if (event) events.push(event)

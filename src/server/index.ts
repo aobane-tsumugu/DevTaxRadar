@@ -8,6 +8,7 @@ import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
 import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
 import { buildDashboard } from './dashboard.js'
 import { getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
+import { beginScan, finishScan, readScanProgress, reportScannedFile } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
 
@@ -185,6 +186,22 @@ app.get('/api/export', async (request, reply) => {
     .send(planningMarkdown(snapshot, diagnosePlanning(snapshot), buildPlanningLedger(snapshot)))
 })
 
+const contractDateSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, {
+  message: '日付は YYYY-MM-DD で入力してください。',
+})
+
+const providerContractSchema = z
+  .object({
+    startedOn: contractDateSchema.optional(),
+    endedOn: contractDateSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (contract) =>
+      !contract.startedOn || !contract.endedOn || contract.startedOn <= contract.endedOn,
+    { message: '契約終了日は開始日以降にしてください。' },
+  )
+
 const configurationSchema = z
   .object({
     charges: z.object({
@@ -201,6 +218,13 @@ const configurationSchema = z
       )
       .max(240)
       .default([]),
+    contracts: z
+      .object({
+        claude: providerContractSchema,
+        codex: providerContractSchema,
+      })
+      .strict()
+      .default({ claude: {}, codex: {} }),
     unobservedRatio: z.number().min(0).max(0.95),
   })
   .strict()
@@ -239,6 +263,8 @@ const scanRequestSchema = z.object({
     .default(['claude', 'codex']),
 })
 
+app.get('/api/scan/progress', async () => readScanProgress())
+
 app.post('/api/scan', async (request, reply) => {
   const parsed = scanRequestSchema.safeParse(request.body ?? {})
   if (!parsed.success) {
@@ -253,34 +279,41 @@ app.post('/api/scan', async (request, reply) => {
   const identifierSalt = getIdentifierSalt()
   const results: Record<string, unknown> = {}
 
-  for (const provider of parsed.data.providers) {
-    const result =
-      provider === 'claude'
-        ? await readClaudeHistory(paths.claude, {
-            identifierSalt,
-            includeLocalProjectLabel: true,
-            includeLocalReferences: true,
-          })
-        : await readCodexHistory(paths.codex, {
-            identifierSalt,
-            includeLocalProjectLabel: true,
-            includeLocalReferences: true,
-          })
+  try {
+    for (const provider of parsed.data.providers) {
+      beginScan(provider)
+      const result =
+        provider === 'claude'
+          ? await readClaudeHistory(paths.claude, {
+              identifierSalt,
+              includeLocalProjectLabel: true,
+              includeLocalReferences: true,
+              onFileScanned: reportScannedFile,
+            })
+          : await readCodexHistory(paths.codex, {
+              identifierSalt,
+              includeLocalProjectLabel: true,
+              includeLocalReferences: true,
+              onFileScanned: reportScannedFile,
+            })
 
-    const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
-    const sessions = aggregateSessions(result.events, aggregationDiagnostics)
+      const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
+      const sessions = aggregateSessions(result.events, aggregationDiagnostics)
 
-    replaceProviderSessions(provider, sessions, {
-      filesSeen: result.diagnostics.filesDiscovered,
-      malformedLines: result.diagnostics.malformedJsonLines,
-    })
-    results[provider] = {
-      events: sessions.length,
-      diagnostics: {
-        ...result.diagnostics,
-        nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
-      },
+      replaceProviderSessions(provider, sessions, {
+        filesSeen: result.diagnostics.filesDiscovered,
+        malformedLines: result.diagnostics.malformedJsonLines,
+      })
+      results[provider] = {
+        events: sessions.length,
+        diagnostics: {
+          ...result.diagnostics,
+          nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
+        },
+      }
     }
+  } finally {
+    finishScan()
   }
 
   return {

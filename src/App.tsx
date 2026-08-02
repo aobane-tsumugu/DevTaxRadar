@@ -41,6 +41,7 @@ import FolderAssignmentPage from './client/pages/FolderAssignmentPage'
 import {
   CLASSIFICATION_LABELS,
   categoryLabel,
+  EmptyState,
   GROUP_CLASS,
   GROUP_LABELS,
   incomeCategoryLabel,
@@ -87,7 +88,7 @@ function App() {
         setPlanningState(nextPlanning)
         setDiagnosis(nextDiagnosis)
         setFolders(nextFolders.folders)
-        setLedger(await getLedger(nextPlanning.profile.taxYear))
+        setLedger(await getLedger())
       })
       .catch(() => {
         // The standalone Vite preview intentionally falls back to demo data.
@@ -138,7 +139,7 @@ function App() {
     await savePlanning(activeRuntime.csrfToken, nextPlanning)
     const [nextDiagnosis, nextLedger, nextDashboard] = await Promise.all([
       getDiagnosis(),
-      getLedger(nextPlanning.profile.taxYear),
+      getLedger(),
       getDashboardData(),
     ])
     setPlanningState(nextPlanning)
@@ -452,6 +453,10 @@ function App() {
                 setPage('evidence')
               }}
               onOpenGuide={() => setPage('guide')}
+              onOpenOnboarding={() => {
+                setOnboardingStep(0)
+                setOnboarding(true)
+              }}
             />
           ) : page === 'evidence' ? (
             <EvidencePage
@@ -514,6 +519,7 @@ function SummaryPage({
   totals,
   onOpenEvidence,
   onOpenGuide,
+  onOpenOnboarding,
 }: {
   data: DashboardData
   planning: PlanningSnapshot
@@ -522,6 +528,7 @@ function SummaryPage({
   totals: Record<TaxGroup, number>
   onOpenEvidence: (allocation: Allocation) => void
   onOpenGuide: () => void
+  onOpenOnboarding: () => void
 }) {
   const annualTotal = totals.current + totals.future + totals.review
   const maxMonth = Math.max(
@@ -673,46 +680,66 @@ function SummaryPage({
               </span>
             }
           />
-          <div className="chart-legend" aria-hidden="true">
-            <span>
-              <i className="dot coral" />
-              今年の費用
-            </span>
-            <span>
-              <i className="dot indigo" />
-              将来残高
-            </span>
-            <span>
-              <i className="dot amber" />
-              要確認
-            </span>
-          </div>
-          <div
-            className="bar-chart"
-            role="img"
-            aria-label="2026年4月から7月までの費用配賦積み上げグラフ"
-          >
-            <div className="axis-label top">{yen.format(maxMonth)}</div>
-            <div className="axis-label middle">{yen.format(Math.round(maxMonth / 2))}</div>
-            {months.map((month) => (
-              <div className="bar-column" key={month.label}>
-                <div className="bar-value">
-                  {yen.format(month.current + month.future + month.review)}
-                </div>
-                <div className="bar-track">
-                  {(['review', 'future', 'current'] as TaxGroup[]).map((group) => (
-                    <div
-                      key={group}
-                      className={`bar-part ${GROUP_CLASS[group]}`}
-                      style={{ height: `${(month[group] / maxMonth) * 100}%` }}
-                      title={`${GROUP_LABELS[group]} ${yen.format(month[group])}`}
-                    />
-                  ))}
-                </div>
-                <strong>{month.label}</strong>
+          {months.length === 0 ? (
+            <EmptyState
+              // Sessions exist but no month survived: the contract period, not a
+              // missing scan, is why this is empty. Telling the user to scan
+              // again would send them somewhere that cannot fix it.
+              message={
+                data.meta.sessionCount > 0
+                  ? '読み込んだ利用履歴が、入力された契約期間と重なっていません。費用ステップで契約の開始日・終了日を確認してください。'
+                  : 'AIの利用履歴がまだ読み込まれていません。はじめの準備から履歴を走査すると、月ごとの費用がここに出ます。'
+              }
+              action={
+                <button className="primary-button" onClick={onOpenOnboarding}>
+                  はじめの準備を開く
+                </button>
+              }
+            />
+          ) : (
+            <>
+              <div className="chart-legend" aria-hidden="true">
+                <span>
+                  <i className="dot coral" />
+                  今年の費用
+                </span>
+                <span>
+                  <i className="dot indigo" />
+                  将来残高
+                </span>
+                <span>
+                  <i className="dot amber" />
+                  要確認
+                </span>
               </div>
-            ))}
-          </div>
+              <div
+                className="bar-chart"
+                role="img"
+                aria-label={`${months[0].label}から${months.at(-1)?.label}までの費用配賦積み上げグラフ`}
+              >
+                <div className="axis-label top">{yen.format(maxMonth)}</div>
+                <div className="axis-label middle">{yen.format(Math.round(maxMonth / 2))}</div>
+                {months.map((month) => (
+                  <div className="bar-column" key={month.label}>
+                    <div className="bar-value">
+                      {yen.format(month.current + month.future + month.review)}
+                    </div>
+                    <div className="bar-track">
+                      {(['review', 'future', 'current'] as TaxGroup[]).map((group) => (
+                        <div
+                          key={group}
+                          className={`bar-part ${GROUP_CLASS[group]}`}
+                          style={{ height: `${(month[group] / maxMonth) * 100}%` }}
+                          title={`${GROUP_LABELS[group]} ${yen.format(month[group])}`}
+                        />
+                      ))}
+                    </div>
+                    <strong>{month.label}</strong>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </section>
 
         <section className="panel guide-panel">
@@ -754,34 +781,38 @@ function SummaryPage({
           }
         />
         <div className="alert-list">
-          {data.boundaries.map((boundary) => {
-            const pct = Math.min((boundary.amount / boundary.threshold) * 100, 100)
-            const allocation = data.allocations.find((row) => row.asset === boundary.asset)
-            return (
-              <button
-                className="boundary-row"
-                key={boundary.asset}
-                onClick={() => allocation && onOpenEvidence(allocation)}
-              >
-                <div className="asset-monogram">{boundary.product.slice(-1)}</div>
-                <div className="boundary-name">
-                  <strong>{boundary.asset}</strong>
-                  <span>{boundary.kind}</span>
-                </div>
-                <div className="progress-wrap">
-                  <div className="progress-meta">
-                    <span>{yen.format(boundary.amount)}</span>
-                    <span>{boundary.thresholdLabel}</span>
+          {data.boundaries.length === 0 ? (
+            <EmptyState message="金額境界を確認できる資産がまだありません。フォルダの割当で制作物を決めて分類すると、10万円などの境界に近づいた資産がここに出ます。" />
+          ) : (
+            data.boundaries.map((boundary) => {
+              const pct = Math.min((boundary.amount / boundary.threshold) * 100, 100)
+              const allocation = data.allocations.find((row) => row.asset === boundary.asset)
+              return (
+                <button
+                  className="boundary-row"
+                  key={boundary.asset}
+                  onClick={() => allocation && onOpenEvidence(allocation)}
+                >
+                  <div className="asset-monogram">{boundary.product.slice(-1)}</div>
+                  <div className="boundary-name">
+                    <strong>{boundary.asset}</strong>
+                    <span>{boundary.kind}</span>
                   </div>
-                  <div className="progress">
-                    <i style={{ width: `${pct}%` }} />
+                  <div className="progress-wrap">
+                    <div className="progress-meta">
+                      <span>{yen.format(boundary.amount)}</span>
+                      <span>{boundary.thresholdLabel}</span>
+                    </div>
+                    <div className="progress">
+                      <i style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
-                </div>
-                <span className={`boundary-status ${boundary.tone}`}>{boundary.status}</span>
-                <span aria-hidden="true">›</span>
-              </button>
-            )
-          })}
+                  <span className={`boundary-status ${boundary.tone}`}>{boundary.status}</span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              )
+            })
+          )}
         </div>
       </section>
 
@@ -875,22 +906,24 @@ function EvidencePage({
               </tr>
             </thead>
             <tbody>
+              {allocations.length === 0 && (
+                <tr>
+                  <td colSpan={8}>
+                    <EmptyState message="表示できる配賦明細がありません。履歴を走査し、フォルダを制作物へ割り当てると、月ごとの内訳がここに出ます。" />
+                  </td>
+                </tr>
+              )}
               {allocations.map((row) => (
-                <tr
-                  key={row.id}
-                  className={active?.id === row.id ? 'selected-row' : ''}
-                  onClick={() => onSelect(row)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      onSelect(row)
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${row.month} ${row.provider} ${row.product}、配賦額${yen.format(row.amount)}の根拠を表示`}
-                >
-                  <td>{row.month}</td>
+                <tr key={row.id} className={active?.id === row.id ? 'selected-row' : ''}>
+                  <td>
+                    <button
+                      className="row-open-button"
+                      onClick={() => onSelect(row)}
+                      aria-label={`${row.month} ${row.provider} ${row.product}、配賦額${yen.format(row.amount)}の根拠を表示`}
+                    >
+                      {row.month}
+                    </button>
+                  </td>
                   <td>
                     <span className={`provider-logo ${row.provider === 'Codex' ? 'codex' : ''}`}>
                       {row.provider === 'Codex' ? 'O' : 'C'}
@@ -911,7 +944,6 @@ function EvidencePage({
                       <select
                         value={row.classification ?? 'unclassified'}
                         disabled={busy}
-                        onClick={(event) => event.stopPropagation()}
                         onChange={(event) =>
                           onReclassify(row, event.target.value as ProjectClassification)
                         }
@@ -964,7 +996,7 @@ function EvidencePage({
               </div>
             </dl>
             <p className="scope-warning">
-              AI以外の直接費入力は未実装です。10万円等の境界は、実際の資産全体の取得価額で再確認してください。
+              このカードの金額はAIサブスクの配賦額だけです。入力済みの外注費・その他直接費・設備の償却費は、費用台帳とMarkdown出力には出ますが、この金額にはまだ合算していません。10万円等の境界は、資産全体の取得価額で確認してください。
             </p>
             <div className="asset-progress">
               <div>
@@ -1167,6 +1199,14 @@ function PlanningEvidenceSections({
           title="設備・自宅費用の配賦チェック"
           subtitle="原額から私用・未配賦までを残し、二重計上を防ぎます"
         />
+        {/* buildPlanningLedger filters homeCosts and directCosts by taxYear, so
+            an entry dated outside it is not "missing" -- naming the year keeps
+            this from reading as data loss. */}
+        {ledger.contributions.length === 0 && (
+          <EmptyState
+            message={`${planning.profile.taxYear}年の設備・自宅費用・その他直接費がまだ入力されていません。はじめの準備の費用ステップで入力すると、この年の費用候補がここに出ます。対象年の外の入力はここには出ません。`}
+          />
+        )}
         <dl>
           <div>
             <dt>原額</dt>

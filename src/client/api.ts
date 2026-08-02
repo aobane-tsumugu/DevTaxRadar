@@ -2,6 +2,7 @@ import type {
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
+  ScanProgress,
   ScanResult,
   FolderSummary,
   SessionSummary,
@@ -60,6 +61,10 @@ export function scanHistory(csrfToken: string, providers: ProviderKey[]): Promis
   })
 }
 
+export function getScanProgress(): Promise<ScanProgress> {
+  return requestJson('/api/scan/progress')
+}
+
 export function saveConfiguration(
   csrfToken: string,
   configuration: LocalConfiguration,
@@ -110,8 +115,8 @@ export function getDiagnosis(): Promise<Diagnosis> {
   return requestJson('/api/diagnosis')
 }
 
-export function getLedger(year: number): Promise<PlanningLedger> {
-  return requestJson(`/api/ledger?year=${encodeURIComponent(String(year))}`)
+export function getLedger(): Promise<PlanningLedger> {
+  return requestJson('/api/ledger')
 }
 
 export async function getPlanningExport(format: 'markdown' | 'csv' = 'markdown'): Promise<Blob> {
