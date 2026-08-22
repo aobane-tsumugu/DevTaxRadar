@@ -27,7 +27,7 @@ export const demoPlanning: PlanningSnapshot = {
     },
     {
       id: 'tax-unit-public',
-      name: 'DevTax Radar',
+      name: 'DevTax',
       unitType: 'new-software',
       usageMode: 'external',
       revenueModel: 'oss',
@@ -190,7 +190,7 @@ export const demoPlanning: PlanningSnapshot = {
 export const demoDiagnosis: Diagnosis = {
   currentPosition: [
     '自分の実作業で使う制作物と、外部公開を目指す制作物の両方があります。',
-    '執筆アシスタントは自己利用開始済み、DevTax Radarは公開前の開発中です。',
+    '執筆アシスタントは自己利用開始済み、DevTaxは公開前の開発中です。',
     '設備と自宅費用の按分根拠を登録済みですが、未添付の証拠があります。',
   ],
   immediateActions: [
@@ -204,7 +204,7 @@ export const demoDiagnosis: Diagnosis = {
     {
       id: 'action-2',
       priority: 'high',
-      title: 'DevTax Radarの完成条件を確認',
+      title: 'DevTaxの完成条件を確認',
       reason: '供用開始を後から説明できるよう、正式利用の条件を先に残します。',
       trigger: 'now',
       taxUnitId: 'tax-unit-public',
@@ -293,7 +293,7 @@ export const demoLedger: PlanningLedger = {
   byTaxUnit: [
     {
       taxUnitId: 'tax-unit-public',
-      name: 'DevTax Radar',
+      name: 'DevTax',
       amountJpy: 7200,
       candidate: '取得価額候補',
       missingFacts: ['供用開始日'],

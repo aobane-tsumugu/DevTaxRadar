@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -126,6 +126,161 @@ describe('session storage', () => {
   it('同じセッションを二重に保存しない', () => {
     db.replaceProviderSessions('claude', [session(), session()], diagnostics)
     expect(db.getUsageSessions()).toHaveLength(1)
+  })
+
+  it('既存のセッションキーと制作物キーを保ったまま読み取り元列を移行し、事前backupを検証する', async () => {
+    const databasePath = join(sessionDirectory, 'devtax-radar.db')
+    const raw = new DatabaseSync(databasePath)
+    raw.exec(`
+      CREATE TABLE scans (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        files_seen INTEGER NOT NULL DEFAULT 0,
+        events_written INTEGER NOT NULL DEFAULT 0,
+        malformed_lines INTEGER NOT NULL DEFAULT 0,
+        time_zone TEXT,
+        status TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE usage_events (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        month TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT NOT NULL,
+        message_count INTEGER NOT NULL,
+        project_label TEXT,
+        model TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        schema_version TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        UNIQUE(provider, session_key, project_key, month)
+      ) STRICT;
+      CREATE TABLE session_references (
+        provider TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        native_session_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        working_directory TEXT NOT NULL,
+        content_hash TEXT NOT NULL DEFAULT '',
+        byte_size INTEGER NOT NULL DEFAULT 0,
+        file_mtime TEXT NOT NULL DEFAULT '',
+        captured_at TEXT NOT NULL,
+        PRIMARY KEY(provider, session_key)
+      ) STRICT;
+      INSERT INTO usage_events(
+        provider, session_key, project_key, month, started_at, ended_at,
+        message_count, schema_version, confidence
+      ) VALUES (
+        'claude', 'session_preserved', 'project_preserved', '2026-07',
+        '2026-07-01T00:00:00.000Z', '2026-07-01T01:00:00.000Z', 1, 'old-v1', 'medium'
+      );
+      INSERT INTO session_references(
+        provider, session_key, native_session_id, source_path, working_directory, captured_at
+      ) VALUES (
+        'claude', 'session_preserved', 'native-preserved', '/synthetic.jsonl',
+        '/synthetic/work', '2026-07-01T01:00:00.000Z'
+      );
+    `)
+    raw.close()
+
+    const migrated = db.getDatabase()
+    const row = migrated
+      .prepare(
+        `SELECT source_id AS sourceId, session_key AS sessionKey, project_key AS projectKey
+         FROM usage_events`,
+      )
+      .get()
+    expect(row).toEqual({
+      sourceId: 'local-claude',
+      sessionKey: 'session_preserved',
+      projectKey: 'project_preserved',
+    })
+    const usageSql = (
+      migrated
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'usage_events'`)
+        .get() as { sql: string }
+    ).sql.replaceAll(/\s+/g, '')
+    expect(usageSql).toContain('UNIQUE(source_id,provider,session_key,project_key,month)')
+    expect(
+      migrated
+        .prepare(
+          `SELECT checksum FROM schema_migrations
+           WHERE id = '2026-08-20-multi-source-v1'`,
+        )
+        .get(),
+    ).toEqual({
+      checksum: 'dcf989e36fb283e81cdf84cc19a08c72fb596e13c75a0e7822f968d0e6f4ccf2',
+    })
+
+    const backupFile = readdirSync(sessionDirectory).find((name) =>
+      name.startsWith('devtax-radar.before-multi-source-'),
+    )
+    expect(backupFile).toBeTruthy()
+    const backup = new DatabaseSync(join(sessionDirectory, backupFile!), { readOnly: true })
+    expect(backup.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' })
+    backup.close()
+    expect(
+      readdirSync(sessionDirectory).filter((name) =>
+        name.startsWith('devtax-radar.before-multi-source-'),
+      ),
+    ).toHaveLength(1)
+
+    vi.resetModules()
+    const restarted = await import('../../src/server/database.ts')
+    expect(() => restarted.getDatabase()).not.toThrow()
+    restarted.getDatabase().close()
+    expect(
+      readdirSync(sessionDirectory).filter((name) =>
+        name.startsWith('devtax-radar.before-multi-source-'),
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('移行履歴のchecksumが不正な場合は、失敗したDBを再利用せず再試行も失敗する', () => {
+    const databasePath = join(sessionDirectory, 'devtax-radar.db')
+    const raw = new DatabaseSync(databasePath)
+    raw.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        checksum TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO schema_migrations(id, checksum, applied_at)
+      VALUES ('2026-08-20-multi-source-v1', 'unexpected', '2026-08-20T00:00:00.000Z');
+    `)
+    raw.close()
+
+    expect(() => db.getDatabase()).toThrowError(
+      '複数読み取り元のDB移行履歴を検証できませんでした。',
+    )
+    expect(() => db.getDatabase()).toThrowError(
+      '複数読み取り元のDB移行履歴を検証できませんでした。',
+    )
+
+    const repair = new DatabaseSync(databasePath)
+    repair.prepare(`DELETE FROM schema_migrations WHERE id = ?`).run('2026-08-20-multi-source-v1')
+    repair.close()
+  })
+
+  it('既定のローカル走査元は変更・削除できない', () => {
+    expect(() => db.removeHistorySource('local-claude')).toThrowError(
+      expect.objectContaining({ code: 'immutable_default' }),
+    )
+    const local = db.getHistorySource('local-codex')!
+    expect(() =>
+      db.updateHistorySource(local.id, {
+        provider: local.provider,
+        name: local.name,
+        root: local.root,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'immutable_default' }))
   })
 
   it('再スキャンで置き換えてもトークンが失われない', () => {

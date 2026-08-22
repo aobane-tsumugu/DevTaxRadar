@@ -2,25 +2,39 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
-import Fastify from 'fastify'
+import Fastify, { type FastifyReply } from 'fastify'
 import { z } from 'zod'
-import { readClaudeHistory, readCodexHistory } from '../adapters/index.ts'
 import { localDateFromTimestamp } from '../adapters/localTime.js'
-import { getConfiguration, replaceProviderSessions, saveConfiguration } from './database.js'
+import {
+  getConfiguration,
+  getDatabase,
+  getHistorySources,
+  HistorySourceError,
+  saveConfiguration,
+} from './database.js'
 import { buildDashboard } from './dashboard.js'
-import { getClaudeSettingsPath, getDefaultHistoryPaths, getIdentifierSalt } from './paths.js'
+import { getClaudeSettingsPath, getDefaultHistoryPaths, normalizeHistoryRoot } from './paths.js'
 import {
   forecastNextLoss,
   readCleanupPeriod,
   readHistoryAgeCached,
   writeCleanupPeriod,
 } from './retention.js'
-import { beginScan, finishScan, readScanProgress, reportScannedFile } from './scanProgress.js'
+import { readScanProgress } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
-import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
+import {
+  automaticSourceScanEnabled,
+  createConfiguredHistorySource,
+  listHistorySourceViews,
+  removeConfiguredHistorySource,
+  scanHistorySources,
+  testHistorySource,
+  updateConfiguredHistorySource,
+} from './historySources.js'
 
 const host = '127.0.0.1'
 const port = Number(process.env.PORT ?? 4317)
+let startupScanPending = automaticSourceScanEnabled()
 const app = Fastify({
   logger: true,
   bodyLimit: 64 * 1024,
@@ -36,6 +50,7 @@ app.get('/api/health', async () => ({
 
 app.get('/api/runtime', async () => {
   const historyPaths = getDefaultHistoryPaths()
+  const historySources = getHistorySources()
   const today = localDateFromTimestamp(new Date().toISOString()) ?? ''
 
   const claudeAge = readHistoryAgeCached(historyPaths.claude)
@@ -49,8 +64,22 @@ app.get('/api/runtime', async () => {
   return {
     csrfToken,
     providers: {
-      claude: { detected: existsSync(historyPaths.claude) },
-      codex: { detected: existsSync(historyPaths.codex) },
+      claude: {
+        detected: historySources.some(
+          (source) =>
+            source.enabled &&
+            source.provider === 'claude' &&
+            (source.kind === 'configured' || existsSync(source.root)),
+        ),
+      },
+      codex: {
+        detected: historySources.some(
+          (source) =>
+            source.enabled &&
+            source.provider === 'codex' &&
+            (source.kind === 'configured' || existsSync(source.root)),
+        ),
+      },
     },
     retention: {
       claude: {
@@ -75,7 +104,9 @@ app.get('/api/runtime', async () => {
     },
     privacy: {
       localOnly: true,
-      promptBodiesExtracted: false,
+      promptBodiesPersisted: false,
+      localPromptPreviewOnDemand: true,
+      configuredPromptPreview: false,
       telemetry: false,
     },
   }
@@ -98,6 +129,8 @@ app.get('/api/sessions', async (request, reply) => {
   }
   const { getSessionsForProject } = await import('./database.js')
   const sessions = getSessionsForProject(parsed.data.projectKey).map((session) => ({
+    sourceId: session.sourceId,
+    sourceName: session.sourceName,
     provider: session.provider,
     sessionKey: session.sessionKey,
     month: session.month,
@@ -110,6 +143,7 @@ app.get('/api/sessions', async (request, reply) => {
       session.outputTokens +
       session.cacheReadTokens +
       session.cacheWriteTokens,
+    localDetailAvailable: session.sourceId === `local-${session.provider}`,
   }))
   return { sessions }
 })
@@ -119,6 +153,7 @@ app.get('/api/sessions/detail', async (request, reply) => {
     .object({
       provider: z.enum(['claude', 'codex']),
       sessionKey: z.string().min(1).max(120),
+      sourceId: z.string().min(1).max(120).optional(),
     })
     .safeParse(request.query)
   if (!parsed.success) {
@@ -130,7 +165,12 @@ app.get('/api/sessions/detail', async (request, reply) => {
     import('./database.js'),
     import('./sessionPreview.js'),
   ])
-  const reference = getSessionReference(parsed.data.provider, parsed.data.sessionKey)
+  const localSourceId = `local-${parsed.data.provider}`
+  const requestedSourceId = parsed.data.sourceId ?? localSourceId
+  if (requestedSourceId !== localSourceId) {
+    return { available: false }
+  }
+  const reference = getSessionReference(parsed.data.provider, parsed.data.sessionKey, localSourceId)
   if (!reference) {
     return { available: false }
   }
@@ -152,6 +192,114 @@ app.get('/api/sessions/detail', async (request, reply) => {
 })
 
 app.get('/api/config', async () => getConfiguration())
+
+const historySourceInputSchema = z
+  .object({
+    provider: z.enum(['claude', 'codex']),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .refine(
+        (name) =>
+          !/[\\/]/.test(name) &&
+          [...name].every((character) => {
+            const code = character.charCodeAt(0)
+            return code >= 32 && code !== 127
+          }),
+        {
+          message: '表示名にはパス区切りや制御文字を含められません。',
+        },
+      ),
+    root: z
+      .string()
+      .trim()
+      .min(1)
+      .max(4096)
+      .refine(
+        (root) => {
+          try {
+            normalizeHistoryRoot(root)
+            return true
+          } catch {
+            return false
+          }
+        },
+        { message: '履歴フォルダには絶対パスを指定してください。' },
+      ),
+    enabled: z.boolean().optional(),
+  })
+  .strict()
+
+const historySourceParamsSchema = z
+  .object({ id: z.union([z.string().uuid(), z.enum(['local-claude', 'local-codex'])]) })
+  .strict()
+
+async function sendHistorySourceError(error: unknown, reply: FastifyReply): Promise<void> {
+  if (error instanceof HistorySourceError) {
+    await reply.code(error.code === 'not_found' ? 404 : 409).send({
+      error: error.code,
+      message: error.message,
+    })
+    return
+  }
+  throw error
+}
+
+app.get('/api/sources', async () => ({ sources: await listHistorySourceViews() }))
+
+app.post('/api/sources/test', async (request, reply) => {
+  const parsed = historySourceInputSchema.safeParse(request.body)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+  return await testHistorySource(parsed.data)
+})
+
+app.post('/api/sources', async (request, reply) => {
+  const parsed = historySourceInputSchema.safeParse(request.body)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
+    return
+  }
+  try {
+    const created = await createConfiguredHistorySource(parsed.data)
+    return { saved: true as const, sourceId: created.id }
+  } catch (error) {
+    await sendHistorySourceError(error, reply)
+  }
+})
+
+app.patch('/api/sources/:id', async (request, reply) => {
+  const parameters = historySourceParamsSchema.safeParse(request.params)
+  const input = historySourceInputSchema.safeParse(request.body)
+  if (!parameters.success || !input.success) {
+    await reply.code(400).send({ error: 'invalid_request' })
+    return
+  }
+  try {
+    const updated = await updateConfiguredHistorySource(parameters.data.id, input.data)
+    return { saved: true as const, sourceId: updated.id }
+  } catch (error) {
+    await sendHistorySourceError(error, reply)
+  }
+})
+
+app.delete('/api/sources/:id', async (request, reply) => {
+  const parsed = historySourceParamsSchema.safeParse(request.params)
+  if (!parsed.success) {
+    await reply.code(400).send({ error: 'invalid_request' })
+    return
+  }
+  try {
+    await removeConfiguredHistorySource(parsed.data.id)
+    return { removed: true as const }
+  } catch (error) {
+    await sendHistorySourceError(error, reply)
+  }
+})
 
 app.get('/api/planning', async () => {
   const { getPlanningSnapshot } = await import('./planningRepository.js')
@@ -335,7 +483,10 @@ const scanRequestSchema = z.object({
     .default(['claude', 'codex']),
 })
 
-app.get('/api/scan/progress', async () => readScanProgress())
+app.get('/api/scan/progress', async () => ({
+  ...readScanProgress(),
+  startupPending: startupScanPending,
+}))
 
 app.post('/api/scan', async (request, reply) => {
   const parsed = scanRequestSchema.safeParse(request.body ?? {})
@@ -347,55 +498,7 @@ app.post('/api/scan', async (request, reply) => {
     return
   }
 
-  const paths = getDefaultHistoryPaths()
-  const identifierSalt = getIdentifierSalt()
-  const results: Record<string, unknown> = {}
-
-  try {
-    for (const provider of parsed.data.providers) {
-      beginScan(provider)
-      const result =
-        provider === 'claude'
-          ? await readClaudeHistory(paths.claude, {
-              identifierSalt,
-              includeLocalProjectLabel: true,
-              includeLocalReferences: true,
-              onFileScanned: reportScannedFile,
-            })
-          : await readCodexHistory(paths.codex, {
-              identifierSalt,
-              includeLocalProjectLabel: true,
-              includeLocalReferences: true,
-              onFileScanned: reportScannedFile,
-            })
-
-      const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
-      const sessions = aggregateSessions(result.events, aggregationDiagnostics)
-
-      const { changedReferences } = replaceProviderSessions(provider, sessions, {
-        filesSeen: result.diagnostics.filesDiscovered,
-        malformedLines: result.diagnostics.malformedJsonLines,
-      })
-      results[provider] = {
-        events: sessions.length,
-        diagnostics: {
-          ...result.diagnostics,
-          nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
-          // Only the count crosses this boundary. The changed sessions'
-          // native IDs, paths and hashes stay inside session_references --
-          // see the "no hash or path in API responses" privacy rule.
-          changedSinceLastScan: changedReferences.length,
-        },
-      }
-    }
-  } finally {
-    finishScan()
-  }
-
-  return {
-    completedAt: new Date().toISOString(),
-    providers: results,
-  }
+  return await scanHistorySources(parsed.data.providers)
 })
 
 const moduleDirectory = fileURLToPath(new URL('.', import.meta.url))
@@ -416,7 +519,17 @@ if (existsSync(distDirectory)) {
 }
 
 try {
+  getDatabase()
   await app.listen({ host, port })
+  if (startupScanPending) {
+    void scanHistorySources()
+      .catch(() => {
+        app.log.error('Configured history sources could not be scanned at startup.')
+      })
+      .finally(() => {
+        startupScanPending = false
+      })
+  }
 } catch (error) {
   app.log.error(error)
   process.exitCode = 1

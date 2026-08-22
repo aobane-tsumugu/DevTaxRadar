@@ -79,6 +79,37 @@ export type DashboardData = {
 
 export type ProviderKey = 'claude' | 'codex'
 
+export type HistorySourceInput = {
+  provider: ProviderKey
+  name: string
+  root: string
+  enabled?: boolean
+}
+
+export type HistorySource = {
+  id: string
+  provider: ProviderKey
+  kind: 'default' | 'configured'
+  name: string
+  /** Only render this in the explicit local history-source settings surface. */
+  root: string
+  enabled: boolean
+  availability: 'available' | 'unavailable'
+  lastScan: {
+    status: 'never' | 'complete' | 'unavailable' | 'failed'
+    completedAt?: string
+    filesSeen?: number
+    eventsWritten?: number
+    reason?: 'not_found' | 'not_readable' | 'scan_failed'
+  }
+}
+
+export type HistorySourceTestResult = {
+  availability: 'available' | 'unavailable'
+  filesDiscovered: number
+  reason?: 'not_found' | 'not_readable'
+}
+
 export type ProviderRetention = {
   detected: boolean
   fileCount: number
@@ -98,7 +129,9 @@ export type RuntimeData = {
   retention: Record<ProviderKey, ProviderRetention>
   privacy?: {
     localOnly: boolean
-    promptBodiesExtracted: boolean
+    promptBodiesPersisted: boolean
+    localPromptPreviewOnDemand: boolean
+    configuredPromptPreview: boolean
     telemetry: boolean
   }
 }
@@ -121,8 +154,11 @@ export type LocalConfiguration = {
 
 export type ScanProgress = {
   running: boolean
+  startupPending?: boolean
   provider: ProviderKey | null
   filesScanned: number
+  sourceId?: string
+  sourceName?: string
 }
 
 export type ScanResult = {
@@ -136,6 +172,13 @@ export type ScanResult = {
       }
     >
   >
+  sources?: Array<{
+    sourceId: string
+    sourceName: string
+    provider: ProviderKey
+    status: 'complete' | 'unavailable' | 'failed'
+    events: number
+  }>
 }
 
 export type FolderAssignment = {
@@ -157,11 +200,14 @@ export type FolderSummary = {
   firstUsedOn: string
   lastUsedOn: string
   providers: ProviderKey[]
+  sources: Array<{ id: string; name: string }>
   assignments: FolderAssignment[]
   unassignedSessionCount: number
 }
 
 export type SessionSummary = {
+  sourceId: string
+  sourceName: string
   provider: ProviderKey
   sessionKey: string
   month: string
@@ -170,6 +216,7 @@ export type SessionSummary = {
   messageCount: number
   model: string | null
   weightedTokens: number
+  localDetailAvailable: boolean
 }
 
 export type SessionDetail = {

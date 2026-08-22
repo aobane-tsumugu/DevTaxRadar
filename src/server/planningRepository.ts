@@ -712,7 +712,7 @@ export function planningMarkdown(
   ledger?: PlanningLedger,
 ): string {
   const lines = [
-    '# DevTax Radar 計画・原価資料',
+    '# DevTax 計画・原価資料',
     '',
     `対象年: ${snapshot.profile.taxYear}年`,
     `所得区分候補: ${snapshot.profile.incomeCategory}`,

@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { getAppDataDirectory } from '../../src/server/paths.ts'
+import {
+  getAppDataDirectory,
+  historyRootKey,
+  normalizeHistoryRoot,
+} from '../../src/server/paths.ts'
 
 const originalDataDirectory = process.env.DEVTAX_RADAR_DATA_DIR
 const temporaryDirectories: string[] = []
@@ -26,5 +30,18 @@ describe('application data isolation', () => {
     process.env.DEVTAX_RADAR_DATA_DIR = join(root, 'isolated-data')
 
     expect(getAppDataDirectory()).toBe(join(root, 'isolated-data'))
+  })
+})
+
+describe('history source path validation', () => {
+  it('accepts and normalizes an absolute folder, but rejects a relative folder', () => {
+    const root = join(tmpdir(), 'devtax-source', 'nested', '..', 'history')
+    expect(normalizeHistoryRoot(root)).toBe(join(tmpdir(), 'devtax-source', 'history'))
+    expect(() => normalizeHistoryRoot(join('relative', 'history'))).toThrow('絶対パス')
+  })
+
+  it.runIf(process.platform === 'win32')('folds Windows path case for duplicate detection', () => {
+    expect(historyRootKey('C:\\Shared\\Claude')).toBe(historyRootKey('c:\\shared\\claude'))
+    expect(normalizeHistoryRoot('\\\\server\\share\\claude')).toBe('\\\\server\\share\\claude')
   })
 })

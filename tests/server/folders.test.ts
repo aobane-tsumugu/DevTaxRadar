@@ -6,6 +6,8 @@ import { summarizeFolders } from '../../src/server/folders.js'
 
 function session(overrides: Partial<UsageSessionRow> = {}): UsageSessionRow {
   return {
+    sourceId: 'local-claude',
+    sourceName: 'このPC · Claude Code',
     provider: 'claude',
     sessionKey: 'session_a',
     projectKey: 'project_a',

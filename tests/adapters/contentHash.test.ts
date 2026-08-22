@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AdapterDiagnostics } from '../../src/adapters/types.ts'
-import { readJsonlObjects } from '../../src/adapters/jsonl.ts'
+import { readFileSnapshot, readJsonlObjects, sameFileSnapshot } from '../../src/adapters/jsonl.ts'
 
 const temporaryDirectories: string[] = []
 
@@ -33,6 +33,8 @@ function emptyDiagnostics(): AdapterDiagnostics {
     invalidRecords: 0,
     duplicateRecords: 0,
     ioErrors: 0,
+    unstableFiles: 0,
+    incompatibleFiles: 0,
   }
 }
 
@@ -66,6 +68,16 @@ describe('readJsonlObjects content hashing', () => {
     const rows = []
     for await (const row of readJsonlObjects(jsonlFile('{"a":1}\n'), diagnostics)) rows.push(row)
     expect(rows).toEqual([{ a: 1 }])
+  })
+
+  it('detects a file that changes between the before and after snapshots', () => {
+    const path = jsonlFile('{"a":1}\n')
+    const before = readFileSnapshot(path)
+    writeFileSync(path, '{"a":1000}\n', 'utf8')
+    const after = readFileSnapshot(path)
+
+    expect(sameFileSnapshot(before, after)).toBe(false)
+    expect(sameFileSnapshot(after, after)).toBe(true)
   })
 })
 

@@ -25,6 +25,7 @@ export type FolderSummary = {
   firstUsedOn: string
   lastUsedOn: string
   providers: UsageProvider[]
+  sources: Array<{ id: string; name: string }>
   assignments: FolderAssignment[]
   unassignedSessionCount: number
 }
@@ -67,6 +68,7 @@ export function summarizeFolders(
         firstUsedOn: day,
         lastUsedOn: day,
         providers: [session.provider],
+        sources: [{ id: session.sourceId, name: session.sourceName }],
         assignments: [],
         // A session only counts as handled once it has a real classification.
         // A rule can exist (non-null ruleId) yet still leave classification at
@@ -82,6 +84,9 @@ export function summarizeFolders(
     if (day < current.firstUsedOn) current.firstUsedOn = day
     if (day > current.lastUsedOn) current.lastUsedOn = day
     if (!current.providers.includes(session.provider)) current.providers.push(session.provider)
+    if (!current.sources.some((source) => source.id === session.sourceId)) {
+      current.sources.push({ id: session.sourceId, name: session.sourceName })
+    }
     if (assignment.classification === 'unclassified') current.unassignedSessionCount += 1
     if (session.projectLabel && current.label.startsWith('Project ')) {
       current.label = safeLocalLabel(session.projectLabel, current.label)
@@ -90,6 +95,7 @@ export function summarizeFolders(
 
   for (const folder of byProject.values()) {
     folder.providers.sort((left, right) => providerOrder[left] - providerOrder[right])
+    folder.sources.sort((left, right) => left.name.localeCompare(right.name, 'ja'))
     folder.assignments = planning.projectRules
       .filter((rule) => rule.projectKey === folder.projectKey)
       .map((rule) => ({

@@ -49,6 +49,8 @@ export type AdapterDiagnostics = {
   invalidRecords: number
   duplicateRecords: number
   ioErrors: number
+  unstableFiles: number
+  incompatibleFiles: number
 }
 
 export type AdapterResult = {
@@ -72,6 +74,8 @@ export type AdapterOptions = {
    * the working directory so the app can offer resume. Never leaves this PC.
    */
   includeLocalReferences?: boolean
+  /** Use the cwd's own Windows/POSIX syntax instead of the hub OS semantics. */
+  portableProjectPaths?: boolean
   /**
    * Called once per discovered file, before that file is read, so a file that
    * turns out to be unreadable is still counted and the number only ever goes
@@ -92,5 +96,7 @@ export function createDiagnostics(): AdapterDiagnostics {
     invalidRecords: 0,
     duplicateRecords: 0,
     ioErrors: 0,
+    unstableFiles: 0,
+    incompatibleFiles: 0,
   }
 }

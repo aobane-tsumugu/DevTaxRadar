@@ -13,18 +13,27 @@ import {
   getDiagnosis,
   getConfiguration,
   getFolders,
+  getHistorySources,
+  getScanProgress,
   getLedger,
   getPlanning,
   getPlanningExport,
   getRuntime,
+  createHistorySource,
+  removeHistorySource,
   savePlanning,
   savePlanningRules,
   saveConfiguration,
   saveRetention,
   scanHistory,
+  testHistorySource,
+  updateHistorySource,
 } from './client/api'
 import type {
   FolderSummary,
+  HistorySource,
+  HistorySourceInput,
+  HistorySourceTestResult,
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
@@ -71,34 +80,58 @@ function App() {
   const [diagnosis, setDiagnosis] = useState<Diagnosis>(demoDiagnosis)
   const [ledger, setLedger] = useState<PlanningLedger>(demoLedger)
   const [folders, setFolders] = useState<FolderSummary[]>([])
+  const [historySources, setHistorySources] = useState<HistorySource[]>([])
   const [rulesBusy, setRulesBusy] = useState(false)
   const [rulesError, setRulesError] = useState<string | null>(null)
   const [runtimeLoading, setRuntimeLoading] = useState(true)
   const autoOnboardingShown = useRef(false)
 
   useEffect(() => {
-    getDashboardData().then(setData)
     if (!isLocalRuntime()) {
+      getDashboardData().then(setData)
       setRuntimeLoading(false)
       return
     }
-    Promise.all([getRuntime(), getConfiguration(), getPlanning(), getDiagnosis(), getFolders()])
-      .then(async ([nextRuntime, nextConfiguration, nextPlanning, nextDiagnosis, nextFolders]) => {
-        setRuntime(nextRuntime)
-        setConfiguration(nextConfiguration)
-        setPlanningState(nextPlanning)
-        setDiagnosis(nextDiagnosis)
-        setFolders(nextFolders.folders)
-        setLedger(await getLedger())
-      })
-      .catch(() => {
+    let cancelled = false
+    void (async () => {
+      const nextRuntime = await getRuntime()
+      if (cancelled) return
+      setRuntime(nextRuntime)
+      await refreshUsageViews()
+
+      const startupDeadline = Date.now() + 5 * 60 * 1_000
+      let loadingReleased = false
+      while (!cancelled) {
+        const progress = await getScanProgress()
+        if (!progress.running && !progress.startupPending) break
+        if (!loadingReleased && Date.now() >= startupDeadline) {
+          loadingReleased = true
+          setRuntimeLoading(false)
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      if (!cancelled) await refreshUsageViews()
+    })()
+      .catch(async () => {
         // The standalone Vite preview intentionally falls back to demo data.
+        if (!cancelled) setData(await getDashboardData())
       })
-      .finally(() => setRuntimeLoading(false))
+      .finally(() => {
+        if (!cancelled) setRuntimeLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
-    if (autoOnboardingShown.current || !data || data.meta.source !== 'local' || !configuration)
+    if (
+      runtimeLoading ||
+      autoOnboardingShown.current ||
+      !data ||
+      data.meta.source !== 'local' ||
+      !configuration
+    )
       return
     const hasAnyCharge =
       configuration.charges.claude > 0 ||
@@ -109,21 +142,65 @@ function App() {
       setOnboardingStep(data.meta.sessionCount > 0 ? 1 : 0)
       setOnboarding(true)
     }
-  }, [configuration, data])
+  }, [configuration, data, runtimeLoading])
+
+  async function refreshUsageViews(): Promise<void> {
+    const [
+      nextDashboard,
+      nextConfiguration,
+      nextPlanning,
+      nextDiagnosis,
+      nextLedger,
+      nextFolders,
+      nextSources,
+    ] = await Promise.all([
+      getDashboardData(),
+      getConfiguration(),
+      getPlanning(),
+      getDiagnosis(),
+      getLedger(),
+      getFolders(),
+      getHistorySources(),
+    ])
+    setData(nextDashboard)
+    setConfiguration(nextConfiguration)
+    setPlanningState(nextPlanning)
+    setDiagnosis(nextDiagnosis)
+    setLedger(nextLedger)
+    setFolders(nextFolders.folders)
+    setHistorySources(nextSources.sources)
+  }
 
   async function runScan(providers: ProviderKey[]): Promise<ScanResult> {
     const activeRuntime = runtime ?? (await getRuntime())
     if (!runtime) setRuntime(activeRuntime)
     const result = await scanHistory(activeRuntime.csrfToken, providers)
-    const [nextDashboard, nextConfiguration, nextFolders] = await Promise.all([
-      getDashboardData(),
-      getConfiguration(),
-      getFolders(),
-    ])
-    setData(nextDashboard)
-    setConfiguration(nextConfiguration)
-    setFolders(nextFolders.folders)
+    await refreshUsageViews()
     return result
+  }
+
+  async function withCsrf<T>(action: (csrfToken: string) => Promise<T>): Promise<T> {
+    const activeRuntime = runtime ?? (await getRuntime())
+    if (!runtime) setRuntime(activeRuntime)
+    return action(activeRuntime.csrfToken)
+  }
+
+  async function saveHistorySource(source: HistorySourceInput, sourceId?: string): Promise<void> {
+    await withCsrf((csrfToken) =>
+      sourceId
+        ? updateHistorySource(csrfToken, sourceId, source)
+        : createHistorySource(csrfToken, source),
+    )
+    await refreshUsageViews()
+  }
+
+  function testSourceVisibility(source: HistorySourceInput): Promise<HistorySourceTestResult> {
+    return withCsrf((csrfToken) => testHistorySource(csrfToken, source))
+  }
+
+  async function deleteHistorySource(sourceId: string): Promise<void> {
+    await withCsrf((csrfToken) => removeHistorySource(csrfToken, sourceId))
+    await refreshUsageViews()
   }
 
   async function storeRetention(
@@ -277,10 +354,10 @@ function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="#top" aria-label="DevTax Radar ホーム">
+        <a className="brand" href="#top" aria-label="DevTax ホーム">
           <span className="radar-mark">D</span>
           <span>
-            <strong>DevTax Radar</strong>
+            <strong>DevTax</strong>
             <small>AI原価を、説明できる数字に。</small>
           </span>
         </a>
@@ -331,7 +408,7 @@ function App() {
             <span>{data.meta.source === 'local' ? 'ローカル接続中' : '合成データデモ'}</span>
           </div>
           <strong>{data.meta.sessionCount.toLocaleString()}件の利用記録</strong>
-          <small>最終同期 {data.meta.lastSynced}</small>
+          <small>最終走査 {data.meta.lastSynced}</small>
           <button
             className="quiet-button"
             onClick={() => {
@@ -344,7 +421,7 @@ function App() {
         </div>
         <p className="local-note">
           {data.meta.source === 'local'
-            ? '履歴本文はこのPCから送信されません'
+            ? '通常集計は履歴本文を保存・外部送信しません'
             : '実在する履歴・請求額・パスは含みません'}
         </p>
       </aside>
@@ -507,11 +584,15 @@ function App() {
           data={data}
           runtime={runtime}
           runtimeLoading={runtimeLoading}
+          historySources={historySources}
           configuration={configuration}
           planning={planning}
           unassignedFolderCount={unassignedFolderCount}
           onStep={setOnboardingStep}
           onScan={runScan}
+          onSaveHistorySource={saveHistorySource}
+          onTestHistorySource={testSourceVisibility}
+          onRemoveHistorySource={deleteHistorySource}
           onSave={storeConfiguration}
           onSaveRetention={storeRetention}
           onSavePlanning={storePlanning}
@@ -682,7 +763,7 @@ function SummaryPage({
         ))}
       </section>
 
-      <ol className="value-flow" aria-label="DevTax Radarの処理フロー">
+      <ol className="value-flow" aria-label="DevTaxの処理フロー">
         <li>
           <span>01</span>
           <div>
@@ -893,7 +974,7 @@ function EvidencePage({
         ? await getPlanningExport('markdown')
         : new Blob(
             [
-              `# DevTax Radar 相談用出力\n\n年分: ${planning.profile.taxYear}\n\n` +
+              `# DevTax 相談用出力\n\n年分: ${planning.profile.taxYear}\n\n` +
                 ledger.byTaxUnit
                   .map(
                     (item) => `- ${item.name}: ${yen.format(item.amountJpy)} / ${item.candidate}`,
@@ -905,7 +986,7 @@ function EvidencePage({
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `devtax-radar-${planning.profile.taxYear}.md`
+    anchor.download = `devtax-${planning.profile.taxYear}.md`
     anchor.click()
     URL.revokeObjectURL(url)
   }
@@ -1378,7 +1459,7 @@ function TaxGuidePage() {
           <h2>月額料金を、そのまま税務処理しない。</h2>
           <p>
             まず「何を作るための利用か」を資産・改良計画単位で集め、
-            金額境界と供用状況を確認します。DevTax Radarは判断を確定せず、候補と不足証拠を示します。
+            金額境界と供用状況を確認します。DevTaxは判断を確定せず、候補と不足証拠を示します。
           </p>
         </div>
         <ol className="guide-route" aria-label="税務候補を確認する順序">

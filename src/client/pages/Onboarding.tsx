@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   DashboardData,
+  HistorySource,
+  HistorySourceInput,
+  HistorySourceTestResult,
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
@@ -27,7 +30,9 @@ import {
   providerWithInvertedContract,
 } from '../chargeGuard'
 import { createFocusTrap } from '../focusTrap.js'
+import { providerHasEnabledSource } from '../historySources'
 import { displayMonth } from '../monthLabel.js'
+import HistorySourceManager from './HistorySourceManager'
 import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
 
 function Onboarding({
@@ -35,11 +40,15 @@ function Onboarding({
   data,
   runtime,
   runtimeLoading,
+  historySources,
   configuration,
   planning,
   unassignedFolderCount,
   onStep,
   onScan,
+  onSaveHistorySource,
+  onTestHistorySource,
+  onRemoveHistorySource,
   onSave,
   onSaveRetention,
   onSavePlanning,
@@ -50,11 +59,15 @@ function Onboarding({
   data: DashboardData
   runtime: RuntimeData | null
   runtimeLoading: boolean
+  historySources: HistorySource[]
   configuration: LocalConfiguration | null
   planning: PlanningSnapshot
   unassignedFolderCount: number
   onStep: (step: number) => void
   onScan: (providers: ProviderKey[]) => Promise<ScanResult>
+  onSaveHistorySource: (source: HistorySourceInput, sourceId?: string) => Promise<void>
+  onTestHistorySource: (source: HistorySourceInput) => Promise<HistorySourceTestResult>
+  onRemoveHistorySource: (sourceId: string) => Promise<void>
   onSave: (configuration: LocalConfiguration) => Promise<void>
   onSaveRetention: (
     days: number,
@@ -128,6 +141,14 @@ function Onboarding({
         )
       }
     }
+    for (const source of lastScanResult.sources ?? []) {
+      if (source.status === 'complete') continue
+      notes.push(
+        source.status === 'unavailable'
+          ? `${source.sourceName}へ接続できませんでした。前回の正常な取り込み分は保持しています。`
+          : `${source.sourceName}を最後まで安全に読めませんでした。前回の正常な取り込み分は保持しています。`,
+      )
+    }
     return notes
   }, [lastScanResult])
 
@@ -165,6 +186,13 @@ function Onboarding({
       ),
     )
   }, [runtime])
+
+  useEffect(() => {
+    if (historySources.length === 0) return
+    setSelectedProviders((current) =>
+      current.filter((provider) => providerHasEnabledSource(historySources, provider)),
+    )
+  }, [historySources])
 
   useEffect(() => {
     if (!configuration) return
@@ -424,6 +452,19 @@ function Onboarding({
         setNotice({ kind: 'error', message: '確認するAIサービスを1つ以上選択してください。' })
         return
       }
+      const unavailableProviders = selectedProviders.filter(
+        (provider) => !providerHasEnabledSource(historySources, provider),
+      )
+      if (unavailableProviders.length > 0) {
+        const labels = unavailableProviders
+          .map((provider) => (provider === 'claude' ? 'Claude Code' : 'Codex'))
+          .join('・')
+        setNotice({
+          kind: 'error',
+          message: `${labels}で有効な読み取り元がありません。読み取り元を追加するか、停止中の設定を有効にしてください。`,
+        })
+        return
+      }
       setBusy(true)
       try {
         const result = await onScan(selectedProviders)
@@ -432,9 +473,15 @@ function Onboarding({
           (sum, provider) => sum + (provider?.events ?? 0),
           0,
         )
+        const incompleteSources = (result.sources ?? []).filter(
+          (source) => source.status !== 'complete',
+        )
         setNotice({
-          kind: 'success',
-          message: `${events.toLocaleString()}件の利用記録をローカルに取り込みました。`,
+          kind: incompleteSources.length > 0 ? 'info' : 'success',
+          message:
+            incompleteSources.length > 0
+              ? `${events.toLocaleString()}件を更新しました。読めなかった読み取り元は、前回の正常な取り込み分を保持しています。`
+              : `${events.toLocaleString()}件の利用記録をローカルに取り込みました。`,
         })
         onStep(1)
       } catch (error) {
@@ -601,21 +648,31 @@ function Onboarding({
               <>
                 <span className="step-label">1 / 5　AIの利用履歴</span>
                 <h3>{runtimeLoading ? 'ローカル履歴を探しています…' : 'AI開発履歴を確認'}</h3>
-                <p>読み取り専用で集計します。プロンプトや応答本文、ソースコードは取得しません。</p>
+                <p>
+                  履歴ファイル全体を読み取り専用で解析します。通常集計で本文やコードを保存・外部送信しません。このPCの既定履歴だけは、利用者が「内容を確認」を押したときに元ファイルから先頭プロンプトの短いプレビューを表示します。共有元では表示しません。
+                </p>
                 <div className="detected-list">
                   {(
                     [
-                      ['claude', 'Claude Code', '~/.claude/projects', 'C'],
-                      ['codex', 'Codex', '~/.codex/sessions', 'O'],
+                      ['claude', 'Claude Code', 'C'],
+                      ['codex', 'Codex', 'O'],
                     ] as const
-                  ).map(([key, label, path, monogram]) => {
-                    const detected = runtime?.providers[key].detected ?? isDemoData
+                  ).map(([key, label, monogram]) => {
+                    const sourcesForProvider = historySources.filter(
+                      (source) => source.provider === key && source.enabled,
+                    )
+                    const configured =
+                      sourcesForProvider.length > 0 ||
+                      (!historySources.length && (runtime?.providers[key].detected ?? isDemoData))
+                    const available =
+                      sourcesForProvider.some((source) => source.availability === 'available') ||
+                      (!historySources.length && configured)
                     return (
-                      <label className={!detected ? 'provider-undetected' : ''} key={key}>
+                      <label className={!configured ? 'provider-undetected' : ''} key={key}>
                         <input
                           type="checkbox"
                           checked={selectedProviders.includes(key)}
-                          disabled={!detected || busy || runtimeLoading}
+                          disabled={!configured || busy || runtimeLoading}
                           onChange={() => toggleProvider(key)}
                         />
                         <span className={`provider-logo ${key === 'codex' ? 'codex' : ''}`}>
@@ -623,14 +680,44 @@ function Onboarding({
                         </span>
                         <span>
                           <strong>{label}</strong>
-                          <small>{path}</small>
+                          <small>
+                            {historySources.length > 0
+                              ? `読み取り元 ${sourcesForProvider.length}件`
+                              : '読み取り元を確認中'}
+                          </small>
                         </span>
-                        <b>{runtimeLoading ? '確認中' : detected ? '検出済み' : '未検出'}</b>
-                        <span className="check">{detected ? '✓' : '—'}</span>
+                        <b>
+                          {runtimeLoading
+                            ? '確認中'
+                            : !configured
+                              ? '未設定'
+                              : available
+                                ? '利用可能'
+                                : '要接続'}
+                        </b>
+                        <span className="check">{available ? '✓' : configured ? '!' : '—'}</span>
                       </label>
                     )
                   })}
                 </div>
+                {!apiUnavailable && (
+                  <HistorySourceManager
+                    sources={historySources}
+                    disabled={busy || runtimeLoading}
+                    onSave={async (source, sourceId) => {
+                      await onSaveHistorySource(source, sourceId)
+                      if (!sourceId && source.enabled !== false) {
+                        setSelectedProviders((current) =>
+                          current.includes(source.provider)
+                            ? current
+                            : [...current, source.provider],
+                        )
+                      }
+                    }}
+                    onTest={onTestHistorySource}
+                    onRemove={onRemoveHistorySource}
+                  />
+                )}
                 {/* Gated on detection: without it, a Codex-only user would be
                     shown a Claude Code retention setting and one click would
                     create ~/.claude and a settings file for a tool they do not
@@ -645,8 +732,8 @@ function Onboarding({
                     </summary>
                     <div className="retention-body">
                       <p>
-                        Claude Codeは、設定した日数を過ぎた履歴を削除します。削除された履歴はDevTax
-                        Radarからも復元できません。ここでの配賦は、残っている履歴だけを根拠にしています。
+                        Claude
+                        Codeは、設定した日数を過ぎた履歴を削除します。削除された履歴はDevTaxからも復元できません。ここでの配賦は、残っている履歴だけを根拠にしています。
                       </p>
                       <dl className="retention-facts">
                         <div>
@@ -697,8 +784,7 @@ function Onboarding({
                           ではありません
                         </li>
                         <li>
-                          取り込んだあとも元の履歴には価値があります。DevTax
-                          RadarのデータベースはこのPCの利用者が書き換えられるため、自動生成された
+                          取り込んだあとも元の履歴には価値があります。DevTaxのデータベースはこのPCの利用者が書き換えられるため、自動生成された
                           元履歴のほうが記録としての性質が強いです
                         </li>
                         <li>
@@ -758,7 +844,7 @@ function Onboarding({
                 {busy && (
                   <p className="scan-progress" role="status" aria-live="polite">
                     {scanProgress?.running
-                      ? `${scanProgress.provider === 'codex' ? 'Codex' : 'Claude Code'}の履歴を走査しています。走査したファイル数：${scanProgress.filesScanned}`
+                      ? `${scanProgress.sourceName ?? (scanProgress.provider === 'codex' ? 'Codex' : 'Claude Code')}の履歴を走査しています。走査したファイル数：${scanProgress.filesScanned}`
                       : '履歴を確認しています。'}
                   </p>
                 )}
@@ -772,9 +858,9 @@ function Onboarding({
                 <div className="privacy-callout">
                   <span>⌂</span>
                   <p>
-                    <strong>データはこのPCの中だけ</strong>
+                    <strong>集計結果はこのPCの中だけ</strong>
                     <br />
-                    外部送信・クラウド同期・テレメトリはありません。
+                    共有元の履歴はLAN経由で読み取りますが、外部サービスへの送信・クラウド同期・テレメトリはありません。
                   </p>
                 </div>
                 <div className="setup-insight">
@@ -783,7 +869,7 @@ function Onboarding({
                     <strong>ここまで分かりました</strong>
                     <br />
                     {selectedProviders.length}
-                    種類のAI履歴を確認します。本文やソースコードは読みません。
+                    種類のAI履歴を確認します。本文やソースコードは抽出・保存しません。
                   </p>
                 </div>
               </>
@@ -2088,7 +2174,7 @@ function Onboarding({
                       ? // Naming the provider matters here: the count restarts
                         // at 0 for the second provider, and without the name
                         // the number looks like it went backwards.
-                        `${scanProgress.provider === 'codex' ? 'Codex' : 'Claude'}を走査中… ${scanProgress.filesScanned}ファイル`
+                        `${scanProgress.sourceName ?? (scanProgress.provider === 'codex' ? 'Codex' : 'Claude')}を走査中… ${scanProgress.filesScanned}ファイル`
                       : '履歴を確認中…'
                     : '保存中…'
                   : step === 0

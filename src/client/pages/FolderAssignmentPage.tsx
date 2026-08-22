@@ -67,10 +67,10 @@ export default function FolderAssignmentPage({
     }
   }
 
-  async function loadDetail(provider: ProviderKey, sessionKey: string) {
-    const key = `${provider}:${sessionKey}`
+  async function loadDetail(provider: ProviderKey, sessionKey: string, sourceId: string) {
+    const key = `${sourceId}:${provider}:${sessionKey}`
     if (details[key]) return
-    const detail = await getSessionDetail(provider, sessionKey)
+    const detail = await getSessionDetail(provider, sessionKey, sourceId)
     setDetails((current) => ({ ...current, [key]: detail }))
   }
 
@@ -249,7 +249,8 @@ export default function FolderAssignmentPage({
                   <strong>{folder.label}</strong>
                   <small>
                     {folder.sessionCount}セッション · {folder.firstUsedOn}〜{folder.lastUsedOn} ·{' '}
-                    {folder.providers.map((provider) => PROVIDER_LABELS[provider]).join('・')}
+                    {folder.providers.map((provider) => PROVIDER_LABELS[provider]).join('・')} ·{' '}
+                    {folder.sources.map((source) => source.name).join('・')}
                   </small>
                 </div>
                 {folder.assignments.length <= 1 && (
@@ -378,22 +379,28 @@ export default function FolderAssignmentPage({
                 {expanded === folder.projectKey && (
                   <div className="assignment-sessions">
                     {(sessions[folder.projectKey] ?? []).map((session) => {
-                      const key = `${session.provider}:${session.sessionKey}`
+                      const key = `${session.sourceId}:${session.provider}:${session.sessionKey}`
                       const detail = details[key]
                       return (
                         <article key={key}>
                           <div className="session-head">
                             <strong>{session.startedAt.slice(0, 10)}</strong>
+                            <span>{session.sourceName}</span>
                             <span>{PROVIDER_LABELS[session.provider]}</span>
                             <span>{session.messageCount}メッセージ</span>
                             <span>{session.model ?? 'モデル不明'}</span>
-                            {!detail && (
+                            {!detail && session.localDetailAvailable && (
                               <button
                                 className="text-button"
-                                onClick={() => loadDetail(session.provider, session.sessionKey)}
+                                onClick={() =>
+                                  loadDetail(session.provider, session.sessionKey, session.sourceId)
+                                }
                               >
                                 内容を確認
                               </button>
+                            )}
+                            {!session.localDetailAvailable && (
+                              <small>共有フォルダの履歴は集計情報のみ表示します</small>
                             )}
                           </div>
                           {detail && (

@@ -69,7 +69,7 @@ writeFileSync(
       name: packageMetadata.name,
       private: true,
       version,
-      description: 'Local-only DevTax Radar runtime package',
+      description: 'Local-only DevTax runtime package',
       type: 'module',
       engines: packageMetadata.engines,
       scripts: {
@@ -84,7 +84,7 @@ writeFileSync(
 writeFileSync(
   join(releaseRoot, 'START-HERE.txt'),
   [
-    'DevTax Radar',
+    'DevTax',
     '',
     '1. Install Node.js 24.14 or later.',
     '2. Open a terminal in this directory.',

@@ -74,6 +74,28 @@ async function waitForRuntime(port: number): Promise<Response> {
   throw new Error(`Local server did not start: ${String(lastError)}`)
 }
 
+async function waitForStartupScan(port: number): Promise<{
+  running: boolean
+  startupPending: boolean
+  provider: string | null
+  filesScanned: number
+}> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const progress = (await fetch(`http://127.0.0.1:${port}/api/scan/progress`).then(
+      async (response) => await response.json(),
+    )) as {
+      running: boolean
+      startupPending: boolean
+      provider: string | null
+      filesScanned: number
+    }
+    if (!progress.running && !progress.startupPending) return progress
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50))
+  }
+  throw new Error('Startup history scan did not finish')
+}
+
 describe('local server boundary', () => {
   it('starts on loopback and protects the scan mutation', async () => {
     const port = await reservePort()
@@ -86,11 +108,29 @@ describe('local server boundary', () => {
       resolve('fixtures/claude/synthetic-history.jsonl'),
       join(claudeHistory, 'synthetic-history.jsonl'),
     )
+    const claudeFixturePath = join(claudeHistory, 'synthetic-history.jsonl')
+    writeFileSync(
+      claudeFixturePath,
+      readFileSync(claudeFixturePath, 'utf8')
+        .split(/\r?\n/)
+        .filter((line) => line !== 'not valid json')
+        .join('\n'),
+      'utf8',
+    )
     const codexHistory = join(isolatedHome, '.codex', 'sessions', '2026', '04')
     mkdirSync(codexHistory, { recursive: true })
     copyFileSync(
       resolve('fixtures/codex/2026/04/synthetic-session.jsonl'),
       join(codexHistory, 'synthetic-session.jsonl'),
+    )
+    const codexFixturePath = join(codexHistory, 'synthetic-session.jsonl')
+    writeFileSync(
+      codexFixturePath,
+      readFileSync(codexFixturePath, 'utf8')
+        .split(/\r?\n/)
+        .filter((line) => line !== '{broken')
+        .join('\n'),
+      'utf8',
     )
 
     // Task 2: point retention reads at a throwaway settings file instead of
@@ -117,7 +157,9 @@ describe('local server boundary', () => {
       csrfToken: string
       privacy: {
         localOnly: boolean
-        promptBodiesExtracted: boolean
+        promptBodiesPersisted: boolean
+        localPromptPreviewOnDemand: boolean
+        configuredPromptPreview: boolean
         telemetry: boolean
       }
       retention: {
@@ -141,7 +183,9 @@ describe('local server boundary', () => {
     }
     expect(runtime.privacy).toEqual({
       localOnly: true,
-      promptBodiesExtracted: false,
+      promptBodiesPersisted: false,
+      localPromptPreviewOnDemand: true,
+      configuredPromptPreview: false,
       telemetry: false,
     })
     expect(runtime.retention.claude.autoDelete).toEqual({
@@ -195,10 +239,13 @@ describe('local server boundary', () => {
     })
     expect(invalidDays.status).toBe(400)
 
-    const idleProgress = (await fetch(`http://127.0.0.1:${port}/api/scan/progress`).then(
-      async (response) => await response.json(),
-    )) as { running: boolean; provider: string | null; filesScanned: number }
-    expect(idleProgress).toEqual({ running: false, provider: null, filesScanned: 0 })
+    const idleProgress = await waitForStartupScan(port)
+    expect(idleProgress).toEqual({
+      running: false,
+      provider: null,
+      filesScanned: 0,
+      startupPending: false,
+    })
 
     const nonLoopbackAddress = Object.values(networkInterfaces())
       .flat()

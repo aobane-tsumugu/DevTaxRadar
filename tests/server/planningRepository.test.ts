@@ -184,7 +184,7 @@ describe('planning repository', () => {
   it('exports an adviser-readable summary without exposing local file paths', async () => {
     const repository = await import('../../src/server/planningRepository.js')
     const markdown = repository.planningMarkdown(samplePlanning())
-    expect(markdown).toContain('# DevTax Radar 計画・原価資料')
+    expect(markdown).toContain('# DevTax 計画・原価資料')
     expect(markdown).toContain('自分利用・公開兼用アプリ v1')
     expect(markdown).toContain('AIワークステーション')
     expect(markdown).toContain('正式な制作作業へ初めて利用した')

@@ -1,19 +1,20 @@
-# DevTax Radar 技術設計
+# DevTax 技術設計
 
-Date: 2026-07-24
-Decision status: Adopted for confirmed specification v0.3
+Date: 2026-08-20
+Decision status: Adopted for confirmed specification v0.4
 
 ## 1. 採用構成
 
-> **GitHubから取得した利用者が、自分のPCだけで履歴の読取・配賦・保存を完結できるローカルWebアプリにする。**
+> **GitHubから取得した利用者が、DevTaxを動かす1台からローカルおよび明示指定した共有フォルダを読み、複数PCの履歴を一つの配賦分母へ統合できるローカルWebアプリにする。**
 
 ```text
 GitHub Public Repository / Releases
 └─ 利用者のPC
    ├─ Node local server（127.0.0.1 only）
-   ├─ Claude / Codex adapter
-   │  ├─ ~/.claude/projects（read only）
-   │  └─ ~/.codex/sessions（read only）
+   ├─ history source scanner + Claude / Codex adapter
+   │  ├─ ~/.claude/projects（既定・read only）
+   │  ├─ ~/.codex/sessions（既定・read only）
+   │  └─ SMB/Samba等の共有・マウント済みフォルダ（明示指定・read only）
    ├─ local SQLite database
    └─ React UI（localhost）
 ```
@@ -124,10 +125,11 @@ npm run dev
 
 1. Nodeサーバーを`127.0.0.1`へbindする
 2. `http://127.0.0.1:5173`でブラウザUIを開く
-3. ユーザーの明示操作でClaude／Codexの既定パスを検出する
-4. JSONLをストリーム処理し、許可メタデータだけを正規化する
-5. 集計結果、分類、Provider×月別請求額をローカルSQLiteへ保存する
-6. APIはUIに必要な集計・根拠だけを返す
+3. Claude／Codexの既定パスと、有効な追加走査元を起動時に自動走査する
+4. ユーザーは「はじめの準備」で追加走査元を登録・テスト・停止・削除できる
+5. JSONLをストリーム処理し、許可メタデータだけを正規化する
+6. 集計結果、分類、Provider×月別請求額をローカルSQLiteへ保存する
+7. APIはUIに必要な集計・根拠だけを返す
 
 本番相当のローカル実行:
 
@@ -143,7 +145,7 @@ npm start
 - `0.0.0.0`ではなく`127.0.0.1`だけへbindする
 - CORSを許可しない
 - state-changing APIはJSON、同一Origin、起動ごとのCSRF tokenを要求する
-- UIへプロンプト・応答本文・ソースコードを返さない
+- 通常集計ではUIへプロンプト・応答本文・ソースコードを返さない。既定ローカル履歴の明示的なプレビュー要求だけは、元ファイルから短い先頭プロンプトを返す。DBへ保存せず、追加走査元には提供しない
 - 元履歴はread onlyで開き、変更・削除しない
 - telemetry、クラウド同期、外部LLM送信を初期状態で持たない
 - UI資産、アイコン、フォントをbundleし、CDNから実行時取得しない
@@ -151,7 +153,16 @@ npm start
 
 長時間scanのworker thread化は未実装であり、履歴量が大きい端末での応答性は今後の課題とする。
 
-### 4.2 任意の匿名デモ
+### 4.2 複数PCの直接走査
+
+- 追加走査元はOSが通常の絶対パスとして公開するフォルダであり、SMB/Sambaの認証と再接続はOSへ委ねる
+- DevTaxは共有を作成せず、別PCへクライアント、常駐サービス、タスク、秘密鍵を配布しない
+- 走査は単一プロセス内で直列化し、起動時の自動走査と画面からの再走査を重複実行しない
+- 走査元単位で、読取前後に各ファイルが安定していることを確認する。未接続、読取失敗、走査中変更があれば当該走査元の前回正常値を保持する
+- 追加走査元の元セッションIDと絶対パスはSQLiteへ保存しない。既定ローカル走査元だけ、詳細再開機能のため隔離した参照表へ保存する
+- Collectorは共有が利用できない将来の代替経路であり、通常構成には含めない
+
+### 4.3 任意の匿名デモ
 
 Adapterテストと静的UI確認には`fixtures/claude`、`fixtures/codex`の合成JSONLを使う。これは利用者向け製品データではなく、実ログ・実請求額・実プロジェクト名を一切含まない。
 
@@ -199,6 +210,7 @@ Adapterテストと静的UI確認には`fixtures/claude`、`fixtures/codex`の�
 
 ```ts
 type NormalizedUsage = {
+  sourceId: string;
   provider: "claude" | "codex";
   month: string;
   sessionKey: string;
@@ -214,7 +226,7 @@ type NormalizedUsage = {
 };
 ```
 
-`sessionKey`と`projectKey`は端末内saltでハッシュ化し、元のIDと絶対パスはSQLiteへ保存しない。`projectLabel`はローカルUI用の末尾名であり、公開物へ転用しない。
+`sessionKey`と`projectKey`は端末内saltでハッシュ化する。既定ローカル走査元は従来のキーを維持し、追加走査元は不透明な`sourceId`から導出したsaltを使うため、別PCの同一IDが衝突しない。追加走査元の元IDと絶対パスはSQLiteへ保存しない。`projectLabel`はローカルUI用の末尾名であり、公開物へ転用しない。
 
 ## 6. 配賦エンジン
 
@@ -285,11 +297,12 @@ type TaxDecision = {
 
 ## 7.1 診断・台帳アーキテクチャ
 
-既存の`/api/config`と既存SQLite表は後方互換のため維持する。新機能は追加テーブルと`/api/planning`名前空間へ実装し、既存DBもmigrationなしで起動できるよう`CREATE TABLE IF NOT EXISTS`で段階導入する。
+既存の`/api/config`と計画台帳は後方互換のため維持する。複数走査元への初回更新では、DBを`VACUUM INTO`でバックアップし、読み取り専用で`integrity_check`に成功したことを確認してから、`history_sources`を追加し、`usage_events`、`scans`、`session_references`へ`source_id`を付けるトランザクション移行を行う。既定ローカル走査元の従来キーと分類規則は維持する。
 
 ```text
 履歴・請求設定（既存）
-  usage_events（セッション単位） / session_references / provider_month_charges
+  history_sources / usage_events（走査元・セッション単位）
+  session_references（既定ローカルのみ） / provider_month_charges
              ↓
 診断・制作物台帳（追加）
   planning_profiles / tax_units / lifecycle_events
@@ -323,6 +336,8 @@ Dashboard projection / export
 - `GET /api/diagnosis`: 保存事実から現在地、今すぐ、イベント時、不足事実を再生成
 - `GET /api/ledger`: 設定した対象年について、直接費、設備、家事関連費を集計
 - `GET /api/export?format=markdown`: 税理士相談用の明細。端末内の参照情報は出力しない
+- `GET /api/sources`: 走査元設定画面だけで使う一覧。設定上必要な絶対パスを含む
+- `POST /api/sources/test`, `POST /api/sources`, `PATCH /api/sources/:id`, `DELETE /api/sources/:id`: CSRF保護された走査元管理
 
 Mutationは既存と同じCSRF・Origin検査を通す。IDは非可逆なローカルIDとし、証拠ファイル本体、プロンプト、応答、ソースコードは保存しない。
 
@@ -422,11 +437,11 @@ Claude Codeは`~/.claude/settings.json`の`cleanupPeriodDays`を過ぎた履歴�
 
 ## 7.7 取り込み時のハッシュ
 
-各履歴ファイルのSHA-256を`session_references.content_hash`へ記録し、再走査で
+既定ローカル走査元では、各履歴ファイルのSHA-256を`session_references.content_hash`へ記録し、再走査で
 変わっていれば件数を知らせる。走査中のストリームに`Transform`を挟んで計算するため、
 ファイルは一度しか読まない（実測15.4秒→17.5秒）。読み取りが途中で失敗した場合と、
 読んだ後にファイルが消えた場合は、部分的なハッシュを記録せず「未記録」として扱う。
-ハッシュもファイルパスもこのテーブルの外へ出さず、APIの応答に載るのは件数だけである。
+ハッシュもファイルパスもこのテーブルの外へ出さず、通常APIの応答に載るのは件数だけである。追加走査元では元ファイルのパスとハッシュを保存せず、走査前後のサイズ・更新日時が一致したファイルだけを採用する。追加走査元のルート絶対パスは`history_sources`に設定として保存し、走査元設定専用の`GET /api/sources`以外へ出さない。
 
 同じ利用者権限で動く以上ハッシュ自体も書き換えられるため、第三者に対する改ざん防止には
 ならない。示せるのは同一PC内で記録の辻褄が合い続けていることだけである。
@@ -540,6 +555,8 @@ AI審査がコードを探索しやすいよう、READMEから以下へ直接リ
 | Claude／Codex更新で履歴形式が変わる | Adapter、schema version、confidenceを持つ |
 | トークンが実コストではない | 「配賦基準」と明示し、月額実請求を別入力 |
 | Chat利用等が履歴にない | 未取得利用バケット |
+| 共有先PCの停止・権限切れ・走査中変更 | 当該走査元の更新を拒否し、前回正常値を保持 |
+| 別PCに同じネイティブセッションIDがある | `source_id`別のsaltとDB一意制約で分離 |
 | 実データを公開してしまう | allowlist sanitizer + CI privacy test |
 | 税務判断を断定する | 候補、根拠、不足情報、ユーザー確定 |
 | Node導入が非技術者には難しい | GitHub Releasesで`npm install`不要のZIPを提供 |
@@ -547,7 +564,7 @@ AI審査がコードを探索しやすいよう、READMEから以下へ直接リ
 | 機能過多 | AI原価に直結する診断、制作物、設備、自宅費用、証拠へ限定し、税額・暗号資産・電子申告は扱わない |
 | 履歴が保持期間を過ぎて消える | `cleanupPeriodDays`を検出して警告し、承認のうえ延長できる。7.6を参照 |
 | 設定ファイルの書き換えで利用者の環境を壊す | 上書きしない控えを取り、一時ファイルへ書いてrenameで置換。JSONを解析できなければ書き換えない。7.6を参照 |
-| 取り込み後に元履歴が変わる | 取り込み時のSHA-256を記録し、再走査で差分の件数を知らせる。第三者に対する改ざん防止ではない |
+| 取り込み後に元履歴が変わる | 既定ローカル走査元では取り込み時のSHA-256を記録し、再走査で差分の件数を知らせる。追加走査元では走査前後の安定性を確認する。第三者に対する改ざん防止ではない |
 | 走査後にタイムゾーンが変わる | `scans.time_zone`と現在の値を比べ、月の帰属が動きうることを警告する |
 
 ## 12. 配布判断
@@ -565,7 +582,7 @@ AI審査がコードを探索しやすいよう、READMEから以下へ直接リ
 
 - Tauri等: Nodeを意識しないワンクリック配布
 - Cloudflare Workers等の動的サービス: 将来必要になった場合も、実履歴をアップロードしない境界を維持する
-- local agent + optional sync: 複数PC同期をユーザーが明示的に望む段階
+- ワンショットCollector: SMB/Samba等を利用できない環境の任意代替経路。クライアント間同期は行わない
 
 ## 13. 税務ルールの国税庁公式資料
 

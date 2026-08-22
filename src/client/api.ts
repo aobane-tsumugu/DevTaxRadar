@@ -1,4 +1,7 @@
 import type {
+  HistorySource,
+  HistorySourceInput,
+  HistorySourceTestResult,
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
@@ -48,6 +51,65 @@ export function getRuntime(): Promise<RuntimeData> {
 
 export function getConfiguration(): Promise<LocalConfiguration> {
   return requestJson('/api/config')
+}
+
+export function getHistorySources(): Promise<{ sources: HistorySource[] }> {
+  return requestJson('/api/sources')
+}
+
+export function createHistorySource(
+  csrfToken: string,
+  source: HistorySourceInput,
+): Promise<{ saved: true; sourceId: string }> {
+  return requestJson('/api/sources', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevTax-CSRF': csrfToken,
+    },
+    body: JSON.stringify(source),
+  })
+}
+
+export function updateHistorySource(
+  csrfToken: string,
+  sourceId: string,
+  source: HistorySourceInput,
+): Promise<{ saved: true; sourceId: string }> {
+  return requestJson(`/api/sources/${encodeURIComponent(sourceId)}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevTax-CSRF': csrfToken,
+    },
+    body: JSON.stringify(source),
+  })
+}
+
+export function testHistorySource(
+  csrfToken: string,
+  source: HistorySourceInput,
+): Promise<HistorySourceTestResult> {
+  return requestJson('/api/sources/test', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevTax-CSRF': csrfToken,
+    },
+    body: JSON.stringify(source),
+  })
+}
+
+export function removeHistorySource(
+  csrfToken: string,
+  sourceId: string,
+): Promise<{ removed: true }> {
+  return requestJson(`/api/sources/${encodeURIComponent(sourceId)}`, {
+    method: 'DELETE',
+    headers: {
+      'X-DevTax-CSRF': csrfToken,
+    },
+  })
 }
 
 export function scanHistory(csrfToken: string, providers: ProviderKey[]): Promise<ScanResult> {
@@ -152,8 +214,11 @@ export function getSessions(projectKey: string): Promise<{ sessions: SessionSumm
 export function getSessionDetail(
   provider: ProviderKey,
   sessionKey: string,
+  sourceId?: string,
 ): Promise<SessionDetail> {
   return requestJson(
-    `/api/sessions/detail?provider=${provider}&sessionKey=${encodeURIComponent(sessionKey)}`,
+    `/api/sessions/detail?provider=${provider}&sessionKey=${encodeURIComponent(sessionKey)}${
+      sourceId ? `&sourceId=${encodeURIComponent(sourceId)}` : ''
+    }`,
   )
 }

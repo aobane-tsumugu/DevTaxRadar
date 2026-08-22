@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { homedir, platform } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, normalize, resolve } from 'node:path'
 
 export function getAppDataDirectory(): string {
   if (process.env.DEVTAX_RADAR_DATA_DIR) {
@@ -24,6 +24,25 @@ export function getDefaultHistoryPaths(): { claude: string; codex: string } {
     claude: join(homedir(), '.claude', 'projects'),
     codex: join(homedir(), '.codex', 'sessions'),
   }
+}
+
+/**
+ * Converts a user-selected local, UNC, or OS-mounted history root into the
+ * exact absolute path DevTax will read. Share authentication and mounting stay
+ * with the operating system; DevTax only receives a filesystem path.
+ */
+export function normalizeHistoryRoot(root: string): string {
+  const trimmed = root.trim()
+  if (!trimmed || !isAbsolute(trimmed)) {
+    throw new Error('履歴フォルダには絶対パスを指定してください。')
+  }
+  return normalize(resolve(trimmed))
+}
+
+/** A comparison key only. It never leaves the local source-settings boundary. */
+export function historyRootKey(root: string): string {
+  const normalized = normalizeHistoryRoot(root)
+  return platform() === 'win32' ? normalized.toLocaleLowerCase('en-US') : normalized
 }
 
 export function getClaudeSettingsPath(): string {
