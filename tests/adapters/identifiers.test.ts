@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  localProjectLabel,
   portableProjectKey,
   portableProjectLabel,
   portableProjectPath,
@@ -29,5 +30,9 @@ describe('configured-source project paths', () => {
     expect(portableProjectKey('//server/share/Repo', SALT)).toBe(
       portableProjectKey('\\\\server\\share\\repo', SALT),
     )
+  })
+
+  it('keeps a Windows history label private when read on a POSIX host', () => {
+    expect(localProjectLabel('C:\\Users\\Alice\\Repo')).toBe('Repo')
   })
 })

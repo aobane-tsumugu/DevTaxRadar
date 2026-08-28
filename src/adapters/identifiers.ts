@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { createHmac } from 'node:crypto'
-import { basename, normalize, posix, resolve, win32 } from 'node:path'
+import { normalize, posix, resolve, win32 } from 'node:path'
 
 function digestKey(
   kind: 'project' | 'session' | 'message',
@@ -41,7 +41,10 @@ function safeProjectLabel(label: string): string {
 }
 
 export function localProjectLabel(rawPath: string): string {
-  return safeProjectLabel(basename(normalize(rawPath)))
+  // Histories can originate on a different OS from the machine doing the
+  // scan.  Node's native `basename` would leave a Windows path intact on a
+  // POSIX host, which could expose a complete local path in the local UI.
+  return portableProjectLabel(rawPath)
 }
 
 function isWindowsLikePath(rawPath: string): boolean {
