@@ -140,11 +140,7 @@ export type StrategyEvidenceExportRecord = {
 }
 
 export type StrategyAllocationSource =
-  | 'automatic'
-  | 'manual'
-  | 'unobserved'
-  | 'rounding'
-  | 'contract-excluded'
+  'automatic' | 'manual' | 'unobserved' | 'rounding' | 'contract-excluded'
 
 export type StrategyTaxGroup = 'current' | 'future' | 'review'
 
