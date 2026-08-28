@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
+import { validIsoCalendarDate } from '../core/chargePeriods.js'
 import Fastify, { type FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { localDateFromTimestamp } from '../adapters/localTime.js'
@@ -372,8 +373,8 @@ app.get('/api/export', async (request, reply) => {
     .send(planningMarkdown(snapshot, diagnosePlanning(snapshot), buildPlanningLedger(snapshot)))
 })
 
-const contractDateSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, {
-  message: '日付は YYYY-MM-DD で入力してください。',
+const contractDateSchema = z.string().refine(validIsoCalendarDate, {
+  message: '実在する日付を YYYY-MM-DD で入力してください。',
 })
 
 const providerContractSchema = z
@@ -387,6 +388,22 @@ const providerContractSchema = z
       !contract.startedOn || !contract.endedOn || contract.startedOn <= contract.endedOn,
     { message: '契約終了日は開始日以降にしてください。' },
   )
+
+const providerChargePeriodSchema = z
+  .object({
+    id: z.string().trim().min(1).max(120),
+    provider: z.enum(['claude', 'codex']),
+    planName: z.string().trim().max(160),
+    serviceStartedOn: contractDateSchema,
+    serviceEndedOn: contractDateSchema,
+    billedOn: contractDateSchema.optional(),
+    amountJpy: z.number().int().nonnegative(),
+    note: z.string().trim().max(1_000).optional(),
+  })
+  .strict()
+  .refine((period) => period.serviceStartedOn <= period.serviceEndedOn, {
+    message: '利用終了日は開始日以降にしてください。',
+  })
 
 const configurationSchema = z
   .object({
@@ -411,6 +428,7 @@ const configurationSchema = z
       })
       .strict()
       .default({ claude: {}, codex: {} }),
+    chargePeriods: z.array(providerChargePeriodSchema).max(1_000).optional(),
     unobservedRatio: z.number().min(0).max(0.95),
   })
   .strict()
@@ -426,6 +444,17 @@ const configurationSchema = z
         })
       }
       chargeKeys.add(key)
+    })
+    const periodIds = new Set<string>()
+    configuration.chargePeriods?.forEach((period, index) => {
+      if (periodIds.has(period.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['chargePeriods', index, 'id'],
+          message: '請求履歴のIDが重複しています。',
+        })
+      }
+      periodIds.add(period.id)
     })
   })
 
@@ -481,6 +510,7 @@ const scanRequestSchema = z.object({
     .array(z.enum(['claude', 'codex']))
     .min(1)
     .default(['claude', 'codex']),
+  mode: z.enum(['incremental', 'full']).default('incremental'),
 })
 
 app.get('/api/scan/progress', async () => ({
@@ -498,7 +528,7 @@ app.post('/api/scan', async (request, reply) => {
     return
   }
 
-  return await scanHistorySources(parsed.data.providers)
+  return await scanHistorySources(parsed.data.providers, undefined, parsed.data.mode)
 })
 
 const moduleDirectory = fileURLToPath(new URL('.', import.meta.url))

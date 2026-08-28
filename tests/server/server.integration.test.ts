@@ -356,6 +356,7 @@ describe('local server boundary', () => {
         claude: { startedOn: '2025-01-01' },
         codex: {},
       },
+      chargePeriods: [],
       unobservedRatio: 0.1,
     }
     const saveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
@@ -377,8 +378,60 @@ describe('local server boundary', () => {
       charges: configuration.charges,
       monthlyCharges: configuration.monthlyCharges,
       contracts: configuration.contracts,
+      chargePeriods: [],
       unobservedRatio: configuration.unobservedRatio,
     })
+
+    const datedConfiguration = {
+      ...configuration,
+      chargePeriods: [
+        {
+          id: 'compatibility-charge',
+          provider: 'claude' as const,
+          planName: 'Compatibility plan',
+          serviceStartedOn: '2026-04-01',
+          serviceEndedOn: '2026-04-30',
+          amountJpy: 30_001,
+        },
+      ],
+    }
+    const datedSaveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify(datedConfiguration),
+    })
+    expect(datedSaveResponse.status).toBe(200)
+
+    const { chargePeriods: _omittedForLegacyClient, ...legacyConfiguration } = configuration
+    const legacySaveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify(legacyConfiguration),
+    })
+    expect(legacySaveResponse.status).toBe(200)
+    const afterLegacySave = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
+      async (response) => await response.json(),
+    )) as typeof datedConfiguration
+    expect(afterLegacySave.chargePeriods).toEqual(datedConfiguration.chargePeriods)
+
+    const restoreEmptyPeriodsResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify(configuration),
+    })
+    expect(restoreEmptyPeriodsResponse.status).toBe(200)
 
     // Task 8 removed configuration.mappings entirely: classification and
     // product naming come only from planning project rules now. Register
@@ -611,6 +664,7 @@ describe('local server boundary', () => {
     const clearedConfiguration = {
       ...configuration,
       monthlyCharges: [],
+      chargePeriods: [],
     }
     const clearResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: 'POST',
@@ -901,6 +955,97 @@ describe('セッション単位のダッシュボード集計', () => {
     // rounding rows) sums to exactly the configured monthly fee.
     const augustClaudeTotal = augustClaudeRows.reduce((sum, row) => sum + row.amount, 0)
     expect(augustClaudeTotal).toBe(100_000)
+
+    databaseModule.saveConfiguration({
+      charges: { claude: 0, codex: 0 },
+      monthlyCharges: [{ provider: 'claude', month: '2026-08', amountJpy: 100_000 }],
+      contracts: { claude: {}, codex: {} },
+      chargePeriods: [
+        {
+          id: 'charge-midmonth-upgrade',
+          provider: 'claude',
+          planName: 'Upgraded plan',
+          serviceStartedOn: '2026-08-15',
+          serviceEndedOn: '2026-09-14',
+          billedOn: '2026-08-15',
+          amountJpy: 31_000,
+        },
+      ],
+      unobservedRatio: 0.1,
+    })
+
+    expect(databaseModule.getConfiguration().chargePeriods).toEqual([
+      expect.objectContaining({
+        id: 'charge-midmonth-upgrade',
+        serviceStartedOn: '2026-08-15',
+        serviceEndedOn: '2026-09-14',
+        amountJpy: 31_000,
+      }),
+    ])
+
+    const datedDashboard = (await getJson('/api/dashboard')) as {
+      allocations: Array<{
+        provider: string
+        month: string
+        product: string
+        stage: string
+        amount: number
+      }>
+    }
+    const datedAugust = datedDashboard.allocations.filter(
+      (row) => row.provider === 'Claude Code' && row.month === '2026年8月',
+    )
+    const datedSeptember = datedDashboard.allocations.filter(
+      (row) => row.provider === 'Claude Code' && row.month === '2026年9月',
+    )
+    expect(datedAugust.reduce((sum, row) => sum + row.amount, 0)).toBe(17_000)
+    expect(datedSeptember.reduce((sum, row) => sum + row.amount, 0)).toBe(14_000)
+    expect(
+      datedAugust.some(
+        (row) => row.product === '月またぎ検証用アプリ' && row.stage === '契約期間外',
+      ),
+    ).toBe(true)
+
+    databaseModule.saveConfiguration({
+      charges: { claude: 0, codex: 0 },
+      monthlyCharges: [],
+      contracts: { claude: {}, codex: {} },
+      chargePeriods: [
+        {
+          id: 'charge-before-upgrade',
+          provider: 'claude',
+          planName: 'Before upgrade',
+          serviceStartedOn: '2026-08-01',
+          serviceEndedOn: '2026-08-14',
+          amountJpy: 1_400,
+        },
+        {
+          id: 'charge-after-upgrade',
+          provider: 'claude',
+          planName: 'After upgrade',
+          serviceStartedOn: '2026-08-15',
+          serviceEndedOn: '2026-08-31',
+          amountJpy: 3_100,
+        },
+      ],
+      unobservedRatio: 0,
+    })
+
+    const planChangeDashboard = (await getJson('/api/dashboard')) as {
+      allocations: Array<{
+        provider: string
+        month: string
+        product: string
+        stage: string
+        amount: number
+      }>
+    }
+    const planChangeRows = planChangeDashboard.allocations.filter(
+      (row) => row.provider === 'Claude Code' && row.product === '月またぎ検証用アプリ',
+    )
+    expect(planChangeRows.find((row) => row.stage === '新規開発')?.amount).toBe(1_400)
+    expect(planChangeRows.find((row) => row.stage === '保守')?.amount).toBe(3_100)
+    expect(planChangeRows.reduce((sum, row) => sum + row.amount, 0)).toBe(4_500)
   })
 
   it('生のセッションID・絶対パス・作業ディレクトリ・コンテンツハッシュはどのAPIレスポンスにも現れない', async () => {

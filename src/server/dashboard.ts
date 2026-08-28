@@ -10,6 +10,12 @@ import type { ProjectClassification, TaxUnitRecord } from '../planning/types.js'
 import type { UsageProvider } from '../adapters/types.ts'
 import { localDateFromTimestamp, resolvedTimeZone } from '../adapters/localTime.js'
 import {
+  chargePeriodCoversDate,
+  chargePeriodCoversMonth,
+  monthlyAmountsForCharge,
+  monthlyAmountsForCharges,
+} from '../core/chargePeriods.js'
+import {
   getConfiguration,
   getLastScanTimeZones,
   getUsageOverview,
@@ -142,10 +148,56 @@ function groupKey(group: ProjectMonthGroup): string {
   ])
 }
 
+function groupAssignedSessions(sessions: AssignedSession[]): ProjectMonthGroup[] {
+  const groups = new Map<string, ProjectMonthGroup>()
+  for (const session of sessions) {
+    const key = JSON.stringify([
+      session.provider,
+      session.month,
+      session.projectKey,
+      session.assignment.taxUnitId ?? '',
+      session.assignment.classification,
+    ])
+    const current = groups.get(key)
+    if (!current) {
+      groups.set(key, {
+        provider: session.provider,
+        month: session.month,
+        projectKey: session.projectKey,
+        taxUnitId: session.assignment.taxUnitId,
+        classification: session.assignment.classification,
+        projectLabel: session.projectLabel,
+        model: session.model,
+        sessions: 1,
+        messageCount: session.messageCount,
+        inputTokens: session.inputTokens,
+        outputTokens: session.outputTokens,
+        cacheReadTokens: session.cacheReadTokens,
+        cacheWriteTokens: session.cacheWriteTokens,
+        firstStartedAt: session.startedAt,
+        lastEndedAt: session.endedAt,
+      })
+      continue
+    }
+    current.sessions += 1
+    current.messageCount += session.messageCount
+    current.inputTokens += session.inputTokens
+    current.outputTokens += session.outputTokens
+    current.cacheReadTokens += session.cacheReadTokens
+    current.cacheWriteTokens += session.cacheWriteTokens
+    current.projectLabel ??= session.projectLabel
+    current.model ??= session.model
+    if (session.startedAt < current.firstStartedAt) current.firstStartedAt = session.startedAt
+    if (session.endedAt > current.lastEndedAt) current.lastEndedAt = session.endedAt
+  }
+  return [...groups.values()]
+}
+
 function allocationForGroup(
   group: ProjectMonthGroup,
   line: AllocationLine,
   taxUnitById: Map<string, TaxUnitRecord>,
+  allocationId = groupKey(group),
 ): Allocation {
   // getPlanningSnapshot() returns DB rows, so an unexpected classification
   // value (e.g. an older DB row from before an enum change) must not throw --
@@ -155,7 +207,7 @@ function allocationForGroup(
   const product =
     taxUnit?.name ?? safeLocalLabel(group.projectLabel, `Project ${group.projectKey.slice(-6)}`)
   return {
-    id: groupKey(group),
+    id: allocationId,
     month: displayBillingMonth(group.month),
     provider: providerLabel[group.provider],
     product,
@@ -193,10 +245,11 @@ function unobservedAllocation(
   provider: UsageProvider,
   month: string,
   line: AllocationLine,
+  allocationScope = 'monthly',
 ): Allocation {
   const isAdjustment = line.kind === 'rounding-adjustment'
   return {
-    id: `${provider}-${month}-${line.kind}`,
+    id: `${provider}-${month}-${allocationScope}-${line.kind}`,
     month: displayBillingMonth(month),
     provider: providerLabel[provider],
     product: isAdjustment ? '丸め調整' : '未取得利用',
@@ -286,13 +339,24 @@ export function buildDashboard(): DashboardData {
   }))
 
   const contracts = configuration.contracts
-  const contractsConfigured = hasAnyContractPeriod(contracts)
+  const configuredChargePeriods = configuration.chargePeriods ?? []
+  const chargePeriodsByProvider = new Map(
+    (['claude', 'codex'] as const).map((provider) => [
+      provider,
+      configuredChargePeriods.filter((period) => period.provider === provider),
+    ]),
+  )
+  const contractsConfigured = configuredChargePeriods.length > 0 || hasAnyContractPeriod(contracts)
   // A session whose timestamp cannot be read is kept inside the contract:
   // dropping money from the allocation because of an unparsable timestamp
   // would be a worse failure than including it.
   const withinContract = (session: AssignedSession): boolean => {
     const startedOn = localDateFromTimestamp(session.startedAt)
     if (startedOn === undefined) return true
+    const chargePeriods = chargePeriodsByProvider.get(session.provider) ?? []
+    if (chargePeriods.length > 0) {
+      return chargePeriods.some((period) => chargePeriodCoversDate(period, startedOn))
+    }
     return contractCoversDate(contracts[session.provider], startedOn)
   }
   const coveredSessions = assigned.filter(withinContract)
@@ -303,68 +367,30 @@ export function buildDashboard(): DashboardData {
   ).length
   const mappedSessions = assigned.filter((session) => session.assignment.ruleId !== null).length
 
-  const groups = new Map<string, ProjectMonthGroup>()
-  for (const session of coveredSessions) {
-    // Same JSON.stringify encoding as groupKey() below: taxUnitId is a
-    // user-entered identifier that may contain any character, so joining
-    // with ':' here would risk merging two distinct classification groups
-    // into one during this very aggregation step.
-    const key = JSON.stringify([
-      session.provider,
-      session.month,
-      session.projectKey,
-      session.assignment.taxUnitId ?? '',
-      session.assignment.classification,
-    ])
-    const current = groups.get(key)
-    if (!current) {
-      groups.set(key, {
-        provider: session.provider,
-        month: session.month,
-        projectKey: session.projectKey,
-        taxUnitId: session.assignment.taxUnitId,
-        classification: session.assignment.classification,
-        projectLabel: session.projectLabel,
-        model: session.model,
-        sessions: 1,
-        messageCount: session.messageCount,
-        inputTokens: session.inputTokens,
-        outputTokens: session.outputTokens,
-        cacheReadTokens: session.cacheReadTokens,
-        cacheWriteTokens: session.cacheWriteTokens,
-        firstStartedAt: session.startedAt,
-        lastEndedAt: session.endedAt,
-      })
-      continue
-    }
-    current.sessions += 1
-    current.messageCount += session.messageCount
-    current.inputTokens += session.inputTokens
-    current.outputTokens += session.outputTokens
-    current.cacheReadTokens += session.cacheReadTokens
-    current.cacheWriteTokens += session.cacheWriteTokens
-    current.projectLabel ??= session.projectLabel
-    current.model ??= session.model
-    if (session.startedAt < current.firstStartedAt) current.firstStartedAt = session.startedAt
-    if (session.endedAt > current.lastEndedAt) current.lastEndedAt = session.endedAt
-  }
-
-  const groupById = new Map([...groups.values()].map((group) => [groupKey(group), group]))
+  const groups = groupAssignedSessions(coveredSessions)
   const byProviderMonth = new Map<string, ProjectMonthGroup[]>()
-  for (const group of groups.values()) {
+  for (const group of groups) {
     const key = `${group.provider}:${group.month}`
     byProviderMonth.set(key, [...(byProviderMonth.get(key) ?? []), group])
   }
 
+  const datedMonthlyCharges = monthlyAmountsForCharges(configuredChargePeriods)
+  const monthlyChargeRows = [
+    ...configuration.monthlyCharges.filter(
+      (charge) => (chargePeriodsByProvider.get(charge.provider) ?? []).length === 0,
+    ),
+    ...datedMonthlyCharges,
+  ]
   const monthlyChargeByKey = new Map(
-    configuration.monthlyCharges.map((charge) => [
-      `${charge.provider}:${charge.month}`,
-      charge.amountJpy,
-    ]),
+    monthlyChargeRows.map((charge) => [`${charge.provider}:${charge.month}`, charge.amountJpy]),
   )
   const providerMonthKeys = new Set(
     [...byProviderMonth.keys(), ...monthlyChargeByKey.keys()].filter((key) => {
       const [provider, month] = key.split(':') as [UsageProvider, string]
+      const chargePeriods = chargePeriodsByProvider.get(provider) ?? []
+      if (chargePeriods.length > 0) {
+        return chargePeriods.some((period) => chargePeriodCoversMonth(period, month))
+      }
       return contractCoversMonth(contracts[provider], month)
     }),
   )
@@ -384,18 +410,34 @@ export function buildDashboard(): DashboardData {
       .map((key) => key.split(':')[1]),
   ).size
 
-  const inputs = [...providerMonthKeys].sort().map((key) => {
-    const [provider, month] = key.split(':') as [UsageProvider, string]
-    return {
-      provider,
-      billingMonth: month as BillingMonth,
-      monthlyFeeJpy: monthlyChargeByKey.get(key) ?? configuration.charges[provider],
-      unobservedUsage: {
-        kind: 'estimated' as const,
-        ratio: configuration.unobservedRatio,
-      },
-      usageLines: (byProviderMonth.get(key) ?? []).map((group) => ({
-        id: groupKey(group),
+  const groupById = new Map<string, ProjectMonthGroup>()
+  const inputs: Array<{
+    scopeId: string
+    provider: UsageProvider
+    billingMonth: BillingMonth
+    monthlyFeeJpy: number
+    unobservedUsage: { kind: 'estimated'; ratio: number }
+    usageLines: Array<{
+      id: string
+      productId: string
+      taxUnitId?: string
+      bucket: 'private' | 'product'
+      usageWeight: number
+    }>
+  }> = []
+
+  function allocationInput(
+    scopeId: string,
+    provider: UsageProvider,
+    month: string,
+    monthlyFeeJpy: number,
+    sourceGroups: ProjectMonthGroup[],
+  ) {
+    const usageLines = sourceGroups.map((group) => {
+      const id = JSON.stringify([scopeId, groupKey(group)])
+      groupById.set(id, group)
+      return {
+        id,
         productId: group.projectKey,
         taxUnitId: group.taxUnitId ?? undefined,
         bucket:
@@ -408,12 +450,58 @@ export function buildDashboard(): DashboardData {
           cacheCreationTokens: group.cacheWriteTokens,
           outputTokens: group.outputTokens,
         }),
-      })),
+      }
+    })
+    return {
+      scopeId,
+      provider,
+      billingMonth: month as BillingMonth,
+      monthlyFeeJpy,
+      unobservedUsage: {
+        kind: 'estimated' as const,
+        ratio: configuration.unobservedRatio,
+      },
+      usageLines,
     }
-  })
+  }
+
+  for (const key of [...providerMonthKeys].sort()) {
+    const [provider, month] = key.split(':') as [UsageProvider, string]
+    if ((chargePeriodsByProvider.get(provider) ?? []).length > 0) continue
+    inputs.push(
+      allocationInput(
+        `monthly:${key}`,
+        provider,
+        month,
+        monthlyChargeByKey.get(key) ?? configuration.charges[provider],
+        byProviderMonth.get(key) ?? [],
+      ),
+    )
+  }
+
+  for (const period of configuredChargePeriods) {
+    for (const amount of monthlyAmountsForCharge(period)) {
+      const periodSessions = coveredSessions.filter((session) => {
+        if (session.provider !== period.provider || session.month !== amount.month) return false
+        const startedOn = localDateFromTimestamp(session.startedAt)
+        return startedOn !== undefined && chargePeriodCoversDate(period, startedOn)
+      })
+      inputs.push(
+        allocationInput(
+          `charge:${period.id}:${amount.month}`,
+          period.provider,
+          amount.month,
+          amount.amountJpy,
+          groupAssignedSessions(periodSessions),
+        ),
+      )
+    }
+  }
 
   const allocations: Allocation[] = []
-  for (const result of allocateSubscriptions(inputs)) {
+  for (const input of inputs) {
+    const [result] = allocateSubscriptions([input])
+    if (!result) continue
     // The sum-equals-fee property is the product's core promise: turn a
     // future regression into a loud error instead of a silently wrong tax
     // figure shown to the user.
@@ -421,12 +509,14 @@ export function buildDashboard(): DashboardData {
     for (const line of result.lines) {
       if (line.kind === 'rounding-adjustment' && line.allocatedAmountJpy === 0) continue
       if (line.kind === 'unobserved' || line.kind === 'rounding-adjustment') {
-        allocations.push(unobservedAllocation(result.provider, result.billingMonth, line))
+        allocations.push(
+          unobservedAllocation(result.provider, result.billingMonth, line, input.scopeId),
+        )
         continue
       }
       const group = line.sourceId ? groupById.get(line.sourceId) : undefined
       if (!group) continue
-      allocations.push(allocationForGroup(group, line, taxUnitById))
+      allocations.push(allocationForGroup(group, line, taxUnitById, line.sourceId))
     }
   }
 

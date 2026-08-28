@@ -23,13 +23,14 @@ import {
 import { localMonthFromTimestamp } from './localTime.ts'
 import {
   createDiagnostics,
+  type AdapterFileReadResult,
   type AdapterOptions,
   type AdapterResult,
   type NormalizedUsage,
 } from './types.ts'
 
-const ADAPTER = 'codex-local-jsonl'
-const SCHEMA_VERSION = 'codex-local-v1'
+export const CODEX_HISTORY_ADAPTER = 'codex-local-jsonl'
+export const CODEX_HISTORY_SCHEMA_VERSION = 'codex-local-v1'
 
 type CodexSession = {
   sessionId?: string
@@ -55,54 +56,90 @@ export async function readCodexHistory(
 
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
     options.onFileScanned?.()
-    const before = readFileSnapshot(filePath)
-    const session: CodexSession = {
-      sourcePath: filePath,
-      hasRecognizedRecord: false,
-      hasTokenSnapshot: false,
-      hasInvalidTokenSnapshot: false,
-    }
-    // The Transform inside readJsonlObjects hashes every byte as it streams
-    // past on its way to the line splitter, so the file is read exactly once
-    // even though both the parsed rows and the digest are needed. A Codex
-    // session file yields at most one event, so the digest can be finalized
-    // right after the loop, before that event is built.
-    const hash = options.includeLocalReferences ? createHash('sha256') : undefined
-    const ioErrorsBefore = diagnostics.ioErrors
-
-    for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
-      if (consumeSessionMetadata(row, session) || consumeModel(row, session)) {
-        continue
-      }
-      if (consumeTokenSnapshot(row, session)) {
-        continue
-      }
-      diagnostics.unsupportedLines += 1
-    }
-
-    // A read that failed part way through leaves the hash covering only the
-    // bytes that arrived. Recording that as the file's hash would make the next
-    // scan report a change that never happened, so leave it out -- which the
-    // change detection already treats as "not recorded".
-    const after = readFileSnapshot(filePath)
-    const stable = diagnostics.ioErrors === ioErrorsBefore && sameFileSnapshot(before, after)
-    if (!stable) {
-      diagnostics.unstableFiles += 1
-      continue
-    }
-    const fileSummary = hash && after ? fileContentSummary(hash, after) : undefined
-    const normalized = normalizeCodexSession(session, options, fileSummary)
-    if (normalized.kind === 'event') {
-      events.push(normalized.event)
-    } else if (normalized.kind === 'invalid') {
-      diagnostics.invalidRecords += 1
-      diagnostics.incompatibleFiles += 1
-    } else if (!session.hasRecognizedRecord) {
-      diagnostics.incompatibleFiles += 1
-    }
+    const fileResult = await readCodexHistoryFile(filePath, options)
+    addDiagnostics(diagnostics, fileResult.diagnostics)
+    events.push(...fileResult.events)
   }
 
   return { events, diagnostics }
+}
+
+/** Parses one already-discovered Codex transcript for the incremental scanner. */
+export async function readCodexHistoryFile(
+  filePath: string,
+  options: AdapterOptions,
+): Promise<AdapterFileReadResult> {
+  const diagnostics = createDiagnostics()
+  const before = readFileSnapshot(filePath)
+  const session: CodexSession = {
+    sourcePath: filePath,
+    hasRecognizedRecord: false,
+    hasTokenSnapshot: false,
+    hasInvalidTokenSnapshot: false,
+  }
+  // The Transform inside readJsonlObjects hashes every byte as it streams past
+  // on its way to the line splitter, so the file is read exactly once even
+  // though both the parsed rows and the digest are needed.
+  const hash = options.includeLocalReferences ? createHash('sha256') : undefined
+
+  for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
+    if (consumeSessionMetadata(row, session) || consumeModel(row, session)) {
+      continue
+    }
+    if (consumeTokenSnapshot(row, session)) {
+      continue
+    }
+    diagnostics.unsupportedLines += 1
+  }
+
+  // A read that failed part way through leaves the hash covering only the
+  // bytes that arrived. Recording that as the file's hash would make the next
+  // scan report a change that never happened, so leave it out.
+  const after = readFileSnapshot(filePath)
+  if (diagnostics.ioErrors > 0) {
+    diagnostics.unstableFiles += 1
+    return { events: [], diagnostics, state: 'io_error' }
+  }
+  if (!sameFileSnapshot(before, after)) {
+    diagnostics.unstableFiles += 1
+    return { events: [], diagnostics, state: 'unstable' }
+  }
+  const fileSummary = hash && after ? fileContentSummary(hash, after) : undefined
+  const normalized = normalizeCodexSession(session, options, fileSummary)
+  if (normalized.kind === 'event') {
+    return {
+      events: [normalized.event],
+      diagnostics,
+      state: 'accepted',
+      snapshot: after ? { byteSize: after.byteSize, fileMtime: after.fileMtime } : undefined,
+    }
+  }
+  if (normalized.kind === 'invalid') {
+    diagnostics.invalidRecords += 1
+    diagnostics.incompatibleFiles += 1
+    return { events: [], diagnostics, state: 'incompatible' }
+  }
+  if (!session.hasRecognizedRecord) {
+    diagnostics.incompatibleFiles += 1
+    return { events: [], diagnostics, state: 'incompatible' }
+  }
+  return {
+    events: [],
+    diagnostics,
+    state: 'accepted',
+    snapshot: after ? { byteSize: after.byteSize, fileMtime: after.fileMtime } : undefined,
+  }
+}
+
+function addDiagnostics(
+  target: AdapterResult['diagnostics'],
+  source: AdapterResult['diagnostics'],
+): void {
+  for (const [key, value] of Object.entries(source) as Array<
+    [keyof AdapterResult['diagnostics'], number]
+  >) {
+    target[key] += value
+  }
 }
 
 function consumeSessionMetadata(row: Record<string, unknown>, session: CodexSession): boolean {
@@ -223,8 +260,8 @@ function normalizeCodexSession(
       outputTokens: nonNegativeInteger(session.usage.output_tokens),
       reasoningTokens: nonNegativeInteger(session.usage.reasoning_output_tokens),
       captureMethod: 'local transcript compatibility adapter',
-      adapter: ADAPTER,
-      schemaVersion: SCHEMA_VERSION,
+      adapter: CODEX_HISTORY_ADAPTER,
+      schemaVersion: CODEX_HISTORY_SCHEMA_VERSION,
       confidence: 'B',
     },
   }

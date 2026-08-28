@@ -1,17 +1,38 @@
-import { opendir } from 'node:fs/promises'
+import { createHmac } from 'node:crypto'
+import { opendir, realpath } from 'node:fs/promises'
+import { isAbsolute, relative, sep } from 'node:path'
 
-import { readClaudeHistory, readCodexHistory } from '../adapters/index.js'
+import {
+  CLAUDE_HISTORY_ADAPTER,
+  CLAUDE_HISTORY_SCHEMA_VERSION,
+  readClaudeHistoryFile,
+} from '../adapters/claude.js'
+import {
+  CODEX_HISTORY_ADAPTER,
+  CODEX_HISTORY_SCHEMA_VERSION,
+  readCodexHistoryFile,
+} from '../adapters/codex.js'
 import { sourceIdentifierSalt } from '../adapters/identifiers.js'
-import { createDiagnostics, type UsageProvider } from '../adapters/types.js'
-import { discoverJsonlFiles } from '../adapters/jsonl.js'
+import {
+  createDiagnostics,
+  type AdapterDiagnostics,
+  type AdapterFileReadResult,
+  type AdapterOptions,
+  type NormalizedUsage,
+  type UsageProvider,
+} from '../adapters/types.js'
+import { discoverJsonlFiles, readFileSnapshot } from '../adapters/jsonl.js'
 import {
   createHistorySource,
+  getHistoryFileCacheEntries,
   getHistorySourceScanStatuses,
   getHistorySources,
   recordHistorySourceScanFailure,
   removeHistorySource,
   replaceHistorySourceSessions,
   updateHistorySource,
+  type CachedNormalizedUsage,
+  type HistoryFileCacheMutation,
   type HistorySource,
   type HistorySourceInput,
 } from './database.js'
@@ -53,6 +74,8 @@ export type HistoryScanResult = {
   providers: Partial<Record<UsageProvider, { events: number; diagnostics: Record<string, number> }>>
   sources: SourceScanOutcome[]
 }
+
+export type HistoryScanMode = 'incremental' | 'full'
 
 function reasonForFileError(error: unknown): 'not_found' | 'not_readable' {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
@@ -161,9 +184,267 @@ function addDiagnostics(
   return target
 }
 
+type DiscoveredHistoryFile = {
+  path: string
+  fileKey: string
+  byteSize: number
+  fileMtime: string
+  canonicalRelativeIdentity: string
+}
+
+type AdapterSignature = { adapter: string; schemaVersion: string }
+
+function adapterSignature(provider: UsageProvider): AdapterSignature {
+  return provider === 'claude'
+    ? { adapter: CLAUDE_HISTORY_ADAPTER, schemaVersion: CLAUDE_HISTORY_SCHEMA_VERSION }
+    : { adapter: CODEX_HISTORY_ADAPTER, schemaVersion: CODEX_HISTORY_SCHEMA_VERSION }
+}
+
+function pathIsWithin(canonicalRoot: string, candidate: string): boolean {
+  const child = relative(canonicalRoot, candidate)
+  return child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`))
+}
+
+function canonicalRelativeIdentity(
+  canonicalRoot: string,
+  canonicalFile: string,
+): string | undefined {
+  if (!pathIsWithin(canonicalRoot, canonicalFile)) return undefined
+  const relativePath = relative(canonicalRoot, canonicalFile)
+  if (!relativePath || isAbsolute(relativePath)) return undefined
+  const slashSeparated = relativePath.split(sep).join('/')
+  return process.platform === 'win32' ? slashSeparated.toLocaleLowerCase('en-US') : slashSeparated
+}
+
+function opaqueFileKey(cacheSalt: string, relativeIdentity: string): string {
+  return createHmac('sha256', cacheSalt).update(`history-file\0${relativeIdentity}`).digest('hex')
+}
+
+/**
+ * Discovery still uses the shared canonical-root and cycle-safe walker. This
+ * layer adds a canonical relative identity plus a stat fingerprint without
+ * persisting either the root or a real path.
+ */
+async function discoverSourceFiles(
+  root: string,
+  cacheSalt: string,
+  diagnostics: AdapterDiagnostics,
+): Promise<DiscoveredHistoryFile[] | undefined> {
+  let canonicalRoot: string
+  try {
+    canonicalRoot = await realpath(root)
+  } catch {
+    diagnostics.ioErrors += 1
+    return undefined
+  }
+
+  const files: DiscoveredHistoryFile[] = []
+  for await (const filePath of discoverJsonlFiles(root, diagnostics)) {
+    reportScannedFile()
+    let canonicalFile: string
+    try {
+      canonicalFile = await realpath(filePath)
+    } catch {
+      diagnostics.ioErrors += 1
+      continue
+    }
+    const relativeIdentity = canonicalRelativeIdentity(canonicalRoot, canonicalFile)
+    const snapshot = readFileSnapshot(filePath)
+    if (!relativeIdentity || !snapshot) {
+      // The walk has already shown this entry to be a JSONL file. If it cannot
+      // now be canonicalized or stat'ed, committing deletions would risk
+      // replacing a good source snapshot with a partial one.
+      diagnostics.ioErrors += 1
+      continue
+    }
+    files.push({
+      path: filePath,
+      fileKey: opaqueFileKey(cacheSalt, relativeIdentity),
+      byteSize: snapshot.byteSize,
+      fileMtime: snapshot.fileMtime,
+      canonicalRelativeIdentity: relativeIdentity,
+    })
+  }
+
+  if (diagnostics.ioErrors > 0) return undefined
+  // A stable order makes duplicate Claude message handling deterministic even
+  // when a subset of files comes from cache rather than the parser.
+  return files.sort((left, right) =>
+    left.canonicalRelativeIdentity.localeCompare(right.canonicalRelativeIdentity),
+  )
+}
+
+function cacheMatches(
+  cached: ReturnType<typeof getHistoryFileCacheEntries>[number] | undefined,
+  file: DiscoveredHistoryFile,
+  signature: AdapterSignature,
+): boolean {
+  return Boolean(
+    cached &&
+    cached.valid &&
+    cached.byteSize === file.byteSize &&
+    cached.fileMtime === file.fileMtime &&
+    cached.adapter === signature.adapter &&
+    cached.schemaVersion === signature.schemaVersion,
+  )
+}
+
+function cachedEvent(event: NormalizedUsage): CachedNormalizedUsage {
+  // Do not spread `event`: localReference contains real source paths and
+  // native IDs for local preview/resume, all of which are forbidden from the
+  // file cache.
+  return {
+    provider: event.provider,
+    ...(event.eventKey === undefined ? {} : { eventKey: event.eventKey }),
+    month: event.month,
+    observedAt: event.observedAt,
+    sessionKey: event.sessionKey,
+    projectKey: event.projectKey,
+    ...(event.projectLabel === undefined ? {} : { projectLabel: event.projectLabel }),
+    model: event.model,
+    inputTokens: event.inputTokens,
+    cacheReadTokens: event.cacheReadTokens,
+    cacheWriteTokens: event.cacheWriteTokens,
+    outputTokens: event.outputTokens,
+    reasoningTokens: event.reasoningTokens,
+    ...(event.activeSeconds === undefined ? {} : { activeSeconds: event.activeSeconds }),
+    captureMethod: event.captureMethod,
+    adapter: event.adapter,
+    schemaVersion: event.schemaVersion,
+    confidence: event.confidence,
+  }
+}
+
+function restoredCachedEvents(events: CachedNormalizedUsage[]): NormalizedUsage[] {
+  // Cache rows have been explicitly decoded in database.ts and contain no
+  // localReference. A copy keeps aggregation from ever mutating an object that
+  // will be reused on a later scan.
+  return events.map((event) => ({ ...event }))
+}
+
+async function readOneHistoryFile(
+  provider: UsageProvider,
+  path: string,
+  options: AdapterOptions,
+): Promise<AdapterFileReadResult> {
+  return provider === 'claude'
+    ? await readClaudeHistoryFile(path, options, new Set<string>())
+    : await readCodexHistoryFile(path, options)
+}
+
+type IncrementalSourceRead = {
+  events: NormalizedUsage[]
+  diagnostics: AdapterDiagnostics
+  fileCache: HistoryFileCacheMutation
+  failed: boolean
+}
+
+async function readSourceIncrementally(
+  source: HistorySource,
+  identifierSalt: string,
+  mode: HistoryScanMode,
+): Promise<IncrementalSourceRead> {
+  const diagnostics = createDiagnostics()
+  const signature = adapterSignature(source.provider)
+  // Use a source namespace even for default sources, whose session/project
+  // identifiers intentionally retain their legacy salt for compatibility.
+  const cacheSalt = sourceIdentifierSalt(identifierSalt, source.id)
+  const files = await discoverSourceFiles(source.root, cacheSalt, diagnostics)
+  if (!files) {
+    return { events: [], diagnostics, fileCache: { upsert: [], deleteFileKeys: [] }, failed: true }
+  }
+
+  const cacheEntries = getHistoryFileCacheEntries(source.id, source.provider)
+  const cachedByFileKey = new Map(cacheEntries.map((entry) => [entry.fileKey, entry]))
+  const seenFileKeys = new Set<string>()
+  const events: NormalizedUsage[] = []
+  const upsert: HistoryFileCacheMutation['upsert'] = []
+  const seenClaudeMessages = new Set<string>()
+  const scanSalt =
+    source.kind === 'default' ? identifierSalt : sourceIdentifierSalt(identifierSalt, source.id)
+  const adapterOptions: AdapterOptions = {
+    identifierSalt: scanSalt,
+    includeLocalProjectLabel: true,
+    includeLocalReferences: source.kind === 'default',
+    portableProjectPaths: source.kind === 'configured',
+  }
+
+  function appendContribution(contribution: NormalizedUsage[]): void {
+    for (const event of contribution) {
+      if (source.provider === 'claude' && event.eventKey) {
+        if (seenClaudeMessages.has(event.eventKey)) {
+          diagnostics.duplicateRecords += 1
+          continue
+        }
+        seenClaudeMessages.add(event.eventKey)
+      }
+      events.push(event)
+    }
+  }
+
+  function appendCachedContribution(cached: CachedNormalizedUsage[]): void {
+    appendContribution(restoredCachedEvents(cached))
+  }
+
+  for (const file of files) {
+    seenFileKeys.add(file.fileKey)
+    const cached = cachedByFileKey.get(file.fileKey)
+    if (mode === 'incremental' && cacheMatches(cached, file, signature)) {
+      diagnostics.filesReused += 1
+      appendCachedContribution(cached!.events)
+      continue
+    }
+
+    const parsed = await readOneHistoryFile(source.provider, file.path, adapterOptions)
+    addDiagnostics(
+      diagnostics as unknown as Record<string, number>,
+      parsed.diagnostics as unknown as Record<string, number>,
+    )
+    if (parsed.state === 'io_error') {
+      return {
+        events: [],
+        diagnostics,
+        fileCache: { upsert: [], deleteFileKeys: [] },
+        failed: true,
+      }
+    }
+    if (parsed.state === 'accepted' && parsed.snapshot) {
+      appendContribution(parsed.events)
+      upsert.push({
+        fileKey: file.fileKey,
+        byteSize: parsed.snapshot.byteSize,
+        fileMtime: parsed.snapshot.fileMtime,
+        adapter: signature.adapter,
+        schemaVersion: signature.schemaVersion,
+        events: parsed.events.map(cachedEvent),
+      })
+      continue
+    }
+
+    // An unstable or incompatible changed file is deliberately local to that
+    // file. Its last accepted contribution survives if present; a new bad file
+    // contributes zero and can be retried next incremental scan.
+    diagnostics.filesDeferred += 1
+    if (cached?.valid) appendCachedContribution(cached.events)
+  }
+
+  return {
+    events,
+    diagnostics,
+    fileCache: {
+      upsert,
+      deleteFileKeys: cacheEntries
+        .filter((entry) => !seenFileKeys.has(entry.fileKey))
+        .map((entry) => entry.fileKey),
+    },
+    failed: false,
+  }
+}
+
 async function executeHistoryScan(
   providers: UsageProvider[],
   sourceIds?: string[],
+  mode: HistoryScanMode = 'incremental',
 ): Promise<HistoryScanResult> {
   const selectedProviders = new Set(providers)
   const selectedSources = sourceIds ? new Set(sourceIds) : undefined
@@ -200,45 +481,17 @@ async function executeHistoryScan(
       }
 
       try {
-        const scanSalt =
-          source.kind === 'default'
-            ? identifierSalt
-            : sourceIdentifierSalt(identifierSalt, source.id)
-        const result =
-          source.provider === 'claude'
-            ? await readClaudeHistory(source.root, {
-                identifierSalt: scanSalt,
-                includeLocalProjectLabel: true,
-                includeLocalReferences: source.kind === 'default',
-                portableProjectPaths: source.kind === 'configured',
-                onFileScanned: reportScannedFile,
-              })
-            : await readCodexHistory(source.root, {
-                identifierSalt: scanSalt,
-                includeLocalProjectLabel: true,
-                includeLocalReferences: source.kind === 'default',
-                portableProjectPaths: source.kind === 'configured',
-                onFileScanned: reportScannedFile,
-              })
+        const result = await readSourceIncrementally(source, identifierSalt, mode)
         addDiagnostics(
           providerResult.diagnostics,
           result.diagnostics as unknown as Record<string, number>,
         )
 
-        // A stable, recognized transcript can legitimately contain an
-        // interrupted trailing JSON line or no billable usage at all. The
-        // adapters classify a file as incompatible when it has no recognized
-        // provider structure, and classify claimed usage with missing/renamed
-        // required fields as invalid. Those structural signals protect the
-        // whole-source last-good snapshot without rejecting normal aborted
-        // sessions found in real Claude/Codex histories.
-        const incompatibleSnapshot =
-          result.diagnostics.invalidRecords > 0 || result.diagnostics.incompatibleFiles > 0
-        if (
-          result.diagnostics.ioErrors > 0 ||
-          result.diagnostics.unstableFiles > 0 ||
-          incompatibleSnapshot
-        ) {
+        // Root/traversal/read I/O failures still protect the entire source's
+        // last-good snapshot. Stable parsing incompatibilities and files that
+        // change during their own read are handled per file by the incremental
+        // cache and do not block unrelated files in the same source.
+        if (result.failed || result.diagnostics.ioErrors > 0) {
           recordHistorySourceScanFailure(source.id, source.provider, 'failed', 'scan_failed')
           outcomes.push({
             sourceId: source.id,
@@ -261,6 +514,7 @@ async function executeHistoryScan(
             filesSeen: result.diagnostics.filesDiscovered,
             malformedLines: result.diagnostics.malformedJsonLines,
           },
+          result.fileCache,
         )
         addDiagnostics(providerResult.diagnostics, {
           nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
@@ -311,8 +565,9 @@ function enqueueSourceOperation<T>(operation: () => Promise<T> | T): Promise<T> 
 export function scanHistorySources(
   providers: UsageProvider[] = ['claude', 'codex'],
   sourceIds?: string[],
+  mode: HistoryScanMode = 'incremental',
 ): Promise<HistoryScanResult> {
-  return enqueueSourceOperation(() => executeHistoryScan(providers, sourceIds))
+  return enqueueSourceOperation(() => executeHistoryScan(providers, sourceIds, mode))
 }
 
 export function createConfiguredHistorySource(input: HistorySourceInput): Promise<HistorySource> {

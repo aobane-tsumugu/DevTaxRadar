@@ -26,6 +26,8 @@ function emptyDiagnostics(): AdapterDiagnostics {
   return {
     filesDiscovered: 0,
     filesRead: 0,
+    filesReused: 0,
+    filesDeferred: 0,
     linesRead: 0,
     blankLines: 0,
     malformedJsonLines: 0,

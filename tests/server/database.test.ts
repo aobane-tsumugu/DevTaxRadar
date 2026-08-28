@@ -202,6 +202,13 @@ describe('session storage', () => {
       sessionKey: 'session_preserved',
       projectKey: 'project_preserved',
     })
+    expect(
+      migrated
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'history_file_cache'`,
+        )
+        .get(),
+    ).toEqual({ name: 'history_file_cache' })
     const usageSql = (
       migrated
         .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'usage_events'`)

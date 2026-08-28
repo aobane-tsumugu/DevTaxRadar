@@ -212,17 +212,6 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
     }
   }
 
-  if (snapshot.profile.incomeCategory === 'undecided') {
-    addAction(immediateActions, {
-      id: 'income-facts',
-      priority: 'medium',
-      title: '所得区分の判断材料を整理する',
-      reason: '販売、継続、帳簿、改善活動等の事実を記録し、区分そのものは自動確定しません。',
-      trigger: 'now',
-    })
-    missingFacts.push('所得区分の判断材料')
-  }
-
   if (!snapshot.profile.hasBookkeeping) {
     addAction(immediateActions, {
       id: 'start-bookkeeping',
@@ -305,7 +294,6 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
           hasEvent(snapshot, unit.id, 'external-released')
         return internalReady && externalReady
       }),
-    snapshot.profile.incomeCategory !== 'undecided',
     snapshot.profile.hasBookkeeping,
     snapshot.equipment.length > 0 &&
       snapshot.equipment.every(

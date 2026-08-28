@@ -1,4 +1,5 @@
 import type { ProjectClassification } from '../planning/types.js'
+import type { ProviderChargePeriod } from '../core/chargePeriods.js'
 
 export type TaxGroup = 'current' | 'future' | 'review'
 
@@ -78,6 +79,7 @@ export type DashboardData = {
 }
 
 export type ProviderKey = 'claude' | 'codex'
+export type ScanMode = 'incremental' | 'full'
 
 export type HistorySourceInput = {
   provider: ProviderKey
@@ -149,6 +151,7 @@ export type LocalConfiguration = {
     amountJpy: number
   }>
   contracts: Record<ProviderKey, ProviderContract>
+  chargePeriods: ProviderChargePeriod[]
   unobservedRatio: number
 }
 
@@ -178,6 +181,7 @@ export type ScanResult = {
     provider: ProviderKey
     status: 'complete' | 'unavailable' | 'failed'
     events: number
+    diagnostics?: Record<string, number>
   }>
 }
 

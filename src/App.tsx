@@ -37,6 +37,7 @@ import type {
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
+  ScanMode,
   ScanResult,
 } from './client/types'
 import type {
@@ -46,6 +47,7 @@ import type {
   ProjectClassification,
   ProjectRuleRecord,
 } from './planning/types'
+import { buildFilingScenarios } from './core/filingScenarios'
 import Onboarding from './client/pages/Onboarding'
 import FolderAssignmentPage from './client/pages/FolderAssignmentPage'
 import {
@@ -136,7 +138,8 @@ function App() {
     const hasAnyCharge =
       configuration.charges.claude > 0 ||
       configuration.charges.codex > 0 ||
-      configuration.monthlyCharges.some((charge) => charge.amountJpy > 0)
+      configuration.monthlyCharges.some((charge) => charge.amountJpy > 0) ||
+      configuration.chargePeriods.some((charge) => charge.amountJpy > 0)
     if (!hasAnyCharge || data.meta.sessionCount === 0) {
       autoOnboardingShown.current = true
       setOnboardingStep(data.meta.sessionCount > 0 ? 1 : 0)
@@ -171,10 +174,13 @@ function App() {
     setHistorySources(nextSources.sources)
   }
 
-  async function runScan(providers: ProviderKey[]): Promise<ScanResult> {
+  async function runScan(
+    providers: ProviderKey[],
+    mode: ScanMode = 'incremental',
+  ): Promise<ScanResult> {
     const activeRuntime = runtime ?? (await getRuntime())
     if (!runtime) setRuntime(activeRuntime)
-    const result = await scanHistory(activeRuntime.csrfToken, providers)
+    const result = await scanHistory(activeRuntime.csrfToken, providers, mode)
     await refreshUsageViews()
     return result
   }
@@ -631,6 +637,7 @@ function SummaryPage({
   retention: RuntimeData['retention'] | null
 }) {
   const annualTotal = totals.current + totals.future + totals.review
+  const filingScenarios = buildFilingScenarios(totals)
   const maxMonth = Math.max(
     ...months.map((month) => month.current + month.future + month.review),
     1,
@@ -735,6 +742,34 @@ function SummaryPage({
             </details>
           )}
         </article>
+      </section>
+      <section className="panel filing-scenario-panel" aria-label="申告区分ごとの結果比較">
+        <PanelHeading
+          title="申告区分ごとの見え方"
+          subtitle="申告方法を先に決めず、同じ履歴・売上・費用から違いを確認します"
+        />
+        <div className="filing-scenario-grid">
+          {filingScenarios.map((scenario) => (
+            <section key={scenario.id}>
+              <span>{scenario.title}</span>
+              <dl className="filing-scenario-values">
+                <div>
+                  <dt>当年の費用候補</dt>
+                  <dd>{yen.format(scenario.currentExpenseCandidateJpy)}</dd>
+                </div>
+                <div>
+                  <dt>将来分の原価候補</dt>
+                  <dd>{yen.format(scenario.futureCostCandidateJpy)}</dd>
+                </div>
+                <div>
+                  <dt>未分類・私用等</dt>
+                  <dd>{yen.format(scenario.reviewJpy)}</dd>
+                </div>
+              </dl>
+              <p>{scenario.condition}</p>
+            </section>
+          ))}
+        </div>
       </section>
       <section className="summary-grid" aria-label="年間サマリー">
         {(['current', 'future', 'review'] as TaxGroup[]).map((group) => (

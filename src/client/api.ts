@@ -112,14 +112,18 @@ export function removeHistorySource(
   })
 }
 
-export function scanHistory(csrfToken: string, providers: ProviderKey[]): Promise<ScanResult> {
+export function scanHistory(
+  csrfToken: string,
+  providers: ProviderKey[],
+  mode: 'incremental' | 'full' = 'incremental',
+): Promise<ScanResult> {
   return requestJson('/api/scan', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-DevTax-CSRF': csrfToken,
     },
-    body: JSON.stringify({ providers }),
+    body: JSON.stringify({ providers, mode }),
   })
 }
 

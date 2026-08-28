@@ -92,7 +92,7 @@ describe('diagnosePlanning', () => {
       expect.arrayContaining(['internal-use:app-v1', 'external-release:app-v1']),
     )
     expect(result.missingFacts).not.toContain('AI履歴と税務単位を結ぶ期間付き分類ルール')
-    expect(result.readiness).toEqual({ confirmed: 10, total: 10 })
+    expect(result.readiness).toEqual({ confirmed: 9, total: 9 })
   })
 
   it('retrospective journey asks to reconstruct facts and supports Git-free evidence', () => {
@@ -131,7 +131,6 @@ describe('diagnosePlanning', () => {
     expect(result.immediateActions.map((action) => action.id)).toEqual(
       expect.arrayContaining([
         'register-project-period-rules',
-        'income-facts',
         'start-bookkeeping',
         'review-equipment',
         'review-home-costs',

@@ -7,6 +7,7 @@ import type {
   LocalConfiguration,
   ProviderKey,
   RuntimeData,
+  ScanMode,
   ScanProgress,
   ScanResult,
 } from '../types'
@@ -19,8 +20,18 @@ import type {
   PlanningSnapshot,
   TaxUnitRecord,
 } from '../../planning/types'
+import { chargePeriodIsValid, type ProviderChargePeriod } from '../../core/chargePeriods'
 import { diagnosePlanning } from '../../core/diagnosis'
+import { buildFilingScenarios } from '../../core/filingScenarios'
 import { getScanProgress } from '../api'
+import {
+  applyCandidateDestinations,
+  candidateGroupByTaxUnit,
+  destinationSummary,
+  normalizedProductGroup,
+  type CandidateDestination,
+  type CandidateDestinations,
+} from '../candidateGrouping'
 import {
   chargeConfirmationKey,
   invertedContractMessage,
@@ -33,7 +44,7 @@ import { createFocusTrap } from '../focusTrap.js'
 import { providerHasEnabledSource } from '../historySources'
 import { displayMonth } from '../monthLabel.js'
 import HistorySourceManager from './HistorySourceManager'
-import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
+import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel, yen } from './shared'
 
 function Onboarding({
   step,
@@ -64,7 +75,7 @@ function Onboarding({
   planning: PlanningSnapshot
   unassignedFolderCount: number
   onStep: (step: number) => void
-  onScan: (providers: ProviderKey[]) => Promise<ScanResult>
+  onScan: (providers: ProviderKey[], mode?: ScanMode) => Promise<ScanResult>
   onSaveHistorySource: (source: HistorySourceInput, sourceId?: string) => Promise<void>
   onTestHistorySource: (source: HistorySourceInput) => Promise<HistorySourceTestResult>
   onRemoveHistorySource: (sourceId: string) => Promise<void>
@@ -76,13 +87,15 @@ function Onboarding({
   onClose: () => void
   onSaved?: () => void
 }) {
-  const steps = ['履歴', '対象年', '制作物', '費用', '診断']
+  const steps = ['履歴', '候補整理', '制作物', '費用', '結果']
   const isDemoData = data.meta.source === 'demo'
   const apiUnavailable = !runtime
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(['claude', 'codex'])
+  const [scanMode, setScanMode] = useState<ScanMode>('incremental')
   const [claudeCharge, setClaudeCharge] = useState<number | undefined>(undefined)
   const [codexCharge, setCodexCharge] = useState<number | undefined>(undefined)
   const [monthlyCharges, setMonthlyCharges] = useState<LocalConfiguration['monthlyCharges']>([])
+  const [chargePeriods, setChargePeriods] = useState<ProviderChargePeriod[]>([])
   const [contracts, setContracts] = useState<LocalConfiguration['contracts']>({
     claude: {},
     codex: {},
@@ -103,15 +116,30 @@ function Onboarding({
   const [retentionDays, setRetentionDays] = useState<number | undefined>(undefined)
   const [retentionBusy, setRetentionBusy] = useState(false)
   const [planningDraft, setPlanningDraft] = useState<PlanningSnapshot>(planning)
-  const [selectedHistoryProjects, setSelectedHistoryProjects] = useState<Record<string, boolean>>(
-    {},
-  )
+  const [candidateQuery, setCandidateQuery] = useState('')
+  const [candidateDestinations, setCandidateDestinations] = useState<CandidateDestinations>({})
   const onboardingBodyRef = useRef<HTMLDivElement>(null)
   const modalRef = useRef<HTMLElement>(null)
   const onCloseRef = useRef(onClose)
-  const rankedProducts = data.products
-    .map((product, index) => ({ product, index }))
-    .sort((left, right) => right.product.sessions - left.product.sessions)
+  const rankedProducts = useMemo(
+    () =>
+      data.products
+        .map((product, index) => ({ product, index }))
+        .sort((left, right) => right.product.sessions - left.product.sessions),
+    [data.products],
+  )
+  const visibleCandidateProducts = rankedProducts.filter(({ product }) =>
+    product.name.toLowerCase().includes(candidateQuery.trim().toLowerCase()),
+  )
+  const candidateSummary = destinationSummary(candidateDestinations)
+  const nextCandidateGroup = String(
+    Math.max(
+      0,
+      ...Object.values(candidateDestinations).map((destination) =>
+        destination.kind === 'product' ? Number(normalizedProductGroup(destination.group) ?? 0) : 0,
+      ),
+    ) + 1,
+  )
   const observedHistoryMonths = data.products
     .flatMap((product) => [product.firstObservedMonth, product.lastObservedMonth])
     .filter((month): month is string => Boolean(month))
@@ -121,13 +149,34 @@ function Onboarding({
       ? `${displayMonth(observedHistoryMonths[0])}～${displayMonth(observedHistoryMonths.at(-1))}`
       : '利用時期を確認中'
   const draftDiagnosis = useMemo(() => diagnosePlanning(planningDraft), [planningDraft])
+  const filingScenarios = useMemo(
+    () =>
+      buildFilingScenarios(
+        data.months.reduce(
+          (totals, month) => ({
+            current: totals.current + month.current,
+            future: totals.future + month.future,
+            review: totals.review + month.review,
+          }),
+          { current: 0, future: 0, review: 0 },
+        ),
+      ),
+    [data.months],
+  )
   const scanNotes = useMemo(() => {
     if (!lastScanResult) return []
     const notes: string[] = []
     for (const [provider, summary] of Object.entries(lastScanResult.providers)) {
       const label = provider === 'codex' ? 'Codex' : 'Claude Code'
       const diagnostics = summary?.diagnostics as
-        { nonUtcTimestamps?: number; changedSinceLastScan?: number } | undefined
+        | {
+            nonUtcTimestamps?: number
+            changedSinceLastScan?: number
+            filesRead?: number
+            filesReused?: number
+            filesDeferred?: number
+          }
+        | undefined
       const nonUtc = Number(diagnostics?.nonUtcTimestamps ?? 0)
       if (nonUtc > 0) {
         notes.push(
@@ -138,6 +187,19 @@ function Onboarding({
       if (changed > 0) {
         notes.push(
           `${label}の履歴のうち${changed}件が、前回の取り込みから内容が変わっていました。同じセッションを続ければ変わるのが普通です。身に覚えのない変化がないかだけ確かめてください。`,
+        )
+      }
+      const filesRead = Number(diagnostics?.filesRead ?? 0)
+      const filesReused = Number(diagnostics?.filesReused ?? 0)
+      const filesDeferred = Number(diagnostics?.filesDeferred ?? 0)
+      if (filesRead + filesReused > 0) {
+        notes.push(
+          `${label}は変更あり${filesRead}ファイルを読み、変更なし${filesReused}ファイルは前回結果を再利用しました。`,
+        )
+      }
+      if (filesDeferred > 0) {
+        notes.push(
+          `${label}の更新中または形式確認待ち${filesDeferred}ファイルは、そのファイルだけ前回の正常値を保持しました。`,
         )
       }
     }
@@ -199,6 +261,7 @@ function Onboarding({
     setClaudeCharge(configuration.charges.claude > 0 ? configuration.charges.claude : undefined)
     setCodexCharge(configuration.charges.codex > 0 ? configuration.charges.codex : undefined)
     setContracts(configuration.contracts)
+    setChargePeriods(configuration.chargePeriods ?? [])
     setUnobservedPercent(Math.round(configuration.unobservedRatio * 100))
     const saved = new Map(
       configuration.monthlyCharges.map((charge) => [
@@ -224,20 +287,41 @@ function Onboarding({
   }, [runtime])
 
   useEffect(() => {
-    const fallbackUnit: TaxUnitRecord = {
-      id: `tax-unit-${Date.now()}`,
-      name: data.products[0]?.name ?? '新しいアプリ',
-      unitType: 'new-software',
-      usageMode: 'undecided',
-      revenueModel: 'undecided',
-      lifecycleStatus: 'developing',
-      journeyMode: planning.profile.journeyMode,
-      monetizationStatus: 'none',
-      sameAsExternalVersion: 'undecided',
-    }
-    const next = planning.taxUnits.length > 0 ? planning : { ...planning, taxUnits: [fallbackUnit] }
-    setPlanningDraft(next)
-  }, [data.products, planning])
+    setPlanningDraft(planning)
+  }, [planning])
+
+  useEffect(() => {
+    setCandidateDestinations((current) => {
+      const next = { ...current }
+      const groupByTaxUnit = candidateGroupByTaxUnit(planning.taxUnits)
+      let nextGroup = Math.max(0, ...[...groupByTaxUnit.values()].map(Number)) + 1
+
+      for (const { product } of rankedProducts) {
+        if (!product.projectKey || next[product.projectKey]) continue
+        const firstRule = planning.projectRules
+          .filter((rule) => rule.projectKey === product.projectKey)
+          .sort((left, right) => left.effectiveFrom.localeCompare(right.effectiveFrom))[0]
+        if (firstRule?.taxUnitId) {
+          const group = groupByTaxUnit.get(firstRule.taxUnitId) ?? String(nextGroup++)
+          groupByTaxUnit.set(firstRule.taxUnitId, group)
+          next[product.projectKey] = {
+            kind: 'product',
+            group,
+            existingTaxUnitId: firstRule.taxUnitId,
+          }
+        } else if (firstRule?.classification === 'private') {
+          next[product.projectKey] = { kind: 'private' }
+        } else if (firstRule?.classification === 'general-learning') {
+          next[product.projectKey] = { kind: 'learning' }
+        } else if (firstRule?.classification === 'unclassified') {
+          next[product.projectKey] = { kind: 'later' }
+        } else {
+          next[product.projectKey] = { kind: 'later' }
+        }
+      }
+      return next
+    })
+  }, [planning.projectRules, planning.taxUnits, rankedProducts])
 
   useEffect(() => {
     onCloseRef.current = onClose
@@ -274,6 +358,34 @@ function Onboarding({
     )
   }
 
+  function updateChargePeriod(index: number, patch: Partial<ProviderChargePeriod>) {
+    setChargePeriods((current) =>
+      current.map((period, periodIndex) =>
+        periodIndex === index ? { ...period, ...patch } : period,
+      ),
+    )
+  }
+
+  function addChargePeriod() {
+    const provider = selectedProviders[0] ?? 'claude'
+    const observedStart = observedHistoryMonths[0]
+    const start = observedStart ? `${observedStart}-01` : `${planningDraft.profile.taxYear}-01-01`
+    const end = new Date(Date.UTC(Number(start.slice(0, 4)), Number(start.slice(5, 7)), 0))
+      .toISOString()
+      .slice(0, 10)
+    setChargePeriods((current) => [
+      ...current,
+      {
+        id: `charge-period-${Date.now()}`,
+        provider,
+        planName: '',
+        serviceStartedOn: start,
+        serviceEndedOn: end,
+        amountJpy: 0,
+      },
+    ])
+  }
+
   function updateTaxUnit(index: number, patch: Partial<TaxUnitRecord>) {
     setPlanningDraft((current) => ({
       ...current,
@@ -283,42 +395,18 @@ function Onboarding({
     }))
   }
 
-  function addHistoryCandidates() {
-    const selected = rankedProducts
-      .map(({ product }) => product)
-      .filter((product) => product.projectKey && selectedHistoryProjects[product.projectKey])
-    if (selected.length === 0) {
-      setNotice({ kind: 'info', message: '候補を1件以上選んでください。' })
-      return
-    }
+  function updateCandidateDestination(projectKey: string, destination: CandidateDestination) {
+    setCandidateDestinations((current) => ({ ...current, [projectKey]: destination }))
+  }
 
-    const units = [...planningDraft.taxUnits]
-    selected.forEach((product, index) => {
-      const existing = units.find(
-        (unit) => unit.name.trim().toLowerCase() === product.name.trim().toLowerCase(),
-      )
-      if (!existing) {
-        units.push({
-          id: `tax-unit-history-${Date.now()}-${index}`,
-          name: product.name,
-          unitType: 'new-software',
-          usageMode: 'undecided',
-          revenueModel: 'undecided',
-          lifecycleStatus: 'developing',
-          journeyMode: 'retrospective',
-          monetizationStatus: 'none',
-          sameAsExternalVersion: 'undecided',
-          notes: 'ローカルAI履歴から名称候補を作成。用途・状態・実際の開始日は利用者確認が必要。',
-        })
-      }
-    })
-
-    setPlanningDraft((current) => ({ ...current, taxUnits: units }))
-    setSelectedHistoryProjects({})
-    setNotice({
-      kind: 'success',
-      message: `${selected.length}件を履歴から入力しました。用途・状態・実際の開始日を確認してください。`,
-    })
+  function materializeCandidateGroups(): PlanningSnapshot {
+    const next = applyCandidateDestinations(
+      planningDraft,
+      rankedProducts.map(({ product }) => product),
+      candidateDestinations,
+    )
+    setPlanningDraft(next)
+    return next
   }
 
   function updateEquipment(index: number, patch: Partial<EquipmentRecord>) {
@@ -467,7 +555,7 @@ function Onboarding({
       }
       setBusy(true)
       try {
-        const result = await onScan(selectedProviders)
+        const result = await onScan(selectedProviders, scanMode)
         setLastScanResult(result)
         const events = Object.values(result.providers).reduce(
           (sum, provider) => sum + (provider?.events ?? 0),
@@ -495,6 +583,18 @@ function Onboarding({
       return
     }
     if (step === 1) {
+      const invalidGroup = Object.values(candidateDestinations).some(
+        (destination) =>
+          destination.kind === 'product' && !normalizedProductGroup(destination.group),
+      )
+      if (invalidGroup) {
+        setNotice({
+          kind: 'error',
+          message: '制作物としてまとめる候補には、1以上のグループ番号を入力してください。',
+        })
+        return
+      }
+      materializeCandidateGroups()
       onStep(2)
       return
     }
@@ -523,25 +623,42 @@ function Onboarding({
         })
         return
       }
-      onStep(4)
+    }
+    if (step === 4) {
+      onSaved?.()
+      onClose()
       return
     }
     const invalidContract = providerWithInvertedContract(contracts)
-    if (invalidContract) {
+    if (chargePeriods.length === 0 && invalidContract) {
       setNotice({ kind: 'error', message: invertedContractMessage(invalidContract) })
       return
     }
-    const missingCharges = missingChargeProviders(selectedProviders, {
-      claude: claudeCharge,
-      codex: codexCharge,
-    })
+    const invalidChargePeriod = chargePeriods.find((period) => !chargePeriodIsValid(period))
+    if (invalidChargePeriod) {
+      setNotice({
+        kind: 'error',
+        message: '請求履歴の利用開始日・終了日・実際の請求額を確認してください。',
+      })
+      return
+    }
+    const missingCharges =
+      chargePeriods.length > 0
+        ? selectedProviders.filter(
+            (provider) =>
+              !chargePeriods.some((period) => period.provider === provider && period.amountJpy > 0),
+          )
+        : missingChargeProviders(selectedProviders, {
+            claude: claudeCharge,
+            codex: codexCharge,
+          })
     if (needsChargeConfirmation(missingCharges, confirmedMissingCharges)) {
       setConfirmedMissingCharges(chargeConfirmationKey(missingCharges))
       setNotice({ kind: 'error', message: missingChargeMessage(missingCharges) })
       return
     }
     if (apiUnavailable) {
-      onClose()
+      onStep(4)
       return
     }
     setBusy(true)
@@ -553,12 +670,15 @@ function Onboarding({
         },
         monthlyCharges,
         contracts,
+        chargePeriods,
         unobservedRatio: Math.min(95, Math.max(0, unobservedPercent)) / 100,
       })
       await onSavePlanning(planningDraft)
-      setNotice({ kind: 'success', message: '設定を保存し、ダッシュボードを再集計しました。' })
-      onSaved?.()
-      window.setTimeout(onClose, 650)
+      setNotice({
+        kind: 'success',
+        message: '設定を保存し、入力後の結果へ再集計しました。',
+      })
+      onStep(4)
     } catch (error) {
       setNotice({
         kind: 'error',
@@ -580,7 +700,8 @@ function Onboarding({
     }
     setBusy(true)
     try {
-      await onSavePlanning(planningDraft)
+      const draftToSave = step === 1 ? materializeCandidateGroups() : planningDraft
+      await onSavePlanning(draftToSave)
       setNotice({
         kind: 'success',
         message: 'ここまでの入力を保存しました。次回は続きから確認できます。',
@@ -717,6 +838,27 @@ function Onboarding({
                     onTest={onTestHistorySource}
                     onRemove={onRemoveHistorySource}
                   />
+                )}
+                {!apiUnavailable && (
+                  <div className="scan-mode-control">
+                    <label>
+                      <span>
+                        <strong>走査方法</strong>
+                        <small>通常は変更されたファイルだけを読みます</small>
+                      </span>
+                      <select
+                        value={scanMode}
+                        disabled={busy || runtimeLoading}
+                        onChange={(event) => setScanMode(event.target.value as ScanMode)}
+                      >
+                        <option value="incremental">増分走査（通常）</option>
+                        <option value="full">完全再走査</option>
+                      </select>
+                    </label>
+                    <p>
+                      完全再走査は、履歴形式の更新後や結果を最初から照合したい場合だけ使用します。
+                    </p>
+                  </div>
                 )}
                 {/* Gated on detection: without it, a Codex-only user would be
                     shown a Claude Code retention setting and one click would
@@ -876,39 +1018,156 @@ function Onboarding({
             )}
             {step === 1 && (
               <>
-                <span className="step-label">2 / 5　対象年と申告全体</span>
-                <h3>まず、今回整理する年を確認します</h3>
+                <span className="step-label">2 / 5　履歴から候補を整理</span>
+                <h3>履歴にある全候補を、同じ制作物ごとにまとめます</h3>
                 <p>
-                  ここでは申告全体に共通することだけ確認します。開発時期や売上状況は、次の画面で制作物ごとに登録します。
+                  同じ制作物には同じ番号を付けてください。番号が同じ候補は、次の画面で1つの制作物として扱います。
                 </p>
-                <div className="history-context-bridge">
+                <div className="history-context-bridge candidate-context">
                   <div>
-                    <span>履歴から分かったこと</span>
-                    <strong>
+                    <span>読み取った履歴</span>
+                    <strong>{rankedProducts.length}候補</strong>
+                    <small>
                       {data.meta.sessionCount.toLocaleString('ja-JP')}件・{historyRangeText}
-                    </strong>
-                    <small>利用AI、作業フォルダ、利用量</small>
-                  </div>
-                  <b>＋</b>
-                  <div>
-                    <span>この画面で確認</span>
-                    <strong>対象年・申告全体</strong>
-                    <small>所得区分は未確定でも進められます</small>
+                    </small>
                   </div>
                   <b>→</b>
                   <div>
-                    <span>次の画面で確認</span>
-                    <strong>制作物ごとの現在地</strong>
-                    <small>開始時期、売上、利用・公開状況</small>
+                    <span>番号でまとめた結果</span>
+                    <strong>{candidateSummary.products}制作物</strong>
+                    <small>
+                      私用 {candidateSummary.privateItems}件・あとで確認{' '}
+                      {candidateSummary.laterItems}件
+                    </small>
                   </div>
                 </div>
-                <p className="answer-later-note">
-                  分からない項目は「まだ決めていない」で進められます。
+                <label className="candidate-search">
+                  <span>候補を検索</span>
+                  <input
+                    type="search"
+                    value={candidateQuery}
+                    onChange={(event) => setCandidateQuery(event.target.value)}
+                    placeholder="フォルダ名・候補名"
+                  />
+                </label>
+                {rankedProducts.length === 0 ? (
+                  <div className="setup-insight">
+                    <span>ⓘ</span>
+                    <p>
+                      <strong>履歴候補はまだありません</strong>
+                      <br />
+                      次へ進み、制作物を手動で追加できます。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="history-grouping-list" role="list">
+                    {visibleCandidateProducts.map(({ product }) => {
+                      if (!product.projectKey) return null
+                      const destination = candidateDestinations[product.projectKey] ?? {
+                        kind: 'later' as const,
+                      }
+                      return (
+                        <article
+                          key={product.projectKey}
+                          className="history-grouping-row"
+                          role="listitem"
+                        >
+                          <div className="history-grouping-candidate">
+                            <strong>{product.name}</strong>
+                            <small>
+                              {product.sessions}セッション・
+                              {product.providers?.join('・') || '利用AI確認中'}
+                              <br />
+                              {product.firstObservedAt?.slice(0, 10) ||
+                                product.firstObservedMonth ||
+                                '開始不明'}
+                              ～
+                              {product.lastObservedAt?.slice(0, 10) ||
+                                product.lastObservedMonth ||
+                                '終了不明'}
+                            </small>
+                          </div>
+                          <label>
+                            <span>扱い</span>
+                            <select
+                              aria-label={`${product.name}の扱い`}
+                              value={destination.kind}
+                              onChange={(event) => {
+                                const kind = event.target.value as CandidateDestination['kind']
+                                updateCandidateDestination(
+                                  product.projectKey!,
+                                  kind === 'product'
+                                    ? {
+                                        kind,
+                                        group:
+                                          destination.kind === 'product'
+                                            ? destination.group
+                                            : nextCandidateGroup,
+                                        ...(destination.kind === 'product' &&
+                                        destination.existingTaxUnitId
+                                          ? { existingTaxUnitId: destination.existingTaxUnitId }
+                                          : {}),
+                                      }
+                                    : {
+                                        kind,
+                                        ...(destination.existingTaxUnitId
+                                          ? { existingTaxUnitId: destination.existingTaxUnitId }
+                                          : {}),
+                                      },
+                                )
+                              }}
+                            >
+                              <option value="product">制作物</option>
+                              <option value="private">趣味・私用</option>
+                              <option value="learning">一般的な学習</option>
+                              <option value="later">あとで確認</option>
+                            </select>
+                          </label>
+                          <label className="candidate-group-number">
+                            <span>同じ制作物の番号</span>
+                            <input
+                              aria-label={`${product.name}のグループ番号`}
+                              type="number"
+                              inputMode="numeric"
+                              min="1"
+                              disabled={destination.kind !== 'product'}
+                              value={destination.kind === 'product' ? destination.group : ''}
+                              onChange={(event) =>
+                                updateCandidateDestination(product.projectKey!, {
+                                  kind: 'product',
+                                  group: event.target.value,
+                                  ...(destination.kind === 'product' &&
+                                  destination.existingTaxUnitId
+                                    ? { existingTaxUnitId: destination.existingTaxUnitId }
+                                    : {}),
+                                })
+                              }
+                            />
+                          </label>
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
+                <div className="candidate-grouping-legend">
+                  <strong>まとめ方の例</strong>
+                  <span>1・1・1＝3候補を1つの制作物へ</span>
+                  <span>1・2・3＝それぞれ別の制作物へ</span>
+                  <span>私用＝制作物の原価へ含めない</span>
+                </div>
+              </>
+            )}
+            {step === 2 && (
+              <>
+                <span className="step-label">3 / 5　制作物ごとの状況</span>
+                <h3>制作物ごとに、売上や利用状況を確認します</h3>
+                <p>
+                  先ほど同じ番号にした候補は1件にまとまっています。公開日だけでなく、実際に使い始めた時点も記録できます。
                 </p>
-                <div className="simple-form-grid">
+                <div className="simple-form-grid product-year-field">
                   <label>
                     <span>
-                      <strong>対象の年</strong>
+                      <strong>結果を確認する年</strong>
                       <small>今回まとめたい費用の年</small>
                     </span>
                     <input
@@ -928,150 +1187,22 @@ function Onboarding({
                     />
                   </label>
                 </div>
-                <details className="advanced-fields">
-                  <summary>申告について分かる範囲で答える</summary>
-                  <div className="simple-form-grid">
-                    <label>
-                      <span>
-                        <strong>所得の区分</strong>
-                        <small>分からなければ未確定のままで進めます</small>
-                      </span>
-                      <select
-                        value={planningDraft.profile.incomeCategory}
-                        onChange={(event) =>
-                          setPlanningDraft((current) => ({
-                            ...current,
-                            profile: {
-                              ...current.profile,
-                              incomeCategory: event.target
-                                .value as PlanningSnapshot['profile']['incomeCategory'],
-                            },
-                          }))
-                        }
-                      >
-                        <option value="undecided">まだ分からない</option>
-                        <option value="miscellaneous">雑所得として検討中</option>
-                        <option value="business">事業所得として検討中</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>
-                        <strong>申告方法</strong>
-                        <small>開業届だけで所得区分が決まるものではありません</small>
-                      </span>
-                      <select
-                        value={planningDraft.profile.filingType}
-                        onChange={(event) =>
-                          setPlanningDraft((current) => ({
-                            ...current,
-                            profile: {
-                              ...current.profile,
-                              filingType: event.target
-                                .value as PlanningSnapshot['profile']['filingType'],
-                            },
-                          }))
-                        }
-                      >
-                        <option value="undecided">まだ分からない</option>
-                        <option value="white">白色申告</option>
-                        <option value="blue">青色申告</option>
-                      </select>
-                    </label>
-                  </div>
-                </details>
-                <div className="setup-insight">
-                  <span>✓</span>
-                  <p>
-                    <strong>ここまで分かりました</strong>
-                    <br />
-                    {planningDraft.profile.taxYear}
-                    年分として整理します。制作物ごとの開始時期と売上状況は次に確認します。
-                  </p>
-                </div>
-              </>
-            )}
-            {step === 2 && (
-              <>
-                <span className="step-label">3 / 5　作っているもの</span>
-                <h3>AIを使って何を作っていますか？</h3>
-                <p>
-                  自分で使うものも、外へ公開するものも登録できます。公開日だけでなく、実際に使い始めた時点も大切です。
-                </p>
-                {!isDemoData && rankedProducts.length > 0 && (
-                  <details className="history-candidate-import">
-                    <summary>履歴からプロダクト候補を入力する</summary>
-                    <p>
-                      AI履歴にある名前・最初と最後の利用日時・利用AIを候補にします。税務上の用途や正式な開始日は自動で決めません。
-                    </p>
-                    <div className="history-candidate-list">
-                      {rankedProducts.slice(0, 12).map(({ product }) => (
-                        <label key={product.projectKey ?? product.name}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(
-                              product.projectKey && selectedHistoryProjects[product.projectKey],
-                            )}
-                            disabled={!product.projectKey}
-                            onChange={(event) =>
-                              product.projectKey &&
-                              setSelectedHistoryProjects((current) => ({
-                                ...current,
-                                [product.projectKey!]: event.target.checked,
-                              }))
-                            }
-                          />
-                          <span>
-                            <strong>{product.name}</strong>
-                            <small>
-                              {product.sessions}セッション　
-                              {product.providers?.join('・') || '利用AI確認中'}
-                              <br />
-                              履歴上：
-                              {product.firstObservedAt?.slice(0, 10) ||
-                                (product.firstObservedMonth
-                                  ? displayMonth(product.firstObservedMonth)
-                                  : '開始時期不明')}{' '}
-                              ～{' '}
-                              {product.lastObservedAt?.slice(0, 10) ||
-                                (product.lastObservedMonth
-                                  ? displayMonth(product.lastObservedMonth)
-                                  : '終了時期不明')}
-                            </small>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                    {rankedProducts.length > 12 && (
-                      <p className="candidate-note">
-                        まず利用量の多い12件を表示しています。残りは下の「別の開発をもう1件追加」から手動で入力してください。
-                      </p>
-                    )}
-                    <button
-                      type="button"
-                      className="primary-button candidate-import-button"
-                      onClick={addHistoryCandidates}
-                    >
-                      選んだ候補を入力
-                    </button>
-                  </details>
-                )}
                 <div className="multi-product-guide">
-                  <strong>複数の開発があるとき</strong>
+                  <strong>同じフォルダでも途中から扱いが変わるとき</strong>
                   <p>
-                    <b>1つずつ別々に登録</b>
-                    します。まず1件目を入力し、下の「別の開発をもう1件追加」を押してください。
+                    ここでは制作物そのものを確認します。利用開始後の保守や大きな機能追加は、保存後に「フォルダの割当」で期間を分けられます。
                   </p>
                   <details>
-                    <summary>どこまでを1つとして分ける？</summary>
+                    <summary>制作物と期間の違い</summary>
                     <ul>
                       <li>
-                        <b>別々にする：</b>家計アプリと小説執筆ツールなど、目的や完成条件が違うもの
+                        <b>別の制作物：</b>家計アプリと小説執筆ツールなど、目的や完成条件が違うもの
                       </li>
                       <li>
-                        <b>同じまま：</b>同じアプリの軽い修正や通常の更新
+                        <b>同じ制作物の別期間：</b>完成前の製作、利用開始後の保守、大きな機能追加
                       </li>
                       <li>
-                        <b>迷うとき：</b>普段、別の名前で進捗を管理している単位で登録する
+                        <b>迷うとき：</b>制作物は同じままにし、あとから期間を分けて確認する
                       </li>
                     </ul>
                   </details>
@@ -1352,149 +1483,261 @@ function Onboarding({
                     判定は請求書1枚や月額ごとではなく、通常は機能する1つの資産単位の取得価額で行います。税務目的で不自然に分割しません。
                   </p>
                 </section>
-                <div className="invoice-box">
-                  <div>
-                    <span className="provider-logo">C</span>
-                    <strong>Claude Code 月額</strong>
-                    <input
-                      aria-label="Claude Code 月額"
-                      type="number"
-                      min="0"
-                      placeholder="未入力"
-                      value={claudeCharge ?? ''}
-                      onChange={(event) =>
-                        updateProviderCharge(
-                          'claude',
-                          Number.isNaN(event.target.valueAsNumber)
-                            ? undefined
-                            : event.target.valueAsNumber,
-                        )
-                      }
-                    />
-                    <span>円</span>
-                  </div>
-                  <div>
-                    <span className="provider-logo codex">O</span>
-                    <strong>Codex 月額</strong>
-                    <input
-                      aria-label="Codex 月額"
-                      type="number"
-                      min="0"
-                      placeholder="未入力"
-                      value={codexCharge ?? ''}
-                      onChange={(event) =>
-                        updateProviderCharge(
-                          'codex',
-                          Number.isNaN(event.target.valueAsNumber)
-                            ? undefined
-                            : event.target.valueAsNumber,
-                        )
-                      }
-                    />
-                    <span>円</span>
-                  </div>
-                </div>
-                <div className="contract-fields">
-                  <div className="contract-heading">
-                    <strong>契約期間</strong>
-                    <small>
-                      入力すると、契約していない月を配賦から外せます。未入力のままでも構いません。その場合は履歴のある全月へ同額を適用します。日割りは行いません。
-                    </small>
-                  </div>
-                  {(
-                    [
-                      ['claude', 'Claude Code'],
-                      ['codex', 'Codex'],
-                    ] as const
-                  ).map(([provider, label]) => (
-                    <div className="contract-row" key={provider}>
-                      <strong>{label}</strong>
-                      <label>
-                        <span>開始日</span>
-                        <input
-                          aria-label={`${label} 契約開始日`}
-                          type="date"
-                          value={contracts[provider].startedOn ?? ''}
-                          onChange={(event) =>
-                            setContracts((current) => ({
-                              ...current,
-                              [provider]: {
-                                ...current[provider],
-                                startedOn: event.target.value || undefined,
-                              },
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <span>終了日</span>
-                        <input
-                          aria-label={`${label} 契約終了日`}
-                          type="date"
-                          value={contracts[provider].endedOn ?? ''}
-                          onChange={(event) =>
-                            setContracts((current) => ({
-                              ...current,
-                              [provider]: {
-                                ...current[provider],
-                                endedOn: event.target.value || undefined,
-                              },
-                            }))
-                          }
-                        />
-                      </label>
-                      <small>解約していない場合、終了日は空のままにしてください。</small>
+                <section className="charge-period-editor">
+                  <div className="cost-editor-heading">
+                    <div>
+                      <h4>請求・契約履歴</h4>
+                      <p>
+                        月額の推定ではなく、明細にある利用期間と実際の請求額を記録します。月途中のプラン変更は行を分けてください。
+                      </p>
                     </div>
-                  ))}
-                </div>
-                {monthlyCharges.length > 0 && (
-                  <details className="monthly-charges">
-                    <summary>月別料金を編集（{monthlyCharges.length / 2}か月）</summary>
-                    <div className="monthly-charge-grid">
-                      {data.months.map((month) => {
-                        const monthKey = monthKeyFromLabel(
-                          month.label,
-                          planningDraft.profile.taxYear,
-                        )
-                        return (
-                          <div className="monthly-charge-row" key={monthKey}>
-                            <strong>{month.label}</strong>
-                            {(['claude', 'codex'] as ProviderKey[]).map((provider) => {
-                              const index = monthlyCharges.findIndex(
-                                (charge) =>
-                                  charge.provider === provider && charge.month === monthKey,
+                    <button type="button" className="secondary-button" onClick={addChargePeriod}>
+                      ＋ 請求を追加
+                    </button>
+                  </div>
+                  {chargePeriods.length === 0 ? (
+                    <p className="charge-period-empty">
+                      請求履歴が未登録です。正確な期間が分かる場合は追加してください。分からない場合だけ、下の月額概算を利用できます。
+                    </p>
+                  ) : (
+                    <div className="charge-period-list">
+                      {chargePeriods.map((period, index) => (
+                        <article key={period.id} className="charge-period-row">
+                          <label>
+                            <span>AIサービス</span>
+                            <select
+                              value={period.provider}
+                              onChange={(event) =>
+                                updateChargePeriod(index, {
+                                  provider: event.target.value as ProviderKey,
+                                })
+                              }
+                            >
+                              <option value="claude">Claude Code</option>
+                              <option value="codex">Codex</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span>プラン名</span>
+                            <input
+                              placeholder="例：Pro"
+                              value={period.planName}
+                              onChange={(event) =>
+                                updateChargePeriod(index, { planName: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>利用開始日</span>
+                            <input
+                              type="date"
+                              value={period.serviceStartedOn}
+                              onChange={(event) =>
+                                updateChargePeriod(index, {
+                                  serviceStartedOn: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>利用終了日</span>
+                            <input
+                              type="date"
+                              value={period.serviceEndedOn}
+                              onChange={(event) =>
+                                updateChargePeriod(index, {
+                                  serviceEndedOn: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>請求日</span>
+                            <input
+                              type="date"
+                              value={period.billedOn ?? ''}
+                              onChange={(event) =>
+                                updateChargePeriod(index, {
+                                  billedOn: event.target.value || undefined,
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>実際の請求額</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={period.amountJpy}
+                              onChange={(event) =>
+                                updateChargePeriod(index, {
+                                  amountJpy: Math.max(0, event.target.valueAsNumber || 0),
+                                })
+                              }
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() =>
+                              setChargePeriods((current) =>
+                                current.filter((_, periodIndex) => periodIndex !== index),
                               )
-                              return (
-                                <label key={provider}>
-                                  <span>{provider === 'claude' ? 'Claude' : 'Codex'}</span>
-                                  <input
-                                    aria-label={`${month.label} ${provider}料金`}
-                                    type="number"
-                                    min="0"
-                                    value={monthlyCharges[index]?.amountJpy ?? 0}
-                                    onChange={(event) =>
-                                      setMonthlyCharges((current) =>
-                                        current.map((charge, chargeIndex) =>
-                                          chargeIndex === index
-                                            ? {
-                                                ...charge,
-                                                amountJpy: event.target.valueAsNumber || 0,
-                                              }
-                                            : charge,
-                                        ),
-                                      )
-                                    }
-                                  />
-                                  <span>円</span>
-                                </label>
-                              )
-                            })}
-                          </div>
-                        )
-                      })}
+                            }
+                          >
+                            削除
+                          </button>
+                        </article>
+                      ))}
                     </div>
-                  </details>
-                )}
+                  )}
+                </section>
+                <details className="advanced-fields legacy-charge-fields">
+                  <summary>請求期間が分からない場合の月額概算</summary>
+                  <div className="invoice-box">
+                    <div>
+                      <span className="provider-logo">C</span>
+                      <strong>Claude Code 月額</strong>
+                      <input
+                        aria-label="Claude Code 月額"
+                        type="number"
+                        min="0"
+                        placeholder="未入力"
+                        value={claudeCharge ?? ''}
+                        onChange={(event) =>
+                          updateProviderCharge(
+                            'claude',
+                            Number.isNaN(event.target.valueAsNumber)
+                              ? undefined
+                              : event.target.valueAsNumber,
+                          )
+                        }
+                      />
+                      <span>円</span>
+                    </div>
+                    <div>
+                      <span className="provider-logo codex">O</span>
+                      <strong>Codex 月額</strong>
+                      <input
+                        aria-label="Codex 月額"
+                        type="number"
+                        min="0"
+                        placeholder="未入力"
+                        value={codexCharge ?? ''}
+                        onChange={(event) =>
+                          updateProviderCharge(
+                            'codex',
+                            Number.isNaN(event.target.valueAsNumber)
+                              ? undefined
+                              : event.target.valueAsNumber,
+                          )
+                        }
+                      />
+                      <span>円</span>
+                    </div>
+                  </div>
+                  <div className="contract-fields">
+                    <div className="contract-heading">
+                      <strong>契約期間</strong>
+                      <small>
+                        入力すると、契約していない月を配賦から外せます。未入力のままでも構いません。その場合は履歴のある全月へ同額を適用します。日割りは行いません。
+                      </small>
+                    </div>
+                    {(
+                      [
+                        ['claude', 'Claude Code'],
+                        ['codex', 'Codex'],
+                      ] as const
+                    ).map(([provider, label]) => (
+                      <div className="contract-row" key={provider}>
+                        <strong>{label}</strong>
+                        <label>
+                          <span>開始日</span>
+                          <input
+                            aria-label={`${label} 契約開始日`}
+                            type="date"
+                            value={contracts[provider].startedOn ?? ''}
+                            onChange={(event) =>
+                              setContracts((current) => ({
+                                ...current,
+                                [provider]: {
+                                  ...current[provider],
+                                  startedOn: event.target.value || undefined,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          <span>終了日</span>
+                          <input
+                            aria-label={`${label} 契約終了日`}
+                            type="date"
+                            value={contracts[provider].endedOn ?? ''}
+                            onChange={(event) =>
+                              setContracts((current) => ({
+                                ...current,
+                                [provider]: {
+                                  ...current[provider],
+                                  endedOn: event.target.value || undefined,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                        <small>解約していない場合、終了日は空のままにしてください。</small>
+                      </div>
+                    ))}
+                  </div>
+                  {monthlyCharges.length > 0 && (
+                    <details className="monthly-charges">
+                      <summary>月別料金を編集（{monthlyCharges.length / 2}か月）</summary>
+                      <div className="monthly-charge-grid">
+                        {data.months.map((month) => {
+                          const monthKey = monthKeyFromLabel(
+                            month.label,
+                            planningDraft.profile.taxYear,
+                          )
+                          return (
+                            <div className="monthly-charge-row" key={monthKey}>
+                              <strong>{month.label}</strong>
+                              {(['claude', 'codex'] as ProviderKey[]).map((provider) => {
+                                const index = monthlyCharges.findIndex(
+                                  (charge) =>
+                                    charge.provider === provider && charge.month === monthKey,
+                                )
+                                return (
+                                  <label key={provider}>
+                                    <span>{provider === 'claude' ? 'Claude' : 'Codex'}</span>
+                                    <input
+                                      aria-label={`${month.label} ${provider}料金`}
+                                      type="number"
+                                      min="0"
+                                      value={monthlyCharges[index]?.amountJpy ?? 0}
+                                      onChange={(event) =>
+                                        setMonthlyCharges((current) =>
+                                          current.map((charge, chargeIndex) =>
+                                            chargeIndex === index
+                                              ? {
+                                                  ...charge,
+                                                  amountJpy: event.target.valueAsNumber || 0,
+                                                }
+                                              : charge,
+                                          ),
+                                        )
+                                      }
+                                    />
+                                    <span>円</span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </details>
+                  )}
+                </details>
                 <label className="ratio-field">
                   <span>
                     <strong>未取得利用の割合</strong>
@@ -2062,7 +2305,31 @@ function Onboarding({
               <>
                 <span className="step-label">5 / 5　これから行うこと</span>
                 <h3>いまの整理結果です</h3>
-                <p>保存すると、登録した事実から診断と金額を計算し直します。</p>
+                <p>
+                  入力内容を保存して再集計しました。申告方法を先に決めず、同じ事実を使って該当する場合の違いを比較できます。
+                </p>
+                <div className="filing-scenario-grid" aria-label="申告区分ごとの結果">
+                  {filingScenarios.map((scenario) => (
+                    <section key={scenario.id}>
+                      <span>{scenario.title}</span>
+                      <dl className="filing-scenario-values">
+                        <div>
+                          <dt>当年の費用候補</dt>
+                          <dd>{yen.format(scenario.currentExpenseCandidateJpy)}</dd>
+                        </div>
+                        <div>
+                          <dt>将来分の原価候補</dt>
+                          <dd>{yen.format(scenario.futureCostCandidateJpy)}</dd>
+                        </div>
+                        <div>
+                          <dt>未分類・私用等</dt>
+                          <dd>{yen.format(scenario.reviewJpy)}</dd>
+                        </div>
+                      </dl>
+                      <p>{scenario.condition}</p>
+                    </section>
+                  ))}
+                </div>
                 <div className="onboarding-diagnosis">
                   <section>
                     <h4>準備の進み具合</h4>
@@ -2070,7 +2337,7 @@ function Onboarding({
                       <strong>
                         {draftDiagnosis.readiness.confirmed} / {draftDiagnosis.readiness.total}
                       </strong>{' '}
-                      項目まで確認できました。全部埋めなくても保存して、次回ここから続けられます。
+                      項目まで確認できました。未入力項目は、次回ここから続けられます。
                     </p>
                   </section>
                   <section>
@@ -2181,11 +2448,13 @@ function Onboarding({
                     ? apiUnavailable
                       ? 'デモで次へ'
                       : '履歴を確認して次へ'
-                    : step === 4
+                    : step === 3
                       ? apiUnavailable
-                        ? 'デモを閉じる'
-                        : '保存する'
-                      : '次へ'}
+                        ? 'デモ結果を見る'
+                        : '保存して結果を見る'
+                      : step === 4
+                        ? '完了'
+                        : '次へ'}
               </button>
             </div>
           </div>

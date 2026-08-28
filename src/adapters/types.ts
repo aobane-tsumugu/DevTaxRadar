@@ -20,6 +20,8 @@ export type LocalSessionReference = {
 
 export type NormalizedUsage = {
   provider: UsageProvider
+  /** Opaque per-record identity used only to preserve Claude duplicate handling across cached files. */
+  eventKey?: string
   month: string
   observedAt: string
   sessionKey: string
@@ -42,6 +44,10 @@ export type NormalizedUsage = {
 export type AdapterDiagnostics = {
   filesDiscovered: number
   filesRead: number
+  /** Files whose prior sanitized contribution was used without opening them. */
+  filesReused: number
+  /** Changed files that were safely deferred to their prior contribution. */
+  filesDeferred: number
   linesRead: number
   blankLines: number
   malformedJsonLines: number
@@ -56,6 +62,18 @@ export type AdapterDiagnostics = {
 export type AdapterResult = {
   events: NormalizedUsage[]
   diagnostics: AdapterDiagnostics
+}
+
+/**
+ * The ephemeral outcome for one transcript file. When local references were
+ * requested, events can contain local-only source paths; cache callers must
+ * strip them and keep their opaque file identity separately before persisting.
+ */
+export type AdapterFileReadResult = {
+  events: NormalizedUsage[]
+  diagnostics: AdapterDiagnostics
+  state: 'accepted' | 'unstable' | 'incompatible' | 'io_error'
+  snapshot?: { byteSize: number; fileMtime: string }
 }
 
 export type AdapterOptions = {
@@ -89,6 +107,8 @@ export function createDiagnostics(): AdapterDiagnostics {
   return {
     filesDiscovered: 0,
     filesRead: 0,
+    filesReused: 0,
+    filesDeferred: 0,
     linesRead: 0,
     blankLines: 0,
     malformedJsonLines: 0,

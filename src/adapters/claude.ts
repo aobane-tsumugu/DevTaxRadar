@@ -22,13 +22,14 @@ import {
 import { localMonthFromTimestamp } from './localTime.ts'
 import {
   createDiagnostics,
+  type AdapterFileReadResult,
   type AdapterOptions,
   type AdapterResult,
   type NormalizedUsage,
 } from './types.ts'
 
-const ADAPTER = 'claude-code-local-jsonl'
-const SCHEMA_VERSION = 'claude-local-v1'
+export const CLAUDE_HISTORY_ADAPTER = 'claude-code-local-jsonl'
+export const CLAUDE_HISTORY_SCHEMA_VERSION = 'claude-local-v1'
 
 type ClaudeFileState = {
   hasRecognizedRecord: boolean
@@ -45,56 +46,100 @@ export async function readClaudeHistory(
 
   for await (const filePath of discoverJsonlFiles(rootDirectory, diagnostics)) {
     options.onFileScanned?.()
-    const before = readFileSnapshot(filePath)
-    // The Transform inside readJsonlObjects hashes every byte as it streams
-    // past on its way to the line splitter, so the file is read exactly once
-    // even though both the parsed rows and the digest are needed. The digest
-    // only finishes once every row from this file has been consumed, but a
-    // Claude transcript can hold several messages (several events), so the
-    // real contentHash/byteSize/fileMtime are patched onto every event from
-    // this file below -- not built inline while rows are still streaming.
-    const hash = options.includeLocalReferences ? createHash('sha256') : undefined
-    const ioErrorsBefore = diagnostics.ioErrors
-    const fileState: ClaudeFileState = {
-      hasRecognizedRecord: false,
-      hasInvalidUsageRecord: false,
-    }
-    const fileEvents: NormalizedUsage[] = []
-    for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
-      const event = normalizeClaudeRow(row, filePath, options, seenMessages, diagnostics, fileState)
-      if (event) fileEvents.push(event)
-    }
-    // A read that failed part way through leaves the hash covering only the
-    // bytes that arrived. Recording that as the file's hash would make the next
-    // scan report a change that never happened, so leave it empty -- which the
-    // change detection already treats as "not recorded".
-    const after = readFileSnapshot(filePath)
-    const readCompletely = diagnostics.ioErrors === ioErrorsBefore
-    const stable = readCompletely && sameFileSnapshot(before, after)
-    if (!stable) {
-      diagnostics.unstableFiles += 1
-      continue
-    }
-    // A recognized transcript can legitimately contain no billable assistant
-    // response: for example, a user-only or aborted session. Conversely, an
-    // assistant record that claims usage but no longer has the required token
-    // counters is unsafe to import, even if another row in this file parsed.
-    if (!fileState.hasRecognizedRecord || fileState.hasInvalidUsageRecord) {
-      diagnostics.incompatibleFiles += 1
-      continue
-    }
-    if (hash && after) {
-      const summary = fileContentSummary(hash, after)
-      for (const event of fileEvents) {
-        if (event.localReference) {
-          event.localReference = { ...event.localReference, ...summary }
-        }
-      }
-    }
-    events.push(...fileEvents)
+    const fileResult = await readClaudeHistoryFile(filePath, options, seenMessages)
+    addDiagnostics(diagnostics, fileResult.diagnostics)
+    events.push(...fileResult.events)
   }
 
   return { events, diagnostics }
+}
+
+/**
+ * Parses exactly one already-discovered Claude transcript.  The incremental
+ * scanner uses this entry point so an unchanged file never needs to be opened
+ * merely to rebuild a source-wide result.
+ */
+export async function readClaudeHistoryFile(
+  filePath: string,
+  options: AdapterOptions,
+  seenMessages = new Set<string>(),
+): Promise<AdapterFileReadResult> {
+  const diagnostics = createDiagnostics()
+  const before = readFileSnapshot(filePath)
+  // Keep duplicate detection local until this file has passed its stability
+  // and compatibility checks. A half-written file must not suppress a stable
+  // message from another transcript in the same source.
+  const candidateSeenMessages = new Set(seenMessages)
+  // The Transform inside readJsonlObjects hashes every byte as it streams past
+  // on its way to the line splitter, so the file is read exactly once even
+  // though both the parsed rows and the digest are needed.
+  const hash = options.includeLocalReferences ? createHash('sha256') : undefined
+  const fileState: ClaudeFileState = {
+    hasRecognizedRecord: false,
+    hasInvalidUsageRecord: false,
+  }
+  const fileEvents: NormalizedUsage[] = []
+  for await (const row of readJsonlObjects(filePath, diagnostics, hash)) {
+    const event = normalizeClaudeRow(
+      row,
+      filePath,
+      options,
+      candidateSeenMessages,
+      diagnostics,
+      fileState,
+    )
+    if (event) fileEvents.push(event)
+  }
+
+  // A read that failed part way through leaves the hash covering only the
+  // bytes that arrived. Recording that as the file's hash would make the next
+  // scan report a change that never happened, so leave it out.
+  const after = readFileSnapshot(filePath)
+  if (diagnostics.ioErrors > 0) {
+    // Preserve the historic diagnostic shape: an interrupted read is also an
+    // unstable file. The separate state lets source-level code retain its last
+    // complete snapshot rather than committing a partial cache update.
+    diagnostics.unstableFiles += 1
+    return { events: [], diagnostics, state: 'io_error' }
+  }
+  if (!sameFileSnapshot(before, after)) {
+    diagnostics.unstableFiles += 1
+    return { events: [], diagnostics, state: 'unstable' }
+  }
+  // A recognized transcript can legitimately contain no billable assistant
+  // response: for example, a user-only or aborted session. Conversely, an
+  // assistant record that claims usage but no longer has the required token
+  // counters is unsafe to import, even if another row in this file parsed.
+  if (!fileState.hasRecognizedRecord || fileState.hasInvalidUsageRecord) {
+    diagnostics.incompatibleFiles += 1
+    return { events: [], diagnostics, state: 'incompatible' }
+  }
+  if (hash && after) {
+    const summary = fileContentSummary(hash, after)
+    for (const event of fileEvents) {
+      if (event.localReference) {
+        event.localReference = { ...event.localReference, ...summary }
+      }
+    }
+  }
+  for (const messageKey of candidateSeenMessages) seenMessages.add(messageKey)
+  return {
+    events: fileEvents,
+    diagnostics,
+    state: 'accepted',
+    snapshot: after ? { byteSize: after.byteSize, fileMtime: after.fileMtime } : undefined,
+  }
+}
+
+function addDiagnostics(
+  target: AdapterResult['diagnostics'],
+  source: AdapterResult['diagnostics'],
+): void {
+  for (const [key, value] of Object.entries(source) as Array<
+    [keyof AdapterResult['diagnostics'], number]
+  >) {
+    target[key] += value
+  }
 }
 
 function normalizeClaudeRow(
@@ -155,6 +200,7 @@ function normalizeClaudeRow(
 
   return {
     provider: 'claude',
+    eventKey: messageKey,
     month,
     observedAt: timestamp,
     sessionKey: privateKey('session', sessionId, options.identifierSalt),
@@ -186,8 +232,8 @@ function normalizeClaudeRow(
     outputTokens: nonNegativeInteger(usage.output_tokens),
     reasoningTokens: 0,
     captureMethod: 'local transcript compatibility adapter',
-    adapter: ADAPTER,
-    schemaVersion: SCHEMA_VERSION,
+    adapter: CLAUDE_HISTORY_ADAPTER,
+    schemaVersion: CLAUDE_HISTORY_SCHEMA_VERSION,
     confidence: 'B',
   }
 }

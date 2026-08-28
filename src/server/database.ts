@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { resolvedTimeZone } from '../adapters/localTime.js'
-import type { UsageProvider } from '../adapters/types.js'
+import type { NormalizedUsage, UsageProvider } from '../adapters/types.js'
+import type { ProviderChargePeriod } from '../core/chargePeriods.js'
 import {
   getAppDataDirectory,
   getDefaultHistoryPaths,
@@ -41,6 +42,7 @@ export type LocalConfiguration = {
     amountJpy: number
   }>
   contracts: { claude: ProviderContract; codex: ProviderContract }
+  chargePeriods?: ProviderChargePeriod[]
   unobservedRatio: number
 }
 
@@ -72,6 +74,28 @@ export type HistorySourceScanStatus = {
   filesSeen: number
   eventsWritten: number
   errorCode?: 'not_found' | 'not_readable' | 'scan_failed'
+}
+
+/**
+ * The durable portion of a normalized event. Local transcript references are
+ * intentionally excluded: cache rows must never become another store of raw
+ * paths, native IDs, or working directories.
+ */
+export type CachedNormalizedUsage = Omit<NormalizedUsage, 'localReference'>
+
+export type HistoryFileCacheEntry = {
+  fileKey: string
+  byteSize: number
+  fileMtime: string
+  adapter: string
+  schemaVersion: string
+  events: CachedNormalizedUsage[]
+  valid: boolean
+}
+
+export type HistoryFileCacheMutation = {
+  upsert: Array<Omit<HistoryFileCacheEntry, 'valid'>>
+  deleteFileKeys: string[]
 }
 
 const USAGE_EVENTS_SCHEMA = `
@@ -259,6 +283,25 @@ export function getDatabase(): DatabaseSync {
       UNIQUE(provider, root_key)
     ) STRICT;
 
+    -- File cache rows contain an opaque source-scoped file key and sanitized
+    -- normalized usage only. They must never contain a history root, a
+    -- transcript path, a native session ID, or a working directory.
+    CREATE TABLE IF NOT EXISTS history_file_cache (
+      source_id TEXT NOT NULL,
+      provider TEXT NOT NULL CHECK(provider IN ('claude', 'codex')),
+      file_key TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      file_mtime TEXT NOT NULL,
+      adapter TEXT NOT NULL,
+      schema_version TEXT NOT NULL,
+      events_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(source_id, provider, file_key)
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS history_file_cache_source_provider
+      ON history_file_cache(source_id, provider);
+
     CREATE TABLE IF NOT EXISTS provider_settings (
       provider TEXT PRIMARY KEY,
       monthly_fee_jpy INTEGER NOT NULL DEFAULT 0,
@@ -274,6 +317,17 @@ export function getDatabase(): DatabaseSync {
       month TEXT NOT NULL,
       amount_jpy INTEGER NOT NULL,
       PRIMARY KEY(provider, month)
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS provider_charge_periods (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL CHECK(provider IN ('claude', 'codex')),
+      plan_name TEXT NOT NULL,
+      service_started_on TEXT NOT NULL,
+      service_ended_on TEXT NOT NULL,
+      billed_on TEXT,
+      amount_jpy INTEGER NOT NULL CHECK(amount_jpy >= 0),
+      note TEXT
     ) STRICT;
 
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -551,6 +605,12 @@ export function getDatabase(): DatabaseSync {
         enabled = 1,
         updated_at = excluded.updated_at
     `)
+      const existingDefaultRoot = database.prepare(
+        'SELECT root_key AS rootKey FROM history_sources WHERE id = ?',
+      )
+      const deleteSourceFileCache = database.prepare(
+        'DELETE FROM history_file_cache WHERE source_id = ?',
+      )
       const now = new Date().toISOString()
       const defaultRows = [
         {
@@ -567,15 +627,15 @@ export function getDatabase(): DatabaseSync {
         },
       ]
       for (const source of defaultRows) {
-        upsertDefault.run(
-          source.id,
-          source.provider,
-          source.name,
-          source.root,
-          historyRootKey(source.root),
-          now,
-          now,
-        )
+        const rootKey = historyRootKey(source.root)
+        const previous = existingDefaultRoot.get(source.id) as { rootKey?: string } | undefined
+        // A default source keeps its stable ID when a user changes home
+        // directories. Its relative file identities would otherwise collide
+        // across roots, so discard only this source's file cache first.
+        if (previous?.rootKey && previous.rootKey !== rootKey) {
+          deleteSourceFileCache.run(source.id)
+        }
+        upsertDefault.run(source.id, source.provider, source.name, source.root, rootKey, now, now)
       }
       database
         .prepare(
@@ -769,6 +829,157 @@ export function getHistorySource(id: string): HistorySource | undefined {
   return row ? historySourceFromRow(row) : undefined
 }
 
+function isCachedUsage(value: unknown, provider: UsageProvider): value is CachedNormalizedUsage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  const requiredStrings = [
+    'month',
+    'observedAt',
+    'sessionKey',
+    'projectKey',
+    'model',
+    'captureMethod',
+    'adapter',
+    'schemaVersion',
+  ]
+  const requiredNumbers = [
+    'inputTokens',
+    'cacheReadTokens',
+    'cacheWriteTokens',
+    'outputTokens',
+    'reasoningTokens',
+  ]
+  if (candidate.provider !== provider || candidate.confidence === undefined) return false
+  if (!['A', 'B', 'C'].includes(String(candidate.confidence))) return false
+  if (candidate.projectLabel !== undefined && typeof candidate.projectLabel !== 'string')
+    return false
+  if (candidate.eventKey !== undefined && typeof candidate.eventKey !== 'string') return false
+  if (
+    candidate.activeSeconds !== undefined &&
+    (typeof candidate.activeSeconds !== 'number' ||
+      !Number.isSafeInteger(candidate.activeSeconds) ||
+      Number(candidate.activeSeconds) < 0)
+  ) {
+    return false
+  }
+  if (candidate.localReference !== undefined) return false
+  return (
+    requiredStrings.every((key) => typeof candidate[key] === 'string') &&
+    requiredNumbers.every(
+      (key) =>
+        typeof candidate[key] === 'number' &&
+        Number.isSafeInteger(candidate[key]) &&
+        Number(candidate[key]) >= 0,
+    )
+  )
+}
+
+function parseCachedEvents(
+  value: string,
+  provider: UsageProvider,
+): CachedNormalizedUsage[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed) || !parsed.every((event) => isCachedUsage(event, provider))) {
+      return undefined
+    }
+    // Rebuild every property explicitly. This is defense in depth for the
+    // cache's privacy boundary: even a manually altered SQLite row cannot
+    // reintroduce a localReference or arbitrary transcript-shaped payload.
+    return parsed.map((event) => {
+      const cached = event as CachedNormalizedUsage
+      return {
+        provider: cached.provider,
+        ...(cached.eventKey === undefined ? {} : { eventKey: cached.eventKey }),
+        month: cached.month,
+        observedAt: cached.observedAt,
+        sessionKey: cached.sessionKey,
+        projectKey: cached.projectKey,
+        ...(cached.projectLabel === undefined ? {} : { projectLabel: cached.projectLabel }),
+        model: cached.model,
+        inputTokens: cached.inputTokens,
+        cacheReadTokens: cached.cacheReadTokens,
+        cacheWriteTokens: cached.cacheWriteTokens,
+        outputTokens: cached.outputTokens,
+        reasoningTokens: cached.reasoningTokens,
+        ...(cached.activeSeconds === undefined ? {} : { activeSeconds: cached.activeSeconds }),
+        captureMethod: cached.captureMethod,
+        adapter: cached.adapter,
+        schemaVersion: cached.schemaVersion,
+        confidence: cached.confidence,
+      }
+    })
+  } catch {
+    return undefined
+  }
+}
+
+function serializedCachedEvents(events: CachedNormalizedUsage[]): string {
+  // Keep the explicit shape synchronized with parseCachedEvents. In
+  // particular, spreading an event here would make it too easy for a future
+  // localReference-like field to leak into this durable cache.
+  return JSON.stringify(
+    events.map((event) => ({
+      provider: event.provider,
+      ...(event.eventKey === undefined ? {} : { eventKey: event.eventKey }),
+      month: event.month,
+      observedAt: event.observedAt,
+      sessionKey: event.sessionKey,
+      projectKey: event.projectKey,
+      ...(event.projectLabel === undefined ? {} : { projectLabel: event.projectLabel }),
+      model: event.model,
+      inputTokens: event.inputTokens,
+      cacheReadTokens: event.cacheReadTokens,
+      cacheWriteTokens: event.cacheWriteTokens,
+      outputTokens: event.outputTokens,
+      reasoningTokens: event.reasoningTokens,
+      ...(event.activeSeconds === undefined ? {} : { activeSeconds: event.activeSeconds }),
+      captureMethod: event.captureMethod,
+      adapter: event.adapter,
+      schemaVersion: event.schemaVersion,
+      confidence: event.confidence,
+    })),
+  )
+}
+
+/**
+ * Returns all durable cache rows for one source, including a `valid: false`
+ * marker for a malformed local row so a later successful scan can repair it
+ * and a deletion scan can remove it.
+ */
+export function getHistoryFileCacheEntries(
+  sourceId: string,
+  provider: UsageProvider,
+): HistoryFileCacheEntry[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT file_key AS fileKey, byte_size AS byteSize, file_mtime AS fileMtime,
+              adapter, schema_version AS schemaVersion, events_json AS eventsJson
+       FROM history_file_cache
+       WHERE source_id = ? AND provider = ?`,
+    )
+    .all(sourceId, provider) as Array<{
+    fileKey: string
+    byteSize: number
+    fileMtime: string
+    adapter: string
+    schemaVersion: string
+    eventsJson: string
+  }>
+  return rows.map((row) => {
+    const events = parseCachedEvents(row.eventsJson, provider)
+    return {
+      fileKey: row.fileKey,
+      byteSize: row.byteSize,
+      fileMtime: row.fileMtime,
+      adapter: row.adapter,
+      schemaVersion: row.schemaVersion,
+      events: events ?? [],
+      valid: events !== undefined,
+    }
+  })
+}
+
 export function createHistorySource(input: HistorySourceInput): HistorySource {
   const db = getDatabase()
   const now = new Date().toISOString()
@@ -819,6 +1030,8 @@ export function updateHistorySource(id: string, input: HistorySourceInput): Hist
   }
 
   const root = normalizeHistoryRoot(input.root)
+  const rootChanged = historyRootKey(current.root) !== historyRootKey(root)
+  db.exec('BEGIN IMMEDIATE')
   try {
     db.prepare(
       `UPDATE history_sources
@@ -833,7 +1046,15 @@ export function updateHistorySource(id: string, input: HistorySourceInput): Hist
       new Date().toISOString(),
       id,
     )
+    if (rootChanged) {
+      // File identities are relative to the configured root. Reusing them
+      // after a root move could attribute a different machine's transcript to
+      // this source, so only this source's cache is invalidated.
+      db.prepare('DELETE FROM history_file_cache WHERE source_id = ?').run(id)
+    }
+    db.exec('COMMIT')
   } catch (error) {
+    db.exec('ROLLBACK')
     if (String(error).includes('UNIQUE constraint failed')) {
       throw new HistorySourceError(
         'duplicate',
@@ -859,6 +1080,7 @@ export function removeHistorySource(id: string): void {
   try {
     db.prepare('DELETE FROM usage_events WHERE source_id = ?').run(id)
     db.prepare('DELETE FROM session_references WHERE source_id = ?').run(id)
+    db.prepare('DELETE FROM history_file_cache WHERE source_id = ?').run(id)
     db.prepare('DELETE FROM scans WHERE source_id = ?').run(id)
     db.prepare('DELETE FROM history_sources WHERE id = ?').run(id)
     db.exec('COMMIT')
@@ -939,6 +1161,7 @@ export function replaceHistorySourceSessions(
   provider: UsageProvider,
   sessions: UsageSession[],
   diagnostics: { filesSeen: number; malformedLines: number },
+  fileCache?: HistoryFileCacheMutation,
 ): { changedReferences: ReferenceChange[] } {
   const db = getDatabase()
   const insertScan = db.prepare(`
@@ -958,15 +1181,32 @@ export function replaceHistorySourceSessions(
   // against the freshly computed one. An empty string is the default left by
   // the migration for rows recorded before hashing existed -- that is not a
   // change, just a gap in history, so it must not be reported as one.
-  const previousHashes = new Map(
+  type StoredSessionReference = {
+    nativeSessionId: string
+    sourcePath: string
+    workingDirectory: string
+    contentHash: string
+    byteSize: number
+    fileMtime: string
+  }
+  const previousReferences = new Map(
     (
       db
         .prepare(
-          `SELECT session_key AS sessionKey, content_hash AS contentHash
-                  FROM session_references WHERE source_id = ? AND provider = ?`,
+          `SELECT session_key AS sessionKey, native_session_id AS nativeSessionId,
+                  source_path AS sourcePath, working_directory AS workingDirectory,
+                  content_hash AS contentHash, byte_size AS byteSize,
+                  file_mtime AS fileMtime
+           FROM session_references WHERE source_id = ? AND provider = ?`,
         )
-        .all(sourceId, provider) as Array<{ sessionKey: string; contentHash: string }>
-    ).map((row) => [row.sessionKey, row.contentHash]),
+        .all(sourceId, provider) as Array<{ sessionKey: string } & StoredSessionReference>
+    ).map((row) => [row.sessionKey, row]),
+  )
+  const previousHashes = new Map(
+    [...previousReferences.entries()].map(([sessionKey, reference]) => [
+      sessionKey,
+      reference.contentHash,
+    ]),
   )
   const changedReferences: ReferenceChange[] = []
 
@@ -1003,6 +1243,23 @@ export function replaceHistorySourceSessions(
       file_mtime = excluded.file_mtime,
       captured_at = excluded.captured_at
   `)
+  const deleteCachedFile = db.prepare(
+    `DELETE FROM history_file_cache
+     WHERE source_id = ? AND provider = ? AND file_key = ?`,
+  )
+  const upsertCachedFile = db.prepare(`
+    INSERT INTO history_file_cache(
+      source_id, provider, file_key, byte_size, file_mtime, adapter,
+      schema_version, events_json, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_id, provider, file_key) DO UPDATE SET
+      byte_size = excluded.byte_size,
+      file_mtime = excluded.file_mtime,
+      adapter = excluded.adapter,
+      schema_version = excluded.schema_version,
+      events_json = excluded.events_json,
+      updated_at = excluded.updated_at
+  `)
   const capturedAt = new Date().toISOString()
 
   try {
@@ -1034,17 +1291,21 @@ export function replaceHistorySourceSessions(
         item.schemaVersion,
         item.confidence,
       )
-      if (item.localReference) {
+      // A reused cache event deliberately has no raw local reference. Retain
+      // the already-persisted local-only reference for the same surviving
+      // session, rather than making an unchanged scan erase preview/resume.
+      const localReference = item.localReference ?? previousReferences.get(item.sessionKey)
+      if (localReference) {
         insertReference.run(
           sourceId,
           item.provider,
           item.sessionKey,
-          item.localReference.nativeSessionId,
-          item.localReference.sourcePath,
-          item.localReference.workingDirectory,
-          item.localReference.contentHash,
-          item.localReference.byteSize,
-          item.localReference.fileMtime,
+          localReference.nativeSessionId,
+          localReference.sourcePath,
+          localReference.workingDirectory,
+          localReference.contentHash,
+          localReference.byteSize,
+          localReference.fileMtime,
           capturedAt,
         )
         const previousHash = previousHashes.get(item.sessionKey)
@@ -1056,16 +1317,35 @@ export function replaceHistorySourceSessions(
         if (
           previousHash !== undefined &&
           previousHash !== '' &&
-          item.localReference.contentHash !== '' &&
-          previousHash !== item.localReference.contentHash
+          localReference.contentHash !== '' &&
+          previousHash !== localReference.contentHash
         ) {
           changedReferences.push({
             provider: item.provider,
             sessionKey: item.sessionKey,
             previousHash,
-            currentHash: item.localReference.contentHash,
+            currentHash: localReference.contentHash,
           })
         }
+      }
+    }
+    if (fileCache) {
+      for (const fileKey of new Set(fileCache.deleteFileKeys)) {
+        deleteCachedFile.run(sourceId, provider, fileKey)
+      }
+      const updatedAt = new Date().toISOString()
+      for (const cached of fileCache.upsert) {
+        upsertCachedFile.run(
+          sourceId,
+          provider,
+          cached.fileKey,
+          cached.byteSize,
+          cached.fileMtime,
+          cached.adapter,
+          cached.schemaVersion,
+          serializedCachedEvents(cached.events),
+          updatedAt,
+        )
       }
     }
     db.prepare(
@@ -1295,6 +1575,16 @@ export function getConfiguration(): LocalConfiguration {
   `,
     )
     .all() as LocalConfiguration['monthlyCharges']
+  const chargePeriods = db
+    .prepare(
+      `SELECT id, provider, plan_name AS planName,
+              service_started_on AS serviceStartedOn,
+              service_ended_on AS serviceEndedOn,
+              billed_on AS billedOn, amount_jpy AS amountJpy, note
+       FROM provider_charge_periods
+       ORDER BY service_started_on, provider, id`,
+    )
+    .all() as Array<ProviderChargePeriod & { billedOn: string | null; note: string | null }>
 
   return {
     charges: {
@@ -1303,6 +1593,16 @@ export function getConfiguration(): LocalConfiguration {
     },
     monthlyCharges,
     contracts: { claude: contractFor('claude'), codex: contractFor('codex') },
+    chargePeriods: chargePeriods.map((period) => ({
+      id: period.id,
+      provider: period.provider,
+      planName: period.planName,
+      serviceStartedOn: period.serviceStartedOn,
+      serviceEndedOn: period.serviceEndedOn,
+      amountJpy: period.amountJpy,
+      ...(period.billedOn ? { billedOn: period.billedOn } : {}),
+      ...(period.note ? { note: period.note } : {}),
+    })),
     unobservedRatio: Number(ratioRow?.value ?? 0.1),
   }
 }
@@ -1317,6 +1617,12 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
   const insertMonthlyCharge = db.prepare(`
     INSERT INTO provider_month_charges(provider, month, amount_jpy)
     VALUES (?, ?, ?)
+  `)
+  const insertChargePeriod = db.prepare(`
+    INSERT INTO provider_charge_periods(
+      id, provider, plan_name, service_started_on, service_ended_on,
+      billed_on, amount_jpy, note
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   db.exec('BEGIN IMMEDIATE')
@@ -1339,6 +1645,21 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
     db.exec('DELETE FROM provider_month_charges')
     for (const charge of configuration.monthlyCharges) {
       insertMonthlyCharge.run(charge.provider, charge.month, charge.amountJpy)
+    }
+    if (configuration.chargePeriods !== undefined) {
+      db.exec('DELETE FROM provider_charge_periods')
+      for (const period of configuration.chargePeriods) {
+        insertChargePeriod.run(
+          period.id,
+          period.provider,
+          period.planName,
+          period.serviceStartedOn,
+          period.serviceEndedOn,
+          period.billedOn ?? null,
+          period.amountJpy,
+          period.note ?? null,
+        )
+      }
     }
     db.exec('COMMIT')
   } catch (error) {

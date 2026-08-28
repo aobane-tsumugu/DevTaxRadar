@@ -185,6 +185,25 @@ describe('history source API', () => {
       expect.objectContaining({ sourceId: created.sourceId, status: 'complete' }),
     )
 
+    const fullScanResponse = await fetch(`http://127.0.0.1:${port}/api/scan`, {
+      method: 'POST',
+      headers: mutationHeaders,
+      body: JSON.stringify({ providers: ['claude'], mode: 'full' }),
+    })
+    expect(fullScanResponse.status).toBe(200)
+    const fullScan = (await fullScanResponse.json()) as {
+      sources: Array<{
+        sourceId: string
+        diagnostics?: { filesRead?: number; filesReused?: number }
+      }>
+    }
+    expect(fullScan.sources).toContainEqual(
+      expect.objectContaining({
+        sourceId: created.sourceId,
+        diagnostics: expect.objectContaining({ filesRead: 1, filesReused: 0 }),
+      }),
+    )
+
     const sourcesPayload = (await fetch(`http://127.0.0.1:${port}/api/sources`).then((response) =>
       response.json(),
     )) as { sources: Array<{ id: string; root: string }> }
