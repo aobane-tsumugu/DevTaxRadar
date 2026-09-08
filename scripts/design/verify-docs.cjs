@@ -16,7 +16,7 @@ for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Function
 const api = html.slice(html.indexOf('<section id="api"'), html.indexOf('<section id="security"'));
 const routes = [...(read('src/server/index.ts') + '\n' + read('src/server/balanceRoutes.ts')).matchAll(/app\.(get|post|put|patch|delete)\('([^']+)'/g)];
 for (const [, method, route] of routes) assert.ok(api.includes(method.toUpperCase() + ' ' + route), route);
-const documents = ['PRODUCT_SPEC.md', 'TECHNICAL_DESIGN.md', 'README.md', 'docs/design/purpose-led-redesign.md', 'docs/design/requirements-matrix.md'];
+const documents = ['PRODUCT_SPEC.md', 'TECHNICAL_DESIGN.md', 'README.md', 'docs/design/README.md', 'docs/design/implementation-plan.md', 'docs/design/purpose-led-redesign.md', 'docs/design/requirements-matrix.md'];
 for (const name of documents) {
   const text = read(name);
   assert.ok(!text.includes('\uFFFD') && !/[\u{1F300}-\u{1FAFF}]/u.test(text), name + ': encoding/emoji');
@@ -38,10 +38,5 @@ for (const line of matrix.split('\n').filter(line => line.startsWith('| REQ-')))
   assert.ok(references.length, line);
   for (const id of references) assert.ok(acceptance.has(id), id);
 }
-const allocations = [[3600, 1800, 1800, 800], [6000, 0, 3000, 3000], [3000, 0, 5000, 2000], [3000, 0, 0, 0]];
-const sum = a => a.reduce((x, y) => x + y, 0);
-assert.deepEqual(allocations.map(sum), [8000, 12000, 10000, 3000]);
-assert.deepEqual([0, 1, 2, 3].map(i => sum(allocations.map(r => r[i]))), [15600, 1800, 9800, 5800]);
-for (const [opening, incoming, outgoing, closing] of [[20000, 30000, 40000, 10000], [0, 40000, 4000, 36000], [10000, 12000, 15000, 7000], [36000, 15000, 6000, 45000]]) assert.equal(opening + incoming - outgoing, closing);
-assert.equal(46000 + 12000 - 6000, 7000 + 45000);
+// Financial invariants belong to tests of the actual calculation, not copied constants here.
 console.log(JSON.stringify({requirements: requirements.length, acceptanceScenarios: acceptance.size, sections: (html.match(/<section id=/g) ?? []).length, diagrams: (html.match(/<figure id=/g) ?? []).length, apiRoutes: routes.length, encoding: 'UTF-8', scope: 'document checks, not product acceptance'}));

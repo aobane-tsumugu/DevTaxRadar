@@ -1,6 +1,8 @@
 # Multiple filesystem sources: test plan
 
-Status: **Phase 2 implemented checks and remaining platform evidence**
+Status: **Baseline 7c201f0; existing checks and pending acceptance additions (2026-09-09)**
+
+The added acceptance cases below are not recorded as executed. Implementation order is in [the work plan](implementation-plan.md); historical results remain in [the evidence](../evidence/multi-device-integration/INDEX.md).
 
 ## 1. Non-negotiable gates
 
@@ -19,7 +21,7 @@ npm run build
 
 - Built-in local keys remain byte-for-byte compatible.
 - PC1, PC2, and DGX fixtures containing identical native IDs become three distinct source/session/project identities.
-- All three observations contribute to one provider/month allocation denominator.
+- Observations share an allocation denominator only when they belong to the same actual contract and applicable period. Distinct-contract attribution and copied-history detection are pending W03 work; source identity alone proves neither.
 - Same-name folders stay separate until mapped.
 - Source aliases appear in assignment summaries; roots do not.
 - Repeating a complete scan replaces only that source and does not double count.
@@ -27,9 +29,10 @@ npm run build
 ## 3. Availability and consistency
 
 - Missing configured root records `unavailable` and keeps the last successful observations.
-- Unknown-only files, invalid usage claims, permission, traversal, or read failures record a safe failure and keep prior observations. Malformed lines are counted and skipped only when the same file contains another recognized provider envelope.
-- A file whose size or mtime changes during read is unstable and does not replace the source snapshot.
-- A readable empty root is a complete empty snapshot and clears only that source.
+- Permission, traversal, or read I/O failures protect the source snapshot.
+- Format-incompatible and unstable files are deferred individually: reuse a valid prior value where available and advance other stable files. A first-seen deferred file remains unknown. Do not equate one deferred file with a source-wide failed scan.
+- Pending W02 cases retain prior-value usage, missing coverage, adapter version, and timezone alongside numbers through restart, adoption, and export.
+- A readable empty root clears only current observations for that source, never adopted records. Pending W02 case: acquire numbers, leave tax decisions/annual adoption unfinished, lose originals, and restart automatic scanning; preserved numerical records and conditions must remain explainable.
 - A failed DGX source does not prevent PC1/PC2 sources from completing.
 - Startup/manual scans and source mutations serialize rather than interleave replacement transactions.
 
@@ -80,3 +83,10 @@ Configured sources must not create `session_references` rows or expose local res
 - Narrow settings modal, path wrapping, focus, labels, status announcement, and removal confirmation.
 
 Real PC1/DGX validation may use synthetic directories only and requires separate authorization to create or change actual shares. Repository completion does not claim that real-device smoke occurred.
+
+## 8. Added cross-cutting acceptance (not yet run)
+
+- AC-TIME: scan in UTC, restart in Japan time, then mix unchanged and changed files. Reused and reread data must share the declared calculation timezone; adopted records must not move months.
+- AC-ALLOC: same provider/period, contract A 8,000 yen solely for product A and B 2,000 yen solely for B; expect 8,000/2,000, not 5,000/5,000. Unknown attribution remains unknown.
+- AC-RESTORE: restore on a separate machine while the former shared roots are inaccessible; fixed records remain readable, and reconnection preserves identity.
+- Preserve historical platform results as historical; neither this plan nor synthetic tests establishes a new Windows/DGX smoke result.

@@ -89,15 +89,13 @@ A scan is serialized inside the running DevTax process. For each enabled source:
 5. Replace only rows owned by `(sourceId, provider)` in one transaction.
 6. Record safe counts and status.
 
-The replacement step runs only after a complete readable scan. These outcomes retain the previous imported rows:
+Current behavior at 7c201f0 (2026-09-09): source-wide replacement is withheld on missing/offline roots, unreadable shares, probe timeouts, traversal/read I/O errors, or an unexpected failure before commit. Previously imported rows remain.
 
-- root missing or offline;
-- share not readable or probe timeout;
-- directory traversal/read error;
-- a file changed while it was being read; or
-- unexpected adapter/database failure before commit.
+Files that change during reading or do not match the adapter format are deferred individually by the incremental scan. Reusable prior values for those files remain, while other stable files can advance. A first-seen deferred file has no prior value; it must not be described as fully captured. Do not restore the former all-source stop for a single unstable file.
 
-A readable empty directory is a valid complete snapshot and removes that source's prior observations. This differs from an unavailable directory.
+Persisting that distinction, adapter/timezone provenance, and numerical records before annual adoption remains planned in [W02](implementation-plan.md); it is not established by a successful scan response.
+
+A readable empty directory is a valid complete snapshot and removes that source's current observations. This differs from an unavailable directory. Adopted records remain separate; preservation of acquired numbers before annual adoption is an explicit W02 acceptance case.
 
 ## 7. Provenance and mapping
 
@@ -164,3 +162,7 @@ Manual bundles, a LAN upload API, pairing, public/private device keys, and peer 
 - Duplicate-root detection is lexical after path normalization. Filesystem aliases such as symlinks, junctions, mapped drives, or different UNC spellings can still identify the same directory; users should configure only one spelling per provider root.
 - SQLite/WAL provider histories would require a provider-specific consistency design; current supported providers use JSONL.
 - A configured source should grant read-only access to the narrowest provider-history directory, not an entire home directory or drive.
+
+## 13. Review follow-through (2026-09-09)
+
+[The implementation plan](implementation-plan.md) preserves direct-folder pull and source namespaces. W03 distinguishes provider, actual subscription, and history source: multiple devices do not automatically imply a common contract, and distinct source IDs do not by themselves prevent counting a copied history twice. W02 covers mixed-timezone cache reuse and capture provenance; W07 covers separate-device restoration without original roots. These are pending acceptance cases, not new real-device test results.
