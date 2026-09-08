@@ -31,9 +31,26 @@ describe('provider contract periods', () => {
       initial: LocalConfiguration
       saved: LocalConfiguration
       cleared: LocalConfiguration
+      unknown: LocalConfiguration
+      confirmedNone: LocalConfiguration
+      unknownDefault: LocalConfiguration
+      zeroDefault: LocalConfiguration
     }
 
     expect(result.initial.contracts).toEqual({ claude: {}, codex: {} })
+    expect(result.initial.charges).toEqual({ claude: null, codex: null })
+    expect(result.initial.unknownChargeReasons).toEqual({
+      claude: '既定月額が未入力です。',
+      codex: '既定月額が未入力です。',
+    })
+    expect(result.initial.unobservedRatio).toBeNull()
+    expect(result.saved.unobservedRatio).toBe(0.1)
+    expect(result.unknown.unobservedRatio).toBeNull()
+    expect(result.confirmedNone.unobservedRatio).toBe(0)
+    expect(result.unknownDefault.charges).toEqual({ claude: null, codex: 0 })
+    expect(result.unknownDefault.unknownChargeReasons).toEqual({ claude: '請求書を確認中' })
+    expect(result.zeroDefault.charges).toEqual({ claude: 0, codex: 0 })
+    expect(result.zeroDefault.unknownChargeReasons).toBeUndefined()
     expect(result.saved.contracts).toEqual({
       claude: { startedOn: '2026-07-18' },
       codex: { startedOn: '2026-01-05', endedOn: '2026-05-31' },

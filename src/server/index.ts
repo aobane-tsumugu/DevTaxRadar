@@ -1,8 +1,11 @@
 import { existsSync } from 'node:fs'
+import { datasetIdentity } from './datasetIdentity.js'
+import { previewRestoreSources, RestoreSourceConflict } from './restoreSources.js'
+import { registerBalanceRoutes } from './balanceRoutes.js'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import fastifyStatic from '@fastify/static'
-import { validIsoCalendarDate } from '../core/chargePeriods.js'
+import { registerStaticFiles } from './staticFiles.js'
+import { configurationSchema } from './configurationSchema.js'
 import Fastify, { type FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { localDateFromTimestamp } from '../adapters/localTime.js'
@@ -14,7 +17,29 @@ import {
   saveConfiguration,
 } from './database.js'
 import { buildDashboard } from './dashboard.js'
-import { getClaudeSettingsPath, getDefaultHistoryPaths, normalizeHistoryRoot } from './paths.js'
+import { diagnosePlanning } from '../core/diagnosis.js'
+import {
+  readWorkspace,
+  saveWorkspace,
+  workspaceSaveSchema,
+  WorkspaceConflict,
+  WorkspaceRequestReuse,
+} from './workspaceRepository.js'
+import type { WorkspaceDraft } from '../planning/workspace.js'
+import {
+  previewWorkspace,
+  workspacePreviewSchema,
+  verifyWorkspacePreview,
+  WorkspacePreviewChanged,
+  WorkspacePreviewRangeError,
+} from './workspaceImpact.js'
+import {
+  getClaudeSettingsPath,
+  getAppDataDirectory,
+  getDefaultHistoryPaths,
+  normalizeHistoryRoot,
+  restoreRequiresReconnect,
+} from './paths.js'
 import {
   forecastNextLoss,
   readCleanupPeriod,
@@ -25,6 +50,7 @@ import { readScanProgress } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
 import {
   automaticSourceScanEnabled,
+  reconnectRestoredSources,
   createConfiguredHistorySource,
   listHistorySourceViews,
   removeConfiguredHistorySource,
@@ -43,6 +69,7 @@ const app = Fastify({
 
 app.addHook('preHandler', createLoopbackHostGuard(port))
 app.addHook('preHandler', protectMutation)
+registerBalanceRoutes(app, getDatabase)
 
 app.get('/api/health', async () => ({
   ok: true,
@@ -64,6 +91,8 @@ app.get('/api/runtime', async () => {
 
   return {
     csrfToken,
+    datasetId: datasetIdentity(getDatabase()),
+    restoreRequiresReconnect: restoreRequiresReconnect(),
     providers: {
       claude: {
         detected: historySources.some(
@@ -115,6 +144,16 @@ app.get('/api/runtime', async () => {
 
 app.get('/api/dashboard', async () => {
   return buildDashboard()
+})
+
+app.get('/api/projections', async (request, reply) => {
+  const query = z
+    .object({ year: z.coerce.number().int().min(1900).max(9999).optional() })
+    .strict()
+    .safeParse(request.query)
+  if (!query.success)
+    return reply.code(400).send({ error: 'invalid_request', message: '対象年を確認してください。' })
+  return buildDashboard(query.data.year).costProjection
 })
 
 app.get('/api/folders', async () => {
@@ -302,14 +341,73 @@ app.delete('/api/sources/:id', async (request, reply) => {
   }
 })
 
+function workspaceView(draft: WorkspaceDraft) {
+  return { ...draft, dashboard: buildDashboard(), diagnosis: diagnosePlanning(draft.planning) }
+}
+
+app.get('/api/workspace', async () => readWorkspace(workspaceView))
+
+app.post('/api/workspace/preview', async (request, reply) => {
+  const parsed = workspacePreviewSchema.safeParse(request.body)
+  if (!parsed.success)
+    return reply.code(400).send({
+      error: 'invalid_request',
+      message: parsed.error.issues
+        .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+        .join(' / '),
+    })
+  try {
+    return previewWorkspace(parsed.data)
+  } catch (error) {
+    if (error instanceof WorkspaceConflict)
+      return reply.code(409).send({
+        error: 'workspace_conflict',
+        message: error.message,
+        currentRevision: error.currentRevision,
+      })
+    if (error instanceof WorkspacePreviewRangeError)
+      return reply.code(400).send({ error: 'preview_range', message: error.message })
+    throw error
+  }
+})
+
+app.put('/api/workspace', async (request, reply) => {
+  const parsed = workspaceSaveSchema.safeParse(request.body)
+  if (!parsed.success) {
+    return reply.code(400).send({
+      error: 'invalid_request',
+      message: parsed.error.issues
+        .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+        .join(' / '),
+    })
+  }
+  try {
+    return saveWorkspace(parsed.data, workspaceView, getDatabase(), verifyWorkspacePreview)
+  } catch (error) {
+    if (error instanceof WorkspacePreviewChanged)
+      return reply.code(409).send({ error: 'preview_changed', message: error.message })
+    if (error instanceof WorkspacePreviewRangeError)
+      return reply.code(400).send({ error: 'preview_range', message: error.message })
+    if (error instanceof WorkspaceConflict)
+      return reply.code(409).send({
+        error: 'workspace_conflict',
+        message: error.message,
+        currentRevision: error.currentRevision,
+      })
+    if (error instanceof WorkspaceRequestReuse)
+      return reply.code(400).send({ error: 'request_reuse', message: error.message })
+    throw error
+  }
+})
+
 app.get('/api/planning', async () => {
   const { getPlanningSnapshot } = await import('./planningRepository.js')
   return getPlanningSnapshot()
 })
 
 app.put('/api/planning', async (request, reply) => {
-  const { planningSnapshotSchema, savePlanningSnapshot } = await import('./planningRepository.js')
-  const parsed = planningSnapshotSchema.safeParse(request.body)
+  const { planningSaveSchema, savePlanningSnapshot } = await import('./planningRepository.js')
+  const parsed = planningSaveSchema.safeParse(request.body)
   if (!parsed.success) {
     await reply.code(400).send({
       error: 'invalid_request',
@@ -352,11 +450,7 @@ app.get('/api/diagnosis', async () => {
 })
 
 app.get('/api/ledger', async () => {
-  const [{ buildPlanningLedger }, { getPlanningSnapshot }] = await Promise.all([
-    import('../core/index.js'),
-    import('./planningRepository.js'),
-  ])
-  return buildPlanningLedger(getPlanningSnapshot())
+  return buildDashboard().costProjection
 })
 
 app.get('/api/export', async (request, reply) => {
@@ -365,98 +459,32 @@ app.get('/api/export', async (request, reply) => {
     await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
     return
   }
-  const [{ buildPlanningLedger, diagnosePlanning }, { getPlanningSnapshot, planningMarkdown }] =
-    await Promise.all([import('../core/index.js'), import('./planningRepository.js')])
-  const snapshot = getPlanningSnapshot()
-  await reply
-    .type('text/markdown; charset=utf-8')
-    .send(planningMarkdown(snapshot, diagnosePlanning(snapshot), buildPlanningLedger(snapshot)))
+  const [
+    { diagnosePlanning },
+    { getPlanningSnapshot, planningMarkdown },
+    { costProjectionMarkdown },
+  ] = await Promise.all([
+    import('../core/index.js'),
+    import('./planningRepository.js'),
+    import('../core/costExport.js'),
+  ])
+  const db = getDatabase()
+  db.exec('SAVEPOINT devtax_export_read')
+  let markdown: string
+  try {
+    const snapshot = getPlanningSnapshot()
+    markdown =
+      planningMarkdown(snapshot, diagnosePlanning(snapshot)) +
+      '\n' +
+      costProjectionMarkdown(buildDashboard().costProjection!)
+    db.exec('RELEASE devtax_export_read')
+  } catch (error) {
+    db.exec('ROLLBACK TO devtax_export_read')
+    db.exec('RELEASE devtax_export_read')
+    throw error
+  }
+  await reply.type('text/markdown; charset=utf-8').send(markdown)
 })
-
-const contractDateSchema = z.string().refine(validIsoCalendarDate, {
-  message: '実在する日付を YYYY-MM-DD で入力してください。',
-})
-
-const providerContractSchema = z
-  .object({
-    startedOn: contractDateSchema.optional(),
-    endedOn: contractDateSchema.optional(),
-  })
-  .strict()
-  .refine(
-    (contract) =>
-      !contract.startedOn || !contract.endedOn || contract.startedOn <= contract.endedOn,
-    { message: '契約終了日は開始日以降にしてください。' },
-  )
-
-const providerChargePeriodSchema = z
-  .object({
-    id: z.string().trim().min(1).max(120),
-    provider: z.enum(['claude', 'codex']),
-    planName: z.string().trim().max(160),
-    serviceStartedOn: contractDateSchema,
-    serviceEndedOn: contractDateSchema,
-    billedOn: contractDateSchema.optional(),
-    amountJpy: z.number().int().nonnegative(),
-    note: z.string().trim().max(1_000).optional(),
-  })
-  .strict()
-  .refine((period) => period.serviceStartedOn <= period.serviceEndedOn, {
-    message: '利用終了日は開始日以降にしてください。',
-  })
-
-const configurationSchema = z
-  .object({
-    charges: z.object({
-      claude: z.number().int().nonnegative(),
-      codex: z.number().int().nonnegative(),
-    }),
-    monthlyCharges: z
-      .array(
-        z.object({
-          provider: z.enum(['claude', 'codex']),
-          month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-          amountJpy: z.number().int().nonnegative(),
-        }),
-      )
-      .max(240)
-      .default([]),
-    contracts: z
-      .object({
-        claude: providerContractSchema,
-        codex: providerContractSchema,
-      })
-      .strict()
-      .default({ claude: {}, codex: {} }),
-    chargePeriods: z.array(providerChargePeriodSchema).max(1_000).optional(),
-    unobservedRatio: z.number().min(0).max(0.95),
-  })
-  .strict()
-  .superRefine((configuration, context) => {
-    const chargeKeys = new Set<string>()
-    configuration.monthlyCharges.forEach((charge, index) => {
-      const key = `${charge.provider}:${charge.month}`
-      if (chargeKeys.has(key)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['monthlyCharges', index],
-          message: 'Providerと月の組合せが重複しています。',
-        })
-      }
-      chargeKeys.add(key)
-    })
-    const periodIds = new Set<string>()
-    configuration.chargePeriods?.forEach((period, index) => {
-      if (periodIds.has(period.id)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['chargePeriods', index, 'id'],
-          message: '請求履歴のIDが重複しています。',
-        })
-      }
-      periodIds.add(period.id)
-    })
-  })
 
 app.post('/api/config', async (request, reply) => {
   const parsed = configurationSchema.safeParse(request.body)
@@ -505,6 +533,31 @@ app.post('/api/retention', async (request, reply) => {
   }
 })
 
+app.get('/api/restore/sources', async (_request, reply) => {
+  try {
+    return previewRestoreSources(getDatabase(), getAppDataDirectory())
+  } catch (error) {
+    if (error instanceof RestoreSourceConflict)
+      return reply.code(409).send({ error: 'restore_conflict', message: error.message })
+    throw error
+  }
+})
+app.post('/api/restore/sources', { bodyLimit: 2 * 1024 * 1024 }, async (request, reply) => {
+  try {
+    return await reconnectRestoredSources(request.body)
+  } catch (error) {
+    return reply.code(error instanceof RestoreSourceConflict ? 409 : 400).send({
+      error: error instanceof RestoreSourceConflict ? 'restore_conflict' : 'invalid_reconnect',
+      message:
+        error instanceof z.ZodError
+          ? '再接続の入力形式を確認してください。'
+          : error instanceof Error
+            ? error.message
+            : '再接続できませんでした。',
+    })
+  }
+})
+
 const scanRequestSchema = z.object({
   providers: z
     .array(z.enum(['claude', 'codex']))
@@ -519,6 +572,12 @@ app.get('/api/scan/progress', async () => ({
 }))
 
 app.post('/api/scan', async (request, reply) => {
+  if (restoreRequiresReconnect())
+    return reply.code(409).send({
+      error: 'restore_requires_reconnect',
+      message:
+        '復元した資料の読み取り元を再接続するまで走査できません。保存済み資料は確認できます。',
+    })
   const parsed = scanRequestSchema.safeParse(request.body ?? {})
   if (!parsed.success) {
     await reply.code(400).send({
@@ -535,17 +594,7 @@ const moduleDirectory = fileURLToPath(new URL('.', import.meta.url))
 const distDirectory = join(moduleDirectory, '..', '..', 'dist')
 
 if (existsSync(distDirectory)) {
-  await app.register(fastifyStatic, {
-    root: distDirectory,
-    wildcard: false,
-  })
-  app.setNotFoundHandler(async (request, reply) => {
-    if (request.url.startsWith('/api/')) {
-      await reply.code(404).send({ error: 'not_found' })
-      return
-    }
-    await reply.sendFile('index.html')
-  })
+  await registerStaticFiles(app, distDirectory)
 }
 
 try {

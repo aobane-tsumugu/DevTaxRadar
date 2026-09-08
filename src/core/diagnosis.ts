@@ -5,6 +5,7 @@ import type {
   PlanningSnapshot,
   TaxUnitRecord,
 } from '../planning/types.js'
+import { assessCostPresence, costPresenceRecordsSchema } from '../planning/costPresence.js'
 
 function unique(values: string[]): string[] {
   return [...new Set(values)]
@@ -57,6 +58,28 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
   const immediateActions: ActionItem[] = []
   const eventTriggeredActions: ActionItem[] = []
   const missingFacts: string[] = []
+  const declarationInput = costPresenceRecordsSchema.safeParse(snapshot.costPresence ?? [])
+  const presence =
+    declarationInput.success &&
+    Number.isInteger(snapshot.profile.taxYear) &&
+    snapshot.profile.taxYear >= 2000 &&
+    snapshot.profile.taxYear <= 2100
+      ? assessCostPresence(snapshot, declarationInput.data)
+      : []
+  if (!declarationInput.success) missingFacts.push('年度別の費用項目確認の理由・日時・重複')
+  for (const row of presence) {
+    if (row.status === 'deferred' || row.status === 'conflict') {
+      const title = `${row.taxYear}年の${row.label}: ${row.status === 'conflict' ? '該当なしと登録内容の不一致を確認する' : '保留した確認を続ける'}`
+      missingFacts.push(title)
+      addAction(immediateActions, {
+        id: `cost-presence-${row.category}`,
+        priority: row.status === 'conflict' ? 'high' : 'medium',
+        title,
+        reason: `${row.explanation} 理由: ${row.declaration!.reason}`,
+        trigger: 'now',
+      })
+    }
+  }
 
   if (snapshot.taxUnits.length === 0) {
     addAction(immediateActions, {
@@ -223,7 +246,10 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
     missingFacts.push('月次帳簿')
   }
 
-  if (snapshot.equipment.length === 0) {
+  if (
+    (presence.find((row) => row.category === 'equipment')?.status ??
+      (snapshot.equipment.length ? 'has-records' : 'unreviewed')) === 'unreviewed'
+  ) {
     addAction(immediateActions, {
       id: 'review-equipment',
       priority: 'medium',
@@ -242,7 +268,10 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
     }
   }
 
-  if (snapshot.homeCosts.length === 0) {
+  if (
+    (presence.find((row) => row.category === 'home')?.status ??
+      (snapshot.homeCosts.length ? 'has-records' : 'unreviewed')) === 'unreviewed'
+  ) {
     addAction(immediateActions, {
       id: 'review-home-costs',
       priority: 'medium',
@@ -260,6 +289,7 @@ export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
   }
 
   if (snapshot.evidence.length === 0) {
+    // Evidence remains required independently of annual presence declarations.
     addAction(immediateActions, {
       id: 'register-evidence',
       priority: 'high',

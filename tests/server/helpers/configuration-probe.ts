@@ -21,4 +21,21 @@ const saved = getConfiguration()
 saveConfiguration({ ...saved, contracts: { claude: {}, codex: {} } })
 const cleared = getConfiguration()
 
-process.stdout.write(JSON.stringify({ initial, saved, cleared }))
+saveConfiguration({ ...cleared, unobservedRatio: null })
+const unknown = getConfiguration()
+saveConfiguration({ ...unknown, unobservedRatio: 0 })
+const confirmedNone = getConfiguration()
+
+saveConfiguration({
+  ...confirmedNone,
+  charges: { claude: null, codex: 0 },
+  unknownChargeReasons: { claude: '請求書を確認中' },
+})
+const unknownDefault = getConfiguration()
+const { unknownChargeReasons: _reasons, ...knownConfiguration } = unknownDefault
+saveConfiguration({ ...knownConfiguration, charges: { claude: 0, codex: 0 } })
+const zeroDefault = getConfiguration()
+
+process.stdout.write(
+  JSON.stringify({ initial, saved, cleared, unknown, confirmedNone, unknownDefault, zeroDefault }),
+)

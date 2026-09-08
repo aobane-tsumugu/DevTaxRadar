@@ -1,4 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import AllocationTargetsEditor from './AllocationTargetsEditor'
+import { monthlyChargeInputIssue } from '../monthlyChargeValidation'
+import MonthlyChargesEditor from './MonthlyChargesEditor'
+import DuplicateChargesPanel from './DuplicateChargesPanel'
+import DecisionEditor from './DecisionEditor'
+import ConsultationContextPanel from './ConsultationContextPanel'
+import type { ConsultationNavigation } from '../consultationNavigation'
+import CostPresenceEditor from './CostPresenceEditor'
+import EquipmentMethodsEditor from './EquipmentMethodsEditor'
+import DateInput from './DateInput'
+import PlanningDateRepairPanel from './PlanningDateRepairPanel'
+import { costPresenceRecordsSchema } from '../../planning/costPresence'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   DashboardData,
   HistorySource,
@@ -20,9 +32,10 @@ import type {
   PlanningSnapshot,
   TaxUnitRecord,
 } from '../../planning/types'
-import { chargePeriodIsValid, type ProviderChargePeriod } from '../../core/chargePeriods'
+import { chargeContractBasis, chargePeriodIsValid, type ProviderChargePeriod } from '../../core/chargePeriods'
 import { diagnosePlanning } from '../../core/diagnosis'
-import { buildFilingScenarios } from '../../core/filingScenarios'
+import AnnualOverview from './AnnualOverview'
+import CostsPage from './CostsPage'
 import { getScanProgress } from '../api'
 import {
   applyCandidateDestinations,
@@ -32,21 +45,23 @@ import {
   type CandidateDestination,
   type CandidateDestinations,
 } from '../candidateGrouping'
-import {
-  chargeConfirmationKey,
-  invertedContractMessage,
-  missingChargeMessage,
-  missingChargeProviders,
-  needsChargeConfirmation,
-  providerWithInvertedContract,
-} from '../chargeGuard'
+import { invertedContractMessage, providerWithInvertedContract } from '../chargeGuard'
 import { createFocusTrap } from '../focusTrap.js'
 import { providerHasEnabledSource } from '../historySources'
 import { displayMonth } from '../monthLabel.js'
 import HistorySourceManager from './HistorySourceManager'
-import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel, yen } from './shared'
+import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
+import type { WorkspaceDraft } from '../../planning/workspace'
+import {
+  listWorkspaceRecovery,
+  writeWorkspaceRecovery,
+  removeWorkspaceRecovery,
+  type WorkspaceRecovery,
+  type WorkspaceEditorInput,
+} from '../workspaceRecovery'
 
 function Onboarding({
+  consultation,
   step,
   data,
   runtime,
@@ -60,12 +75,19 @@ function Onboarding({
   onSaveHistorySource,
   onTestHistorySource,
   onRemoveHistorySource,
-  onSave,
+  onSaveWorkspace,
+  suspended = false,
+  resolvedSaveCount = 0,
+  resolvedSaveMessage = '比較して選んだ内容を保存しました。入力を続けられます。',
+  onPreviewWorkspace,
+  onReviewWorkspace,
   onSaveRetention,
-  onSavePlanning,
   onClose,
   onSaved,
+  workspaceBase,
+  onRestoreWorkspaceBase,
 }: {
+  consultation?: ConsultationNavigation
   step: number
   data: DashboardData
   runtime: RuntimeData | null
@@ -79,21 +101,36 @@ function Onboarding({
   onSaveHistorySource: (source: HistorySourceInput, sourceId?: string) => Promise<void>
   onTestHistorySource: (source: HistorySourceInput) => Promise<HistorySourceTestResult>
   onRemoveHistorySource: (sourceId: string) => Promise<void>
-  onSave: (configuration: LocalConfiguration) => Promise<void>
+  onSaveWorkspace: (configuration: LocalConfiguration, planning: PlanningSnapshot) => Promise<void>
+  suspended?: boolean
+  resolvedSaveCount?: number
+  resolvedSaveMessage?: string
+  onPreviewWorkspace?: (
+    configuration: LocalConfiguration,
+    planning: PlanningSnapshot,
+  ) => Promise<void>
+  onReviewWorkspace?: (
+    configuration: LocalConfiguration,
+    planning: PlanningSnapshot,
+  ) => Promise<boolean>
   onSaveRetention: (
     days: number,
   ) => Promise<{ days: number; previousDays?: number; backupFileName?: string }>
-  onSavePlanning: (planning: PlanningSnapshot) => Promise<void>
   onClose: () => void
   onSaved?: () => void
+  workspaceBase?: WorkspaceDraft
+  onRestoreWorkspaceBase?: (base: WorkspaceDraft) => Promise<void>
 }) {
   const steps = ['履歴', '候補整理', '制作物', '費用', '結果']
   const isDemoData = data.meta.source === 'demo'
   const apiUnavailable = !runtime
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(['claude', 'codex'])
   const [scanMode, setScanMode] = useState<ScanMode>('incremental')
-  const [claudeCharge, setClaudeCharge] = useState<number | undefined>(undefined)
-  const [codexCharge, setCodexCharge] = useState<number | undefined>(undefined)
+  const [claudeCharge, setClaudeCharge] = useState<number | null | undefined>(undefined)
+  const [codexCharge, setCodexCharge] = useState<number | null | undefined>(undefined)
+  const [unknownChargeReasons, setUnknownChargeReasons] = useState<
+    NonNullable<LocalConfiguration['unknownChargeReasons']>
+  >({})
   const [monthlyCharges, setMonthlyCharges] = useState<LocalConfiguration['monthlyCharges']>([])
   const [chargePeriods, setChargePeriods] = useState<ProviderChargePeriod[]>([])
   const [contracts, setContracts] = useState<LocalConfiguration['contracts']>({
@@ -104,8 +141,7 @@ function Onboarding({
   // A bare boolean goes stale: warn about Claude, then re-select Codex on an
   // earlier step, and the second press would skip the check entirely and save
   // Codex as 0 yen without ever naming it.
-  const [confirmedMissingCharges, setConfirmedMissingCharges] = useState<string | null>(null)
-  const [unobservedPercent, setUnobservedPercent] = useState(10)
+  const [unobservedPercent, setUnobservedPercent] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
   const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null)
@@ -117,9 +153,99 @@ function Onboarding({
   const [retentionBusy, setRetentionBusy] = useState(false)
   const [planningDraft, setPlanningDraft] = useState<PlanningSnapshot>(planning)
   const [candidateQuery, setCandidateQuery] = useState('')
+  const [showResultCosts, setShowResultCosts] = useState(false)
   const [candidateDestinations, setCandidateDestinations] = useState<CandidateDestinations>({})
+  const [recoveryTouched, setRecoveryTouched] = useState(false)
+  const [recoveryMessage, setRecoveryMessage] = useState('')
+  const [recoveryRecords, setRecoveryRecords] = useState<WorkspaceRecovery[]>([])
+  const [restoredRecord, setRestoredRecord] = useState<WorkspaceRecovery | null>(null)
+  const ownRecovery = useRef<WorkspaceRecovery | null>(null)
+  const sourceRecovery = useRef<WorkspaceRecovery | null>(null)
+  const recoveryBase = useRef(workspaceBase)
+  const editorInput = useMemo<WorkspaceEditorInput>(
+    () => ({
+      claudeCharge,
+      codexCharge,
+      unknownChargeReasons,
+      monthlyCharges,
+      contracts,
+      chargePeriods,
+      unobservedPercent,
+      planning: planningDraft,
+      candidateDestinations,
+      selectedProviders,
+      step,
+    }),
+    [
+      claudeCharge,
+      codexCharge,
+      unknownChargeReasons,
+      monthlyCharges,
+      contracts,
+      chargePeriods,
+      unobservedPercent,
+      planningDraft,
+      candidateDestinations,
+      selectedProviders,
+      step,
+    ],
+  )
+  function inspectRecovery() {
+    if (!runtime?.datasetId) return
+    try {
+      const found = listWorkspaceRecovery(window.localStorage, runtime.datasetId)
+      setRecoveryRecords(found.records.filter((record) => record.id !== ownRecovery.current?.id))
+      setRecoveryMessage(
+        found.unreadable
+          ? '読めない形式の控えは削除せず保持しています。'
+          : found.records.length
+            ? ''
+            : '復旧できる控えはありません。',
+      )
+    } catch {
+      setRecoveryMessage('ブラウザの控えを読み取れません。')
+    }
+  }
+  const clearSavedRecovery = useCallback(() => {
+    setRecoveryTouched(false)
+    try {
+      if (ownRecovery.current) removeWorkspaceRecovery(window.localStorage, ownRecovery.current)
+      if (sourceRecovery.current)
+        removeWorkspaceRecovery(window.localStorage, sourceRecovery.current)
+      ownRecovery.current = null
+      sourceRecovery.current = null
+      setRecoveryRecords([])
+      setRecoveryMessage('保存が確認できた入力の控えを整理しました。')
+    } catch {
+      setRecoveryMessage('DB保存は成功しましたが、ブラウザの控えを整理できませんでした。')
+    }
+  }, [])
   const onboardingBodyRef = useRef<HTMLDivElement>(null)
   const modalRef = useRef<HTMLElement>(null)
+  const [consultationFocus, setConsultationFocus] = useState<'fact' | 'method' | null>(null)
+  useEffect(() => {
+    if (!consultation || !consultationFocus || step !== (consultationFocus === 'fact' ? 2 : 3))
+      return
+    const selector =
+      consultationFocus === 'fact' ? '[data-consultation-unit]' : '[data-consultation-decision]'
+    const expected =
+      consultationFocus === 'fact'
+        ? consultation.taxUnitId
+        : consultation.taxUnitId + ':' + consultation.answer.taxYear
+    const target =
+      [...(modalRef.current?.querySelectorAll<HTMLElement>(selector) ?? [])].find(
+        (node) =>
+          node.getAttribute(
+            consultationFocus === 'fact' ? 'data-consultation-unit' : 'data-consultation-decision',
+          ) === expected,
+      ) ??
+      (consultationFocus === 'method'
+        ? modalRef.current?.querySelector<HTMLElement>('[aria-label="処理の判断記録"]')
+        : null)
+    target?.scrollIntoView?.({ block: 'center' })
+    target?.querySelector<HTMLElement>('input,select,button')?.focus()
+    setConsultationFocus(null)
+  }, [consultation, consultationFocus, step])
   const onCloseRef = useRef(onClose)
   const rankedProducts = useMemo(
     () =>
@@ -149,20 +275,6 @@ function Onboarding({
       ? `${displayMonth(observedHistoryMonths[0])}～${displayMonth(observedHistoryMonths.at(-1))}`
       : '利用時期を確認中'
   const draftDiagnosis = useMemo(() => diagnosePlanning(planningDraft), [planningDraft])
-  const filingScenarios = useMemo(
-    () =>
-      buildFilingScenarios(
-        data.months.reduce(
-          (totals, month) => ({
-            current: totals.current + month.current,
-            future: totals.future + month.future,
-            review: totals.review + month.review,
-          }),
-          { current: 0, future: 0, review: 0 },
-        ),
-      ),
-    [data.months],
-  )
   const scanNotes = useMemo(() => {
     if (!lastScanResult) return []
     const notes: string[] = []
@@ -258,28 +370,16 @@ function Onboarding({
 
   useEffect(() => {
     if (!configuration) return
-    setClaudeCharge(configuration.charges.claude > 0 ? configuration.charges.claude : undefined)
-    setCodexCharge(configuration.charges.codex > 0 ? configuration.charges.codex : undefined)
+    setClaudeCharge(configuration.charges.claude)
+    setCodexCharge(configuration.charges.codex)
     setContracts(configuration.contracts)
     setChargePeriods(configuration.chargePeriods ?? [])
-    setUnobservedPercent(Math.round(configuration.unobservedRatio * 100))
-    const saved = new Map(
-      configuration.monthlyCharges.map((charge) => [
-        `${charge.provider}:${charge.month}`,
-        charge.amountJpy,
-      ]),
+    setUnobservedPercent(
+      configuration.unobservedRatio === null ? null : configuration.unobservedRatio * 100,
     )
-    setMonthlyCharges(
-      data.months.flatMap((month) => {
-        const monthKey = monthKeyFromLabel(month.label, planning.profile.taxYear)
-        return (['claude', 'codex'] as ProviderKey[]).map((provider) => ({
-          provider,
-          month: monthKey,
-          amountJpy: saved.get(`${provider}:${monthKey}`) ?? configuration.charges[provider],
-        }))
-      }),
-    )
-  }, [configuration, data.months, planning.profile.taxYear])
+    setUnknownChargeReasons(configuration.unknownChargeReasons ?? {})
+    setMonthlyCharges(configuration.monthlyCharges)
+  }, [configuration])
 
   useEffect(() => {
     const autoDelete = runtime?.retention.claude.autoDelete
@@ -327,16 +427,63 @@ function Onboarding({
     onCloseRef.current = onClose
   })
 
+  const lastResolvedSave = useRef(resolvedSaveCount)
+  useEffect(() => {
+    if (lastResolvedSave.current !== resolvedSaveCount) {
+      lastResolvedSave.current = resolvedSaveCount
+      clearSavedRecovery()
+      setNotice({
+        kind: 'success',
+        message: resolvedSaveMessage,
+      })
+    }
+  }, [resolvedSaveCount, resolvedSaveMessage, clearSavedRecovery])
+
+  useEffect(() => {
+    if (!restoredRecord) return
+    const input = restoredRecord.input
+    setClaudeCharge(input.claudeCharge)
+    setCodexCharge(input.codexCharge)
+    setUnknownChargeReasons(input.unknownChargeReasons ?? {})
+    setMonthlyCharges(input.monthlyCharges)
+    setContracts(input.contracts)
+    setChargePeriods(input.chargePeriods)
+    setUnobservedPercent(input.unobservedPercent)
+    setPlanningDraft(input.planning)
+    setCandidateDestinations(input.candidateDestinations)
+    setSelectedProviders(input.selectedProviders)
+
+    setRecoveryTouched(true)
+  }, [restoredRecord])
+  useEffect(() => {
+    const baseChanged = recoveryBase.current !== workspaceBase
+    recoveryBase.current = workspaceBase
+    if (baseChanged || !recoveryTouched || !workspaceBase || !runtime?.datasetId) return
+    const record: WorkspaceRecovery = {
+      version: 1,
+      datasetId: runtime.datasetId,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      base: structuredClone(workspaceBase),
+      input: structuredClone(editorInput),
+    }
+    try {
+      writeWorkspaceRecovery(window.localStorage, record)
+      const previous = ownRecovery.current
+      ownRecovery.current = record
+      if (previous) removeWorkspaceRecovery(window.localStorage, previous)
+      setRecoveryMessage('編集中の料金・計画をこのブラウザに控えました。DB保存とは別です。')
+    } catch {
+      setRecoveryMessage('入力をブラウザへ控えられませんでした。画面の入力は保持しています。')
+    }
+  }, [editorInput, recoveryTouched, workspaceBase, runtime?.datasetId])
+
   useEffect(() => {
     const container = modalRef.current
-    if (!container) return
-    // Install the trap once, for the modal's whole lifetime. onClose is a fresh
-    // inline function on every App render, so depending on it would tear the
-    // trap down and rebuild it at every wizard step -- and the focus restored
-    // on close would then be whatever was focused at the last step change
-    // rather than the button that opened the modal.
+    if (!container || suspended) return
+    // Suspend the trap while the comparison dialog owns focus. Keep draft state mounted.
     return createFocusTrap(container, () => onCloseRef.current())
-  }, [])
+  }, [suspended])
 
   function toggleProvider(provider: ProviderKey) {
     setSelectedProviders((current) =>
@@ -346,22 +493,26 @@ function Onboarding({
     )
   }
 
-  function updateProviderCharge(provider: ProviderKey, amount: number | undefined) {
-    const normalized = amount === undefined ? undefined : Math.max(0, amount)
+  function updateProviderCharge(provider: ProviderKey, amount: number | null | undefined) {
+    const normalized = amount == null ? amount : Math.max(0, amount)
     if (provider === 'claude') setClaudeCharge(normalized)
     else setCodexCharge(normalized)
-    setConfirmedMissingCharges(null)
-    setMonthlyCharges((current) =>
-      current.map((charge) =>
-        charge.provider === provider ? { ...charge, amountJpy: normalized ?? 0 } : charge,
-      ),
-    )
+    if (amount !== null)
+      setUnknownChargeReasons((current) => {
+        const next = { ...current }
+        delete next[provider]
+        return next
+      })
   }
 
   function updateChargePeriod(index: number, patch: Partial<ProviderChargePeriod>) {
     setChargePeriods((current) =>
       current.map((period, periodIndex) =>
-        periodIndex === index ? { ...period, ...patch } : period,
+                periodIndex === index ? (() => {
+          const updated = { ...period, ...patch }
+          if (updated.contractConfirmation && !updated.contractConfirmation.confirmedAt) updated.contractConfirmation = { ...updated.contractConfirmation, basis: chargeContractBasis(updated) }
+          return updated
+        })() : period,
       ),
     )
   }
@@ -381,7 +532,8 @@ function Onboarding({
         planName: '',
         serviceStartedOn: start,
         serviceEndedOn: end,
-        amountJpy: 0,
+        amountJpy: null,
+        unknownAmountReason: '請求額をまだ確認していません。',
       },
     ])
   }
@@ -607,6 +759,13 @@ function Onboarding({
       return
     }
     if (step === 3) {
+      if (!costPresenceRecordsSchema.safeParse(planningDraft.costPresence ?? []).success) {
+        setNotice({
+          kind: 'error',
+          message: '年度別の費用項目確認の理由・日時・重複を確認してください。',
+        })
+        return
+      }
       const invalidEquipment = planningDraft.equipment.some(
         (item) => !item.name.trim() || !item.acquiredOn || !item.role.trim(),
       )
@@ -642,38 +801,18 @@ function Onboarding({
       })
       return
     }
-    const missingCharges =
-      chargePeriods.length > 0
-        ? selectedProviders.filter(
-            (provider) =>
-              !chargePeriods.some((period) => period.provider === provider && period.amountJpy > 0),
-          )
-        : missingChargeProviders(selectedProviders, {
-            claude: claudeCharge,
-            codex: codexCharge,
-          })
-    if (needsChargeConfirmation(missingCharges, confirmedMissingCharges)) {
-      setConfirmedMissingCharges(chargeConfirmationKey(missingCharges))
-      setNotice({ kind: 'error', message: missingChargeMessage(missingCharges) })
-      return
-    }
+    if (!confirmMonthlyChargeInputs()) return
     if (apiUnavailable) {
       onStep(4)
       return
     }
     setBusy(true)
     try {
-      await onSave({
-        charges: {
-          claude: Math.max(0, Math.round(claudeCharge ?? 0)),
-          codex: Math.max(0, Math.round(codexCharge ?? 0)),
-        },
-        monthlyCharges,
-        contracts,
-        chargePeriods,
-        unobservedRatio: Math.min(95, Math.max(0, unobservedPercent)) / 100,
-      })
-      await onSavePlanning(planningDraft)
+      if (onReviewWorkspace) {
+        const saved = await onReviewWorkspace(configurationDraft(), planningDraft)
+        if (!saved) return
+      } else await onSaveWorkspace(configurationDraft(), planningDraft)
+      clearSavedRecovery()
       setNotice({
         kind: 'success',
         message: '設定を保存し、入力後の結果へ再集計しました。',
@@ -682,13 +821,48 @@ function Onboarding({
     } catch (error) {
       setNotice({
         kind: 'error',
-        message: `保存に失敗しました：${error instanceof Error ? error.message : '不明なエラー'}`,
+        message: `保存結果を確認できませんでした：${error instanceof Error ? error.message : '不明なエラー'}`,
       })
     } finally {
       setBusy(false)
     }
   }
 
+  function configurationDraft(): LocalConfiguration {
+    const reasons = { ...unknownChargeReasons }
+    if (claudeCharge === undefined) reasons.claude = '既定月額が未入力です。'
+    if (codexCharge === undefined) reasons.codex = '既定月額が未入力です。'
+    return {
+      charges: {
+        claude: claudeCharge == null ? null : Math.max(0, Math.round(claudeCharge)),
+        codex: codexCharge == null ? null : Math.max(0, Math.round(codexCharge)),
+      },
+      ...(Object.keys(reasons).length ? { unknownChargeReasons: reasons } : {}),
+      monthlyCharges,
+      contracts,
+      chargePeriods,
+      unobservedRatio:
+        unobservedPercent === null ? null : Math.min(95, Math.max(0, unobservedPercent)) / 100,
+    }
+  }
+  function confirmMonthlyChargeInputs() {
+    const issues = monthlyCharges
+      .map(monthlyChargeInputIssue)
+      .filter((issue): issue is string => issue !== null)
+    for (const [provider, amount] of [
+      ['claude', claudeCharge],
+      ['codex', codexCharge],
+    ] as const) {
+      if (amount === null && !unknownChargeReasons[provider]?.trim())
+        issues.push(provider + 'の既定月額が不明な理由を入力してください。')
+    }
+    if (!issues.length) return true
+    setNotice({
+      kind: 'error',
+      message: issues.join(' ') + ' 入力は保持しています。「費用」の料金欄で修正できます。',
+    })
+    return false
+  }
   async function saveProgress() {
     setNotice(null)
     if (apiUnavailable) {
@@ -698,10 +872,12 @@ function Onboarding({
       })
       return
     }
+    if (!confirmMonthlyChargeInputs()) return
     setBusy(true)
     try {
       const draftToSave = step === 1 ? materializeCandidateGroups() : planningDraft
-      await onSavePlanning(draftToSave)
+      await onSaveWorkspace(configurationDraft(), draftToSave)
+      clearSavedRecovery()
       setNotice({
         kind: 'success',
         message: 'ここまでの入力を保存しました。次回は続きから確認できます。',
@@ -709,7 +885,27 @@ function Onboarding({
     } catch (error) {
       setNotice({
         kind: 'error',
-        message: `保存できませんでした。ローカルサーバーを確認して、もう一度お試しください。詳細：${error instanceof Error ? error.message : '不明なエラー'}`,
+        message: `保存結果を確認できませんでした。入力はこの画面に残しています。詳細：${error instanceof Error ? error.message : '不明なエラー'}`,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function previewProgress() {
+    if (!onPreviewWorkspace || apiUnavailable) return
+    if (!confirmMonthlyChargeInputs()) return
+    setBusy(true)
+    setNotice(null)
+    try {
+      await onPreviewWorkspace(
+        configurationDraft(),
+        step === 1 ? materializeCandidateGroups() : planningDraft,
+      )
+    } catch (error) {
+      setNotice({
+        kind: 'error',
+        message: error instanceof Error ? error.message : '影響を確認できませんでした。',
       })
     } finally {
       setBusy(false)
@@ -719,6 +915,7 @@ function Onboarding({
   return (
     <div
       className="modal-backdrop"
+      style={suspended ? { display: 'none' } : undefined}
       role="presentation"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
@@ -728,6 +925,11 @@ function Onboarding({
         aria-modal="true"
         aria-labelledby="onboarding-title"
         ref={modalRef}
+        onChangeCapture={() => setRecoveryTouched(true)}
+        onClickCapture={(event) => {
+          if (!(event.target as HTMLElement).closest('[data-recovery-controls]'))
+            setRecoveryTouched(true)
+        }}
       >
         <button className="modal-close" aria-label="閉じる" onClick={onClose}>
           ×
@@ -740,6 +942,90 @@ function Onboarding({
             少しずつ。
           </h2>
           <p>分からない項目は後回しにできます。入力した内容はこのPCだけに保存します。</p>
+          {consultation && (
+            <ConsultationContextPanel
+              context={consultation}
+              units={planningDraft.taxUnits}
+              onNavigate={(kind) => {
+                setConsultationFocus(kind)
+                onStep(kind === 'fact' ? 2 : 3)
+              }}
+              onReturn={onClose}
+            />
+          )}
+          {runtime?.datasetId && workspaceBase && onRestoreWorkspaceBase && (
+            <section data-recovery-controls aria-label="料金と計画の入力復旧">
+              <h3>前回の編集中入力</h3>
+              <p>
+                同じブラウザ・接続先の控えです。別PCには引き継がれず、DBバックアップにも含まれません。
+              </p>
+              <button disabled={busy} onClick={inspectRecovery}>
+                料金・計画の控えを確認
+              </button>
+              {recoveryMessage && <p role="status">{recoveryMessage}</p>}
+              {recoveryRecords.map((record) => (
+                <article key={record.id}>
+                  <p>
+                    {record.createdAt} / 保存元の版 {record.base.revision}
+                  </p>
+                  <details>
+                    <summary>控えた全入力</summary>
+                    <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                      {JSON.stringify(
+                        record.input,
+                        (_key, value) =>
+                          typeof value === 'number' && Number.isNaN(value)
+                            ? '数値入力が空欄'
+                            : value,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                  <button
+                    disabled={busy || recoveryTouched}
+                    onClick={async () => {
+                      setBusy(true)
+                      try {
+                        await onRestoreWorkspaceBase(record.base)
+                        sourceRecovery.current = record
+                        setRestoredRecord(record)
+                        onStep(record.input.step)
+                        setRecoveryMessage(
+                          '入力を復旧しました。DBは変更していません。保存時に最新と照合します。',
+                        )
+                      } catch (error) {
+                        setRecoveryMessage(
+                          error instanceof Error ? error.message : '復旧できませんでした。',
+                        )
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    料金・計画を復旧して編集
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      try {
+                        removeWorkspaceRecovery(window.localStorage, record)
+                        inspectRecovery()
+                      } catch {
+                        setRecoveryMessage('控えを削除できませんでした。')
+                      }
+                    }}
+                  >
+                    この入力の控えを削除
+                  </button>
+                </article>
+              ))}
+              {recoveryTouched && (
+                <p>
+                  別の控えを復旧するには、現在の入力を保存するか、画面を閉じて開き直してください。
+                </p>
+              )}
+            </section>
+          )}
           <div className="setup-progress" aria-label={`${step + 1}/${steps.length}まで進みました`}>
             <i style={{ width: `${((step + 1) / steps.length) * 100}%` }} />
             <span>
@@ -757,6 +1043,7 @@ function Onboarding({
         </div>
         <div className="onboarding-main">
           <div className="onboarding-body" ref={onboardingBodyRef}>
+            <PlanningDateRepairPanel planning={planningDraft} onChange={setPlanningDraft} />
             {isDemoData && (
               <div className="demo-mode-banner" role="status">
                 <strong>デモモード</strong>
@@ -1209,7 +1496,11 @@ function Onboarding({
                 </div>
                 <div className="tax-unit-editor-list">
                   {planningDraft.taxUnits.map((unit, index) => (
-                    <article className="tax-unit-editor" key={unit.id}>
+                    <article
+                      className="tax-unit-editor"
+                      key={unit.id}
+                      data-consultation-unit={unit.id}
+                    >
                       <div className="tax-unit-card-heading">
                         <span>{index + 1}</span>
                         <strong>{unit.name || `開発 ${index + 1}`}</strong>
@@ -1314,11 +1605,10 @@ function Onboarding({
                           <strong>この開発を始めた日</strong>
                           <small>履歴上の最初の日と異なる場合は、実態の日を入力します</small>
                         </span>
-                        <input
-                          type="date"
+                        <DateInput
                           value={lifecycleDate(unit.id, 'development-started')}
-                          onChange={(event) =>
-                            updateLifecycleDate(unit.id, 'development-started', event.target.value)
+                          onValueChange={(value) =>
+                            updateLifecycleDate(unit.id, 'development-started', value)
                           }
                         />
                       </label>
@@ -1341,11 +1631,10 @@ function Onboarding({
                             <strong>初めて売上が発生した日</strong>
                             <small>入金日ではなく、売上の事実が発生した日を確認します</small>
                           </span>
-                          <input
-                            type="date"
+                          <DateInput
                             value={lifecycleDate(unit.id, 'first-sale')}
-                            onChange={(event) =>
-                              updateLifecycleDate(unit.id, 'first-sale', event.target.value)
+                            onValueChange={(value) =>
+                              updateLifecycleDate(unit.id, 'first-sale', value)
                             }
                           />
                         </label>
@@ -1356,15 +1645,10 @@ function Onboarding({
                             <strong>自分の本番作業で使い始めた日</strong>
                             <small>テストではなく、実際の仕事や制作に初めて使った日</small>
                           </span>
-                          <input
-                            type="date"
+                          <DateInput
                             value={lifecycleDate(unit.id, 'internal-use-started')}
-                            onChange={(event) =>
-                              updateLifecycleDate(
-                                unit.id,
-                                'internal-use-started',
-                                event.target.value,
-                              )
+                            onValueChange={(value) =>
+                              updateLifecycleDate(unit.id, 'internal-use-started', value)
                             }
                           />
                         </label>
@@ -1375,11 +1659,10 @@ function Onboarding({
                             <strong>外部へ公開・提供した日</strong>
                             <small>販売ページ、公開URL、顧客提供などを開始した日</small>
                           </span>
-                          <input
-                            type="date"
+                          <DateInput
                             value={lifecycleDate(unit.id, 'external-released')}
-                            onChange={(event) =>
-                              updateLifecycleDate(unit.id, 'external-released', event.target.value)
+                            onValueChange={(value) =>
+                              updateLifecycleDate(unit.id, 'external-released', value)
                             }
                           />
                         </label>
@@ -1437,6 +1720,12 @@ function Onboarding({
               <>
                 <span className="step-label">4 / 5　支払った費用</span>
                 <h3>AI料金と開発に使う費用を登録します</h3>
+                <CostPresenceEditor
+                  planning={planningDraft}
+                  onChange={(costPresence) =>
+                    setPlanningDraft((current) => ({ ...current, costPresence }))
+                  }
+                />
                 <p>金額が分からない項目は後から追加できます。私用分を除くための割合も残します。</p>
                 <section className="development-scale-guide" aria-label="開発費の規模感と処理候補">
                   <div className="scale-guide-heading">
@@ -1495,6 +1784,7 @@ function Onboarding({
                       ＋ 請求を追加
                     </button>
                   </div>
+                  <DuplicateChargesPanel periods={chargePeriods} onChange={(updated) => setChargePeriods((current) => current.map((period) => period.id === updated.id ? updated : period))} />
                   {chargePeriods.length === 0 ? (
                     <p className="charge-period-empty">
                       請求履歴が未登録です。正確な期間が分かる場合は追加してください。分からない場合だけ、下の月額概算を利用できます。
@@ -1529,36 +1819,33 @@ function Onboarding({
                           </label>
                           <label>
                             <span>利用開始日</span>
-                            <input
-                              type="date"
+                            <DateInput
                               value={period.serviceStartedOn}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 updateChargePeriod(index, {
-                                  serviceStartedOn: event.target.value,
+                                  serviceStartedOn: value,
                                 })
                               }
                             />
                           </label>
                           <label>
                             <span>利用終了日</span>
-                            <input
-                              type="date"
+                            <DateInput
                               value={period.serviceEndedOn}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 updateChargePeriod(index, {
-                                  serviceEndedOn: event.target.value,
+                                  serviceEndedOn: value,
                                 })
                               }
                             />
                           </label>
                           <label>
                             <span>請求日</span>
-                            <input
-                              type="date"
+                            <DateInput
                               value={period.billedOn ?? ''}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 updateChargePeriod(index, {
-                                  billedOn: event.target.value || undefined,
+                                  billedOn: value || undefined,
                                 })
                               }
                             />
@@ -1568,14 +1855,85 @@ function Onboarding({
                             <input
                               type="number"
                               min="0"
-                              value={period.amountJpy}
+                              value={period.amountJpy ?? ''}
+                              placeholder="不明"
                               onChange={(event) =>
                                 updateChargePeriod(index, {
-                                  amountJpy: Math.max(0, event.target.valueAsNumber || 0),
+                                  amountJpy:
+                                    event.target.value === '' ? null : event.target.valueAsNumber,
+                                  unknownAmountReason:
+                                    event.target.value === ''
+                                      ? (period.unknownAmountReason ??
+                                        '請求額をまだ確認していません。')
+                                      : undefined,
                                 })
                               }
                             />
                           </label>
+                          {period.amountJpy === null && (
+                            <label>
+                              <span>請求額が不明な理由</span>
+                              <input
+                                aria-label="AI請求額が不明な理由"
+                                value={period.unknownAmountReason ?? ''}
+                                onChange={(event) =>
+                                  updateChargePeriod(index, {
+                                    unknownAmountReason: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          )}
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() =>
+                              updateChargePeriod(index, {
+                                amountJpy: null,
+                                unknownAmountReason:
+                                  period.unknownAmountReason ?? '請求額をまだ確認していません。',
+                              })
+                            }
+                          >
+                            請求額を不明に戻す
+                          </button>
+                          <fieldset>
+                            <legend>この請求の根拠</legend>
+                            <p>
+                              金額・利用期間を確認した資料を選んでください。資料自体は下の「根拠メモ」に記録できます。
+                            </p>
+                            {[
+                              ...new Set([
+                                ...planningDraft.evidence.map((row) => row.id),
+                                ...(period.evidenceIds ?? []),
+                              ]),
+                            ].map((id) => {
+                              const evidence = planningDraft.evidence.find((row) => row.id === id)
+                              return (
+                                <label key={id}>
+                                  <input
+                                    type="checkbox"
+                                    checked={period.evidenceIds?.includes(id) ?? false}
+                                    onChange={(event) =>
+                                      updateChargePeriod(index, {
+                                        evidenceIds: event.target.checked
+                                          ? [...(period.evidenceIds ?? []), id]
+                                          : (period.evidenceIds ?? []).filter(
+                                              (value) => value !== id,
+                                            ),
+                                      })
+                                    }
+                                  />
+                                  {evidence
+                                    ? `${evidence.occurredOn ?? '対象日未記録'} ${evidence.note || '説明未入力'}`
+                                    : `参照先の記録がありません：${id}`}
+                                </label>
+                              )
+                            })}
+                            {!planningDraft.evidence.length && !period.evidenceIds?.length && (
+                              <p>根拠は未登録です。金額の入力だけで確認済みとは扱いません。</p>
+                            )}
+                          </fieldset>
                           <button
                             type="button"
                             className="text-button"
@@ -1593,7 +1951,15 @@ function Onboarding({
                   )}
                 </section>
                 <details className="advanced-fields legacy-charge-fields">
-                  <summary>請求期間が分からない場合の月額概算</summary>
+                  <summary>請求期間が分からない場合の月額概算</summary>{' '}
+                  <p>
+                    サービスごと・月ごとに、利用期間付きの請求、月別料金、既定月額の順に使います。
+                    期間付き請求がある月は月額概算を加算しません。別の月の料金記録は引き続き使います。
+                    月の一部だけを覆う請求も、その月は期間付き請求で計算します。対象日外の利用は契約期間外として表示します。
+                  </p>
+                  <p>
+                    0円は金額を確認した場合に入力してください。空欄は金額不明として保存し、配分額を計算しません。
+                  </p>
                   <div className="invoice-box">
                     <div>
                       <span className="provider-logo">C</span>
@@ -1636,6 +2002,43 @@ function Onboarding({
                       <span>円</span>
                     </div>
                   </div>
+                  {(
+                    [
+                      ['claude', 'Claude Code'],
+                      ['codex', 'Codex'],
+                    ] as const
+                  ).map(([provider, label]) => {
+                    const amount = provider === 'claude' ? claudeCharge : codexCharge
+                    return (
+                      <div key={provider} className="field">
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => updateProviderCharge(provider, null)}
+                        >
+                          {label}の既定月額を不明にする
+                        </button>
+                        {amount === null && (
+                          <label>
+                            {label}の既定月額は不明です。理由を記録してください。
+                            <textarea
+                              aria-label={`${label}の既定月額が不明な理由`}
+                              value={unknownChargeReasons[provider] ?? ''}
+                              onChange={(event) =>
+                                setUnknownChargeReasons((current) => ({
+                                  ...current,
+                                  [provider]: event.target.value,
+                                }))
+                              }
+                            />
+                            <small>
+                              0円として計算しません。金額が分かったら上の月額欄に入力してください。
+                            </small>
+                          </label>
+                        )}
+                      </div>
+                    )
+                  })}
                   <div className="contract-fields">
                     <div className="contract-heading">
                       <strong>契約期間</strong>
@@ -1653,16 +2056,16 @@ function Onboarding({
                         <strong>{label}</strong>
                         <label>
                           <span>開始日</span>
-                          <input
+                          <DateInput
                             aria-label={`${label} 契約開始日`}
-                            type="date"
+
                             value={contracts[provider].startedOn ?? ''}
-                            onChange={(event) =>
+                            onValueChange={(value) =>
                               setContracts((current) => ({
                                 ...current,
                                 [provider]: {
                                   ...current[provider],
-                                  startedOn: event.target.value || undefined,
+                                  startedOn: value || undefined,
                                 },
                               }))
                             }
@@ -1670,16 +2073,16 @@ function Onboarding({
                         </label>
                         <label>
                           <span>終了日</span>
-                          <input
+                          <DateInput
                             aria-label={`${label} 契約終了日`}
-                            type="date"
+
                             value={contracts[provider].endedOn ?? ''}
-                            onChange={(event) =>
+                            onValueChange={(value) =>
                               setContracts((current) => ({
                                 ...current,
                                 [provider]: {
                                   ...current[provider],
-                                  endedOn: event.target.value || undefined,
+                                  endedOn: value || undefined,
                                 },
                               }))
                             }
@@ -1689,70 +2092,46 @@ function Onboarding({
                       </div>
                     ))}
                   </div>
-                  {monthlyCharges.length > 0 && (
-                    <details className="monthly-charges">
-                      <summary>月別料金を編集（{monthlyCharges.length / 2}か月）</summary>
-                      <div className="monthly-charge-grid">
-                        {data.months.map((month) => {
-                          const monthKey = monthKeyFromLabel(
-                            month.label,
-                            planningDraft.profile.taxYear,
-                          )
-                          return (
-                            <div className="monthly-charge-row" key={monthKey}>
-                              <strong>{month.label}</strong>
-                              {(['claude', 'codex'] as ProviderKey[]).map((provider) => {
-                                const index = monthlyCharges.findIndex(
-                                  (charge) =>
-                                    charge.provider === provider && charge.month === monthKey,
-                                )
-                                return (
-                                  <label key={provider}>
-                                    <span>{provider === 'claude' ? 'Claude' : 'Codex'}</span>
-                                    <input
-                                      aria-label={`${month.label} ${provider}料金`}
-                                      type="number"
-                                      min="0"
-                                      value={monthlyCharges[index]?.amountJpy ?? 0}
-                                      onChange={(event) =>
-                                        setMonthlyCharges((current) =>
-                                          current.map((charge, chargeIndex) =>
-                                            chargeIndex === index
-                                              ? {
-                                                  ...charge,
-                                                  amountJpy: event.target.valueAsNumber || 0,
-                                                }
-                                              : charge,
-                                          ),
-                                        )
-                                      }
-                                    />
-                                    <span>円</span>
-                                  </label>
-                                )
-                              })}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </details>
-                  )}
+                  <MonthlyChargesEditor
+                    charges={monthlyCharges}
+                    observedMonths={data.months.map((month) =>
+                      monthKeyFromLabel(month.label, planningDraft.profile.taxYear),
+                    )}
+                    onChange={setMonthlyCharges}
+                  />
                 </details>
                 <label className="ratio-field">
                   <span>
                     <strong>未取得利用の割合</strong>
-                    <small>Webチャットや別PCなど、ローカル履歴に現れない利用</small>
+                    <small>
+                      取得した履歴に含まれないWebチャットや別PCの利用。空欄は不明、0%は捕捉外の利用がないと確認した場合です。不明の間は支払額を保持し、制作物への配分額は未算定とします。
+                    </small>
                   </span>
                   <input
                     aria-label="未取得利用割合"
                     type="number"
                     min="0"
                     max="95"
-                    value={unobservedPercent}
-                    onChange={(event) => setUnobservedPercent(event.target.valueAsNumber || 0)}
+                    step="any"
+                    placeholder="不明"
+                    value={unobservedPercent ?? ''}
+                    onChange={(event) =>
+                      setUnobservedPercent(
+                        Number.isFinite(event.target.valueAsNumber)
+                          ? event.target.valueAsNumber
+                          : null,
+                      )
+                    }
                   />
                   <span>%</span>
                 </label>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setUnobservedPercent(null)}
+                >
+                  割合を不明に戻す
+                </button>
                 <div className="cost-editor-section">
                   <div className="cost-editor-heading">
                     <div>
@@ -1772,7 +2151,8 @@ function Onboarding({
                               id: `equipment-${Date.now()}`,
                               name: '開発用PC',
                               equipmentType: 'pc',
-                              acquisitionCostJpy: 0,
+                              acquisitionCostJpy: null,
+                              unknownAmountReason: '購入額をまだ確認していません。',
                               acquiredOn: `${current.profile.taxYear}-01-01`,
                               convertedFromPrivate: false,
                               businessUseRatio: 1,
@@ -1790,6 +2170,17 @@ function Onboarding({
                   </div>
                   {planningDraft.equipment.map((item, index) => (
                     <div className="cost-edit-row" key={item.id}>
+                      <p style={{ gridColumn: '1 / -1' }}>
+                        {item.name}：ここでは設備の共通情報を編集します。
+                        {planningDraft.equipmentMethods?.some(
+                          (method) =>
+                            method.equipmentId === item.id &&
+                            method.taxYear === planningDraft.profile.taxYear &&
+                            method.allocation,
+                        )
+                          ? `${planningDraft.profile.taxYear}年の割合は、下の「設備計算条件」に記録した年度別設定を使います。対応先も年度別に指定した場合は、その設定を使います。`
+                          : '年度別の配分条件が未登録の年は、この共通割合・対応先を使います。下の「設備計算条件」で年度別に記録できます。'}
+                      </p>
                       <label>
                         <span>機器名</span>
                         <input
@@ -1821,32 +2212,60 @@ function Onboarding({
                         <input
                           type="number"
                           min="0"
-                          value={item.acquisitionCostJpy}
+                          value={item.acquisitionCostJpy ?? ''}
+                          placeholder="不明"
+                          aria-label="設備の購入額"
                           onChange={(event) =>
                             updateEquipment(index, {
-                              acquisitionCostJpy: event.target.valueAsNumber || 0,
+                              acquisitionCostJpy:
+                                event.target.value === '' ? null : event.target.valueAsNumber,
+                              unknownAmountReason:
+                                event.target.value === ''
+                                  ? (item.unknownAmountReason ?? '購入額をまだ確認していません。')
+                                  : undefined,
                             })
                           }
                         />
                       </label>
+                      {item.acquisitionCostJpy === null && (
+                        <label>
+                          <span>購入額が不明な理由</span>
+                          <input
+                            aria-label="設備の購入額が不明な理由"
+                            value={item.unknownAmountReason ?? ''}
+                            onChange={(event) =>
+                              updateEquipment(index, { unknownAmountReason: event.target.value })
+                            }
+                          />
+                        </label>
+                      )}
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          updateEquipment(index, {
+                            acquisitionCostJpy: null,
+                            unknownAmountReason:
+                              item.unknownAmountReason ?? '購入額をまだ確認していません。',
+                          })
+                        }
+                      >
+                        購入額を不明に戻す
+                      </button>
                       <label>
                         <span>購入日</span>
-                        <input
-                          type="date"
+                        <DateInput
                           value={item.acquiredOn}
-                          onChange={(event) =>
-                            updateEquipment(index, { acquiredOn: event.target.value })
-                          }
+                          onValueChange={(value) => updateEquipment(index, { acquiredOn: value })}
                         />
                       </label>
                       <label>
                         <span>業務で使い始めた日</span>
-                        <input
-                          type="date"
+                        <DateInput
                           value={item.businessUseStartedOn ?? ''}
-                          onChange={(event) =>
+                          onValueChange={(value) =>
                             updateEquipment(index, {
-                              businessUseStartedOn: event.target.value || undefined,
+                              businessUseStartedOn: value || undefined,
                             })
                           }
                         />
@@ -1974,7 +2393,8 @@ function Onboarding({
                                 id: `home-${category}-${Date.now()}`,
                                 month: `${current.profile.taxYear}-01`,
                                 category,
-                                amountJpy: 0,
+                                amountJpy: null,
+                                unknownAmountReason: '支払額をまだ確認していません。',
                                 method:
                                   category === 'rent'
                                     ? 'area-time'
@@ -2012,12 +2432,46 @@ function Onboarding({
                         <input
                           type="number"
                           min="0"
-                          value={item.amountJpy}
+                          value={item.amountJpy ?? ''}
+                          placeholder="不明"
+                          aria-label="自宅費用の支払額"
                           onChange={(event) =>
-                            updateHomeCost(index, { amountJpy: event.target.valueAsNumber || 0 })
+                            updateHomeCost(index, {
+                              amountJpy:
+                                event.target.value === '' ? null : event.target.valueAsNumber,
+                              unknownAmountReason:
+                                event.target.value === ''
+                                  ? (item.unknownAmountReason ?? '支払額をまだ確認していません。')
+                                  : undefined,
+                            })
                           }
                         />
                       </label>
+                      {item.amountJpy === null && (
+                        <label>
+                          <span>支払額が不明な理由</span>
+                          <input
+                            aria-label="自宅費用の支払額が不明な理由"
+                            value={item.unknownAmountReason ?? ''}
+                            onChange={(event) =>
+                              updateHomeCost(index, { unknownAmountReason: event.target.value })
+                            }
+                          />
+                        </label>
+                      )}
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          updateHomeCost(index, {
+                            amountJpy: null,
+                            unknownAmountReason:
+                              item.unknownAmountReason ?? '支払額をまだ確認していません。',
+                          })
+                        }
+                      >
+                        支払額を不明に戻す
+                      </button>
                       <label>
                         <span>業務割合</span>
                         <input
@@ -2033,37 +2487,68 @@ function Onboarding({
                           }
                         />
                       </label>
-                      <label>
-                        <span>どの制作物に使う？</span>
-                        <select
-                          value={item.taxUnitId ?? ''}
-                          onChange={(event) =>
-                            updateHomeCost(index, { taxUnitId: event.target.value || undefined })
-                          }
-                        >
-                          <option value="">全体・まだ分けない</option>
-                          {planningDraft.taxUnits.map((unit) => (
-                            <option key={unit.id} value={unit.id}>
-                              {unit.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span>その制作物に使う割合</span>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={Math.round(item.projectAllocationRatio * 100)}
-                          onChange={(event) =>
-                            updateHomeCost(index, {
-                              projectAllocationRatio:
-                                Math.min(100, Math.max(0, event.target.valueAsNumber || 0)) / 100,
-                            })
-                          }
-                        />
-                      </label>
+                      {item.treatment !== 'general' &&
+                        (item.targets !== undefined ? (
+                          <AllocationTargetsEditor
+                            name={item.month + ' ' + item.category}
+                            targets={item.targets}
+                            units={planningDraft.taxUnits}
+                            onChange={(targets) => updateHomeCost(index, { targets })}
+                          />
+                        ) : (
+                          <>
+                            <label>
+                              <span>どの制作物に使う？</span>
+                              <select
+                                value={item.taxUnitId ?? ''}
+                                onChange={(event) =>
+                                  updateHomeCost(index, {
+                                    taxUnitId: event.target.value || undefined,
+                                  })
+                                }
+                              >
+                                <option value="">全体・まだ分けない</option>
+                                {planningDraft.taxUnits.map((unit) => (
+                                  <option key={unit.id} value={unit.id}>
+                                    {unit.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span>その制作物に使う割合</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={Math.round(item.projectAllocationRatio * 100)}
+                                onChange={(event) =>
+                                  updateHomeCost(index, {
+                                    projectAllocationRatio:
+                                      Math.min(100, Math.max(0, event.target.valueAsNumber || 0)) /
+                                      100,
+                                  })
+                                }
+                              />
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateHomeCost(index, {
+                                  targets: [],
+                                  taxUnitId: undefined,
+                                  projectAllocationRatio: 0,
+                                })
+                              }
+                            >
+                              制作物別に配分を入力し直す
+                            </button>
+                            <p>
+                              切り替えると旧対応先と割合を解除し、業務分を未配分から入力し直します。支払額・業務割合・計算根拠は保持します。
+                            </p>
+                          </>
+                        ))}
                       <label className="wide-field">
                         <span>計算の根拠</span>
                         <input
@@ -2103,7 +2588,8 @@ function Onboarding({
                               taxUnitId: current.taxUnits[0]?.id,
                               incurredOn: `${current.profile.taxYear}-01-01`,
                               costType: 'cloud',
-                              amountJpy: 0,
+                              amountJpy: null,
+                              unknownAmountReason: '金額をまだ確認していません。',
                               directlyAttributable: true,
                               treatment: 'direct',
                               note: '',
@@ -2120,12 +2606,9 @@ function Onboarding({
                     <div className="cost-edit-row" key={item.id}>
                       <label>
                         <span>支払日</span>
-                        <input
-                          type="date"
+                        <DateInput
                           value={item.incurredOn}
-                          onChange={(event) =>
-                            updateDirectCost(index, { incurredOn: event.target.value })
-                          }
+                          onValueChange={(value) => updateDirectCost(index, { incurredOn: value })}
                         />
                       </label>
                       <label>
@@ -2152,28 +2635,88 @@ function Onboarding({
                         <input
                           type="number"
                           min="0"
-                          value={item.amountJpy}
+                          value={item.amountJpy ?? ''}
+                          placeholder="不明"
+                          aria-label="直接費の金額"
                           onChange={(event) =>
-                            updateDirectCost(index, { amountJpy: event.target.valueAsNumber || 0 })
+                            updateDirectCost(index, {
+                              amountJpy:
+                                event.target.value === '' ? null : event.target.valueAsNumber,
+                              unknownAmountReason:
+                                event.target.value === ''
+                                  ? (item.unknownAmountReason ?? '金額をまだ確認していません。')
+                                  : undefined,
+                            })
                           }
                         />
                       </label>
-                      <label>
-                        <span>結び付ける制作物</span>
-                        <select
-                          value={item.taxUnitId ?? ''}
-                          onChange={(event) =>
-                            updateDirectCost(index, { taxUnitId: event.target.value || undefined })
-                          }
-                        >
-                          <option value="">まだ決めない</option>
-                          {planningDraft.taxUnits.map((unit) => (
-                            <option key={unit.id} value={unit.id}>
-                              {unit.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      {item.amountJpy === null && (
+                        <label>
+                          <span>金額が不明な理由</span>
+                          <input
+                            aria-label="直接費の金額が不明な理由"
+                            value={item.unknownAmountReason ?? ''}
+                            onChange={(event) =>
+                              updateDirectCost(index, { unknownAmountReason: event.target.value })
+                            }
+                          />
+                        </label>
+                      )}
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          updateDirectCost(index, {
+                            amountJpy: null,
+                            unknownAmountReason:
+                              item.unknownAmountReason ?? '金額をまだ確認していません。',
+                          })
+                        }
+                      >
+                        金額を不明に戻す
+                      </button>
+                      {item.targets !== undefined ? (
+                        <AllocationTargetsEditor
+                          name={'direct-' + item.id}
+                          targets={item.targets}
+                          units={planningDraft.taxUnits}
+                          onChange={(targets) => updateDirectCost(index, { targets })}
+                        />
+                      ) : (
+                        <>
+                          <label>
+                            <span>結び付ける制作物</span>
+                            <select
+                              value={item.taxUnitId ?? ''}
+                              onChange={(event) =>
+                                updateDirectCost(index, {
+                                  taxUnitId: event.target.value || undefined,
+                                })
+                              }
+                            >
+                              <option value="">まだ決めない</option>
+                              {planningDraft.taxUnits.map((unit) => (
+                                <option key={unit.id} value={unit.id}>
+                                  {unit.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateDirectCost(index, {
+                                targets: [],
+                                taxUnitId: undefined,
+                                directlyAttributable: false,
+                                treatment: 'shared',
+                              })
+                            }
+                          >
+                            直接費を制作物別に配分し直す
+                          </button>
+                        </>
+                      )}
                       <label className="wide-field">
                         <span>メモ</span>
                         <input
@@ -2221,11 +2764,10 @@ function Onboarding({
                     <div className="cost-edit-row" key={item.id}>
                       <label>
                         <span>日付</span>
-                        <input
-                          type="date"
+                        <DateInput
                           value={item.occurredOn ?? ''}
-                          onChange={(event) =>
-                            updateEvidence(index, { occurredOn: event.target.value || undefined })
+                          onValueChange={(value) =>
+                            updateEvidence(index, { occurredOn: value || undefined })
                           }
                         />
                       </label>
@@ -2299,46 +2841,72 @@ function Onboarding({
                     件を記録します。入力が増えるほど、説明できる金額が増えていきます。
                   </p>
                 </div>
+                <EquipmentMethodsEditor
+                  allowRead={!apiUnavailable}
+                  planning={planningDraft}
+                  onChange={(equipmentMethods) =>
+                    setPlanningDraft((current) => ({ ...current, equipmentMethods }))
+                  }
+                />
+                <DecisionEditor
+                  consultation={consultation}
+                  value={planningDraft.decisions}
+                  units={planningDraft.taxUnits}
+                  year={planningDraft.profile.taxYear}
+                  onChange={(decisions) =>
+                    setPlanningDraft((current) => ({ ...current, decisions }))
+                  }
+                />
               </>
             )}
             {step === 4 && (
               <>
                 <span className="step-label">5 / 5　これから行うこと</span>
                 <h3>いまの整理結果です</h3>
+                {Boolean(data.unknownCharges?.length) && (
+                  <p>
+                    請求額が未確認のAI契約が{data.unknownCharges!.length}
+                    件あります。表示額は確認済みの請求分です。未確認分の期間と理由を「支払と配分」で確認してください。
+                  </p>
+                )}
                 <p>
-                  入力内容を保存して再集計しました。申告方法を先に決めず、同じ事実を使って該当する場合の違いを比較できます。
+                  {isDemoData
+                    ? '合成データによる表示例です。'
+                    : '保存済みの全費用資料から集計した結果です。'}
+                  編集中の変更は、保存するまで反映されません。申告区分ごとの金額比較は、適用条件を結ぶ計算が未接続のため表示していません。
                 </p>
-                <div className="filing-scenario-grid" aria-label="申告区分ごとの結果">
-                  {filingScenarios.map((scenario) => (
-                    <section key={scenario.id}>
-                      <span>{scenario.title}</span>
-                      <dl className="filing-scenario-values">
-                        <div>
-                          <dt>当年の費用候補</dt>
-                          <dd>{yen.format(scenario.currentExpenseCandidateJpy)}</dd>
-                        </div>
-                        <div>
-                          <dt>将来分の原価候補</dt>
-                          <dd>{yen.format(scenario.futureCostCandidateJpy)}</dd>
-                        </div>
-                        <div>
-                          <dt>未分類・私用等</dt>
-                          <dd>{yen.format(scenario.reviewJpy)}</dd>
-                        </div>
-                      </dl>
-                      <p>{scenario.condition}</p>
-                    </section>
-                  ))}
-                </div>
+                <AnnualOverview
+                  year={planningDraft.profile.taxYear}
+                  projection={data.costProjection}
+                  showAiFilterNote={false}
+                  onOpenCosts={() => setShowResultCosts(true)}
+                />
+                {showResultCosts && (
+                  <CostsPage
+                    initial={
+                      data.costProjection?.year === planningDraft.profile.taxYear
+                        ? data.costProjection
+                        : undefined
+                    }
+                    local={false}
+                    readOnly
+                    onEdit={() => {}}
+                  />
+                )}
                 <div className="onboarding-diagnosis">
                   <section>
-                    <h4>準備の進み具合</h4>
-                    <p className="readiness-copy">
-                      <strong>
-                        {draftDiagnosis.readiness.confirmed} / {draftDiagnosis.readiness.total}
-                      </strong>{' '}
-                      項目まで確認できました。未入力項目は、次回ここから続けられます。
-                    </p>
+                    <h4>入力から見つかった不足情報</h4>
+                    {draftDiagnosis.missingFacts.length > 0 ? (
+                      <ul>
+                        {draftDiagnosis.missingFacts.map((fact) => (
+                          <li key={fact}>{fact}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>
+                        現在の検査項目では不足を検出していません。原本の確認や税務上の適用条件の確認が完了したことを示すものではありません。
+                      </p>
+                    )}
                   </section>
                   <section>
                     <h4>現在地</h4>
@@ -2430,6 +2998,15 @@ function Onboarding({
                   ここまで保存
                 </button>
               )}
+              {step > 0 && step < 4 && onPreviewWorkspace && !apiUnavailable && (
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => void previewProgress()}
+                >
+                  変更の影響を確認
+                </button>
+              )}
               <button
                 className="primary-button"
                 disabled={busy || runtimeLoading}
@@ -2451,7 +3028,9 @@ function Onboarding({
                     : step === 3
                       ? apiUnavailable
                         ? 'デモ結果を見る'
-                        : '保存して結果を見る'
+                        : onReviewWorkspace
+                          ? '影響を確認して保存'
+                          : '保存して結果を見る'
                       : step === 4
                         ? '完了'
                         : '次へ'}

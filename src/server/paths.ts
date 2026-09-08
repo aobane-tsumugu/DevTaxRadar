@@ -19,6 +19,11 @@ export function getAppDataDirectory(): string {
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'devtax-radar')
 }
 
+/** A restored dataset must reconnect its original sources before any new scan. */
+export function restoreRequiresReconnect(): boolean {
+  return existsSync(join(getAppDataDirectory(), 'restore-reconnect-required.json'))
+}
+
 export function getDefaultHistoryPaths(): { claude: string; codex: string } {
   return {
     claude: join(homedir(), '.claude', 'projects'),

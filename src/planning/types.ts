@@ -1,3 +1,6 @@
+import type { AllocationTarget } from './allocationTargets.js'
+import type { CostPresenceRecord } from './costPresence.js'
+import type { EquipmentAnnualMethod } from './equipmentMethods.js'
 export type JourneyMode = 'early' | 'retrospective'
 export type IncomeCategory = 'undecided' | 'miscellaneous' | 'business'
 export type FilingType = 'undecided' | 'white' | 'blue'
@@ -95,7 +98,8 @@ export type EquipmentRecord = {
   id: string
   name: string
   equipmentType: EquipmentType
-  acquisitionCostJpy: number
+  acquisitionCostJpy: number | null
+  unknownAmountReason?: string
   orderedOn?: string
   deliveredOn?: string
   acquiredOn: string
@@ -118,8 +122,10 @@ export type CostTreatment = 'direct' | 'shared' | 'general'
 export type HomeCostRecord = {
   id: string
   month: string
+  targets?: AllocationTarget[]
   category: HomeCostCategory
-  amountJpy: number
+  amountJpy: number | null
+  unknownAmountReason?: string
   method: HomeCostMethod
   businessUseRatio: number
   basis: string
@@ -134,10 +140,12 @@ export type DirectCostType =
   'outsource' | 'material' | 'cloud' | 'domain' | 'license' | 'old-version-balance' | 'other'
 export type DirectCostRecord = {
   id: string
+  targets?: AllocationTarget[]
   taxUnitId?: string
   incurredOn: string
   costType: DirectCostType
-  amountJpy: number
+  amountJpy: number | null
+  unknownAmountReason?: string
   directlyAttributable: boolean
   treatment: CostTreatment
   note?: string
@@ -182,6 +190,8 @@ export type DecisionRecord = {
 }
 
 export type PlanningSnapshot = {
+  costPresence?: CostPresenceRecord[]
+  equipmentMethods?: EquipmentAnnualMethod[]
   version: 1
   profile: PlanningProfile
   taxUnits: TaxUnitRecord[]

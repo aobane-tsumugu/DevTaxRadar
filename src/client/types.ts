@@ -1,5 +1,6 @@
 import type { ProjectClassification } from '../planning/types.js'
 import type { ProviderChargePeriod } from '../core/chargePeriods.js'
+import type { AnnualCostProjection } from '../accounting/costs.js'
 
 export type TaxGroup = 'current' | 'future' | 'review'
 
@@ -10,7 +11,7 @@ export type Allocation = {
   product: string
   asset: string
   stage: string
-  usageRate: number
+  usageRate: number | null
   amount: number
   group: TaxGroup
   taxCandidate: string
@@ -28,13 +29,21 @@ export type Allocation = {
     folder: string
     branch: string
     model: string
-    tokens: number
+    tokens: number | null
     classification: string
     manualEdit: string
   }
 }
 
 export type DashboardData = {
+  unknownCharges?: Array<{
+    id: string
+    provider: 'claude' | 'codex'
+    serviceStartedOn: string
+    serviceEndedOn: string
+    reason: string
+  }>
+  costProjection?: AnnualCostProjection
   meta: {
     source: 'local' | 'demo'
     sessionCount: number
@@ -42,7 +51,14 @@ export type DashboardData = {
     mappedRate: number
     classifiedRate: number
   }
-  months: Array<{ label: string; current: number; future: number; review: number }>
+  months: Array<{
+    monthKey?: string
+    label: string
+    current: number
+    future: number
+    review: number
+    unknownChargeIds?: string[]
+  }>
   allocations: Allocation[]
   boundaries: Array<{
     product: string
@@ -126,7 +142,9 @@ export type ProviderRetention = {
 }
 
 export type RuntimeData = {
+  datasetId?: string
   csrfToken: string
+  restoreRequiresReconnect?: boolean
   providers: Record<ProviderKey, { detected: boolean }>
   retention: Record<ProviderKey, ProviderRetention>
   privacy?: {
@@ -144,15 +162,18 @@ export type ProviderContract = {
 }
 
 export type LocalConfiguration = {
-  charges: Record<ProviderKey, number>
+  charges: Record<ProviderKey, number | null>
+  unknownChargeReasons?: Partial<Record<ProviderKey, string>>
   monthlyCharges: Array<{
     provider: ProviderKey
     month: string
-    amountJpy: number
+    amountJpy: number | null
+    unknownAmountReason?: string
   }>
   contracts: Record<ProviderKey, ProviderContract>
   chargePeriods: ProviderChargePeriod[]
-  unobservedRatio: number
+  /** null is unknown; 0 explicitly confirms no unobserved use. */
+  unobservedRatio: number | null
 }
 
 export type ScanProgress = {

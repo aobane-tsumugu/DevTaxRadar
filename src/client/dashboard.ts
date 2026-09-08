@@ -334,14 +334,15 @@ export const demoDashboard: DashboardData = {
     classifiedRate: 88,
   },
   months: [
-    { label: '4月', current: 11400, future: 29400, review: 4200 },
-    { label: '5月', current: 13800, future: 31200, review: 9000 },
-    { label: '6月', current: 8400, future: 38400, review: 7200 },
-    { label: '7月', current: 14600, future: 27800, review: 6200 },
+    { monthKey: '2026-04', label: '4月', current: 11400, future: 29400, review: 4200 },
+    { monthKey: '2026-05', label: '5月', current: 13800, future: 31200, review: 9000 },
+    { monthKey: '2026-06', label: '6月', current: 8400, future: 38400, review: 7200 },
+    { monthKey: '2026-07', label: '7月', current: 14600, future: 27800, review: 6200 },
   ],
   allocations: [
     {
       id: 'a1',
+      monthKey: '2026-04',
       month: '4月',
       provider: 'Codex',
       product: 'Product A',
@@ -359,6 +360,7 @@ export const demoDashboard: DashboardData = {
     },
     {
       id: 'a2',
+      monthKey: '2026-04',
       month: '4月',
       provider: 'Claude Code',
       product: 'Product B',
@@ -376,6 +378,7 @@ export const demoDashboard: DashboardData = {
     },
     {
       id: 'a3',
+      monthKey: '2026-05',
       month: '5月',
       provider: 'Claude Code',
       product: 'Product B',
@@ -393,6 +396,7 @@ export const demoDashboard: DashboardData = {
     },
     {
       id: 'a4',
+      monthKey: '2026-05',
       month: '5月',
       provider: 'Codex',
       product: 'Product A',
@@ -410,6 +414,7 @@ export const demoDashboard: DashboardData = {
     },
     {
       id: 'a5',
+      monthKey: '2026-06',
       month: '6月',
       provider: 'Claude Code',
       product: 'Product A',
@@ -427,6 +432,7 @@ export const demoDashboard: DashboardData = {
     },
     {
       id: 'a6',
+      monthKey: '2026-06',
       month: '6月',
       provider: 'Codex',
       product: 'Product C',
@@ -444,6 +450,7 @@ export const demoDashboard: DashboardData = {
     },
     {
       id: 'a7',
+      monthKey: '2026-07',
       month: '7月',
       provider: 'Claude Code',
       product: 'Product A',
@@ -461,6 +468,7 @@ export const demoDashboard: DashboardData = {
     },
     {
       id: 'a8',
+      monthKey: '2026-07',
       month: '7月',
       provider: 'Codex',
       product: '未分類',
@@ -575,7 +583,11 @@ function isDashboardData(value: unknown): value is DashboardData {
 
 export function isLocalRuntime(): boolean {
   if (typeof window === 'undefined') return false
-  return window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+  const loopback =
+    window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+  // A local static preview can explicitly choose synthetic data. A failed API
+  // request must never make that choice on behalf of a real-data session.
+  return loopback && new URLSearchParams(window.location.search).get('mode') !== 'demo'
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
@@ -583,13 +595,9 @@ export async function getDashboardData(): Promise<DashboardData> {
   // may request the read-only collector; every other origin uses synthetic data.
   if (!isLocalRuntime()) return demoDashboard
 
-  try {
-    const response = await fetch('/api/dashboard', { headers: { Accept: 'application/json' } })
-    if (!response.ok) throw new Error(`Dashboard API: ${response.status}`)
-    const value: unknown = await response.json()
-    if (!isDashboardData(value)) throw new Error('Dashboard API returned an unsupported shape')
-    return { ...value, meta: { ...value.meta, source: 'local' } }
-  } catch {
-    return demoDashboard
-  }
+  const response = await fetch('/api/dashboard', { headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new Error(`利用履歴の読込に失敗しました（HTTP ${response.status}）。`)
+  const value: unknown = await response.json()
+  if (!isDashboardData(value)) throw new Error('利用履歴の応答形式を確認できませんでした。')
+  return { ...value, meta: { ...value.meta, source: 'local' } }
 }

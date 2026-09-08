@@ -14,8 +14,6 @@ export const DEFAULT_USAGE_WEIGHTS: UsageWeights = {
   reasoning: 3,
 }
 
-export const UNKNOWN_UNOBSERVED_RESERVE_RATIO = 0.25
-
 function assertFiniteNonNegative(value: number, name: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new RangeError(`${name} must be a finite non-negative number`)
@@ -55,7 +53,7 @@ export function calculateWeightedTokenUsage(
   return values.reduce((sum, value, index) => sum + value * (weightValues[index] ?? 0), 0)
 }
 
-function resolveUnobservedRatio(input: MonthlyAllocationInput, warnings: string[]): number {
+function resolveUnobservedRatio(input: MonthlyAllocationInput): number | null {
   const unobserved = input.unobservedUsage
   if (unobserved.kind === 'confirmed-none') return 0
 
@@ -64,12 +62,7 @@ function resolveUnobservedRatio(input: MonthlyAllocationInput, warnings: string[
     return unobserved.ratio
   }
 
-  const ratio = unobserved.reserveRatio ?? UNKNOWN_UNOBSERVED_RESERVE_RATIO
-  assertRatio(ratio, 'unknown unobserved reserve ratio')
-  warnings.push(
-    `未取得利用が不明のため、月額の${Math.round(ratio * 100)}%を要確認として留保しました。`,
-  )
-  return ratio
+  return null
 }
 
 /**
@@ -80,7 +73,7 @@ export function allocateMonthlySubscription(
   input: MonthlyAllocationInput,
 ): MonthlyAllocationResult {
   assertFiniteNonNegative(input.monthlyFeeJpy, 'monthly fee')
-  if (!Number.isInteger(input.monthlyFeeJpy)) {
+  if (!Number.isSafeInteger(input.monthlyFeeJpy)) {
     throw new RangeError('monthly fee must be an integer number of yen')
   }
 
@@ -89,11 +82,33 @@ export function allocateMonthlySubscription(
     assertFiniteNonNegative(line.usageWeight, `usage weight for ${line.id}`)
     return sum + line.usageWeight
   }, 0)
-  let unobservedUsageRatio = resolveUnobservedRatio(input, warnings)
+  const unobservedUsageRatio = resolveUnobservedRatio(input)
 
-  if (capturedUsageWeight === 0) {
-    unobservedUsageRatio = 1
-    warnings.push('捕捉済み利用がないため、月額の全額を未取得利用として留保しました。')
+  if (!Number.isFinite(capturedUsageWeight)) throw new RangeError('usage weight overflow')
+  if (unobservedUsageRatio === null || capturedUsageWeight === 0) {
+    if (unobservedUsageRatio === null) {
+      warnings.push(
+        '履歴にない利用の割合が不明なため、支払額を配分未算定として保持しています。割合を推定入力するか、捕捉外の利用がないことを確認してください。',
+      )
+    }
+    if (capturedUsageWeight === 0) {
+      warnings.push(
+        '配分の基準となる利用がないため、支払額を配分未算定として保持しています。全額が未取得利用であると判断したものではありません。',
+      )
+    }
+    return {
+      provider: input.provider,
+      billingMonth: input.billingMonth,
+      monthlyFeeJpy: input.monthlyFeeJpy,
+      capturedUsageWeight,
+      status: 'pending',
+      pendingAmountJpy: input.monthlyFeeJpy,
+      unobservedUsageRatio,
+      unobservedUsageEquivalent: null,
+      lines: [],
+      warnings,
+      invariantSatisfied: true,
+    }
   }
 
   const capturedRatio = 1 - unobservedUsageRatio
@@ -143,6 +158,8 @@ export function allocateMonthlySubscription(
     billingMonth: input.billingMonth,
     monthlyFeeJpy: input.monthlyFeeJpy,
     capturedUsageWeight,
+    status: 'allocated',
+    pendingAmountJpy: 0,
     unobservedUsageRatio,
     unobservedUsageEquivalent,
     lines,
@@ -164,7 +181,10 @@ export function allocateSubscriptions(inputs: MonthlyAllocationInput[]): Monthly
 }
 
 export function assertAllocationInvariant(result: MonthlyAllocationResult): void {
-  const total = result.lines.reduce((sum, line) => sum + line.allocatedAmountJpy, 0)
+  const total = result.lines.reduce(
+    (sum, line) => sum + line.allocatedAmountJpy,
+    result.pendingAmountJpy,
+  )
   if (total !== result.monthlyFeeJpy) {
     throw new Error(`allocation invariant violated: expected ${result.monthlyFeeJpy}, got ${total}`)
   }

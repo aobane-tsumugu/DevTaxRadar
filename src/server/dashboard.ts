@@ -4,10 +4,19 @@ import {
   calculateWeightedTokenUsage,
   type AllocationLine,
   type BillingMonth,
+  type UnobservedUsage,
 } from '../core/index.js'
 import type { Allocation, DashboardData, TaxGroup } from '../client/types.js'
 import type { ProjectClassification, TaxUnitRecord } from '../planning/types.js'
 import type { UsageProvider } from '../adapters/types.ts'
+import type { CostPeriod, ExpenseSource, CostTarget } from '../accounting/costs.js'
+import {
+  calendarMonthPeriod,
+  projectWorkspaceCosts,
+  type SubscriptionCostScope,
+} from '../core/workspaceCosts.js'
+import type { ProviderChargePeriod } from '../core/chargePeriods.js'
+import { chargeReviewGroups, chargeContractMessage, distinctChargeContracts } from '../core/chargePeriods.js'
 import { localDateFromTimestamp, resolvedTimeZone } from '../adapters/localTime.js'
 import {
   chargePeriodCoversDate,
@@ -17,6 +26,7 @@ import {
 } from '../core/chargePeriods.js'
 import {
   getConfiguration,
+  getDatabase,
   getLastScanTimeZones,
   getUsageOverview,
   getUsageSessions,
@@ -25,6 +35,9 @@ import {
 import { contractCoversDate, contractCoversMonth, hasAnyContractPeriod } from './contractPeriod.js'
 import { getPlanningSnapshot } from './planningRepository.js'
 import { resolveSessionAssignment, type SessionAssignment } from './sessionAssignment.js'
+import type { WorkspaceDraft } from '../planning/workspace.js'
+import type { AnnualCostProjection } from '../accounting/costs.js'
+import type { DatabaseSync } from 'node:sqlite'
 
 const providerLabel = {
   claude: 'Claude Code',
@@ -322,15 +335,62 @@ function outOfContractAllocation(
   }
 }
 
-export function buildDashboard(): DashboardData {
-  const sessions = getUsageSessions()
-  const overview = getUsageOverview()
-  const configuration = getConfiguration()
-  const lastScanTimeZones = getLastScanTimeZones()
+export function buildDashboard(year?: number): DashboardData {
+  const db = getDatabase()
+  db.exec('SAVEPOINT devtax_dashboard_read')
+  try {
+    const result = buildDashboardFromSnapshot(year)
+    db.exec('RELEASE devtax_dashboard_read')
+    return result
+  } catch (error) {
+    db.exec('ROLLBACK TO devtax_dashboard_read')
+    db.exec('RELEASE devtax_dashboard_read')
+    throw error
+  }
+}
+
+export function readDashboardObservation(db: DatabaseSync = getDatabase()) {
+  return {
+    sessions: getUsageSessions(db),
+    overview: getUsageOverview(db),
+    lastScanTimeZones: getLastScanTimeZones(db),
+  }
+}
+
+export function projectWorkspaceYears(
+  input: Pick<WorkspaceDraft, 'configuration' | 'planning'>,
+  observation: ReturnType<typeof readDashboardObservation>,
+  years: number[],
+) {
+  const projections: AnnualCostProjection[] = []
+  const dashboard = buildDashboardFromSnapshot(undefined, input, observation, (scopes) => {
+    for (const year of years)
+      projections.push(
+        projectWorkspaceCosts(
+          { ...input.planning, profile: { ...input.planning.profile, taxYear: year } },
+          scopes,
+        ),
+      )
+  })
+  return { dashboard, projections }
+}
+
+function buildDashboardFromSnapshot(
+  year?: number,
+  input?: Pick<WorkspaceDraft, 'configuration' | 'planning'>,
+  observation = readDashboardObservation(),
+  inspectCosts?: (scopes: SubscriptionCostScope[]) => void,
+): DashboardData {
+  const { sessions, overview, lastScanTimeZones } = observation
+  const configuration = input?.configuration ?? getConfiguration()
   const staleTimeZones = [...new Set(Object.values(lastScanTimeZones))].filter(
     (zone) => zone !== resolvedTimeZone(),
   )
-  const planning = getPlanningSnapshot()
+  const storedPlanning = input?.planning ?? getPlanningSnapshot()
+  const planning =
+    year === undefined
+      ? storedPlanning
+      : { ...storedPlanning, profile: { ...storedPlanning.profile, taxYear: year } }
   const taxUnitById = new Map(planning.taxUnits.map((unit) => [unit.id, unit]))
 
   const assigned: AssignedSession[] = sessions.map((session) => ({
@@ -340,12 +400,43 @@ export function buildDashboard(): DashboardData {
 
   const contracts = configuration.contracts
   const configuredChargePeriods = configuration.chargePeriods ?? []
+  const chargeWarningsByYear = new Map<number, Map<string, string[]>>()
+  function chargeWarningsForYear(year: number): Map<string, string[]> {
+    const cached = chargeWarningsByYear.get(year)
+    if (cached) return cached
+    const duplicateChargeWarnings = new Map<string, string[]>()
+    for (const period of configuredChargePeriods) {
+      if (!(period.serviceStartedOn <= `${year}-12-31` && period.serviceEndedOn >= `${year}-01-01`)) continue
+      const confirmationMessage = chargeContractMessage(period)
+      if (confirmationMessage) duplicateChargeWarnings.set(`ai:charge:${period.id}`, [confirmationMessage])
+    }
+    for (const { kind, ids } of chargeReviewGroups(configuredChargePeriods, year)) {
+      const message =
+        distinctChargeContracts(configuredChargePeriods.filter((period) => ids.includes(period.id)))
+          ? '利用期間が重なる請求ですが、各請求を異なる契約として確認済みです。各請求の原額を保持し、不明額は未算定として扱います。参照：' + ids.join('、')
+          : kind === 'duplicate'
+          ? `同じAIサービス・利用期間・原額の請求が${ids.length}件あります。重複候補のため明細を確認してください。各請求を合計に含めており、自動で除外していません。参照：${ids.join('、')}`
+          : `同じAIサービスで利用期間が重なる請求の組があります。各請求はこの組の他の1件以上と重なり、全件が同日に重なるとは限りません。終了日も含めて比較しています。別契約・プラン変更の明細を確認してください。原額は自動除外せず、不明額は未算定として保持します。参照：${ids.join('、')}`
+      for (const id of ids) {
+        const key = `ai:charge:${id}`
+        duplicateChargeWarnings.set(key, [...(duplicateChargeWarnings.get(key) ?? []), message])
+      }
+    }
+    chargeWarningsByYear.set(year, duplicateChargeWarnings)
+    return duplicateChargeWarnings
+  }
   const chargePeriodsByProvider = new Map(
     (['claude', 'codex'] as const).map((provider) => [
       provider,
       configuredChargePeriods.filter((period) => period.provider === provider),
     ]),
   )
+  // Dated invoices replace monthly estimates only in the months they cover.
+  // A later invoice must not remove earlier observed or explicitly entered costs.
+  const chargePeriodsForMonth = (provider: UsageProvider, month: string) =>
+    (chargePeriodsByProvider.get(provider) ?? []).filter((period) =>
+      chargePeriodCoversMonth(period, month),
+    )
   const contractsConfigured = configuredChargePeriods.length > 0 || hasAnyContractPeriod(contracts)
   // A session whose timestamp cannot be read is kept inside the contract:
   // dropping money from the allocation because of an unparsable timestamp
@@ -353,7 +444,7 @@ export function buildDashboard(): DashboardData {
   const withinContract = (session: AssignedSession): boolean => {
     const startedOn = localDateFromTimestamp(session.startedAt)
     if (startedOn === undefined) return true
-    const chargePeriods = chargePeriodsByProvider.get(session.provider) ?? []
+    const chargePeriods = chargePeriodsForMonth(session.provider, startedOn.slice(0, 7))
     if (chargePeriods.length > 0) {
       return chargePeriods.some((period) => chargePeriodCoversDate(period, startedOn))
     }
@@ -377,7 +468,7 @@ export function buildDashboard(): DashboardData {
   const datedMonthlyCharges = monthlyAmountsForCharges(configuredChargePeriods)
   const monthlyChargeRows = [
     ...configuration.monthlyCharges.filter(
-      (charge) => (chargePeriodsByProvider.get(charge.provider) ?? []).length === 0,
+      (charge) => chargePeriodsForMonth(charge.provider, charge.month).length === 0,
     ),
     ...datedMonthlyCharges,
   ]
@@ -387,7 +478,7 @@ export function buildDashboard(): DashboardData {
   const providerMonthKeys = new Set(
     [...byProviderMonth.keys(), ...monthlyChargeByKey.keys()].filter((key) => {
       const [provider, month] = key.split(':') as [UsageProvider, string]
-      const chargePeriods = chargePeriodsByProvider.get(provider) ?? []
+      const chargePeriods = chargePeriodsForMonth(provider, month)
       if (chargePeriods.length > 0) {
         return chargePeriods.some((period) => chargePeriodCoversMonth(period, month))
       }
@@ -415,8 +506,10 @@ export function buildDashboard(): DashboardData {
     scopeId: string
     provider: UsageProvider
     billingMonth: BillingMonth
-    monthlyFeeJpy: number
-    unobservedUsage: { kind: 'estimated'; ratio: number }
+    monthlyFeeJpy: number | null
+    source: ExpenseSource
+    period: CostPeriod
+    unobservedUsage: UnobservedUsage
     usageLines: Array<{
       id: string
       productId: string
@@ -430,8 +523,9 @@ export function buildDashboard(): DashboardData {
     scopeId: string,
     provider: UsageProvider,
     month: string,
-    monthlyFeeJpy: number,
+    monthlyFeeJpy: number | null,
     sourceGroups: ProjectMonthGroup[],
+    chargePeriod?: ProviderChargePeriod,
   ) {
     const usageLines = sourceGroups.map((group) => {
       const id = JSON.stringify([scopeId, groupKey(group)])
@@ -452,28 +546,92 @@ export function buildDashboard(): DashboardData {
         }),
       }
     })
+    const monthPeriod = calendarMonthPeriod(month)
+    const source: ExpenseSource = chargePeriod
+      ? {
+          id: `ai:charge:${chargePeriod.id}`,
+          kind: 'subscription',
+          label:
+            chargePeriod.planName.trim() ||
+            `${providerLabel[provider]} ${chargePeriod.serviceStartedOn}～${chargePeriod.serviceEndedOn}`,
+          originalAmountJpy: chargePeriod.amountJpy,
+          ...(chargePeriod.amountJpy === null
+            ? {
+                unknownOriginalAmountReasons: [
+                  chargePeriod.unknownAmountReason ?? '請求額が未確認です。',
+                ],
+              }
+            : {}),
+          currency: 'JPY',
+          servicePeriod: {
+            startedOn: chargePeriod.serviceStartedOn,
+            endedOn: chargePeriod.serviceEndedOn,
+          },
+          ...(chargePeriod.billedOn ? { billedOn: chargePeriod.billedOn } : {}),
+          evidenceIds: [...(chargePeriod.evidenceIds ?? [])],
+          origin: 'entered',
+        }
+      : {
+          id: `ai:${scopeId}`,
+          kind: 'subscription',
+          label: `${providerLabel[provider]} ${month}`,
+          originalAmountJpy: monthlyFeeJpy,
+          ...(monthlyFeeJpy === null
+            ? {
+                unknownOriginalAmountReasons: [
+                  configuration.monthlyCharges.find(
+                    (row) => row.provider === provider && row.month === month,
+                  )?.unknownAmountReason ??
+                    configuration.unknownChargeReasons?.[provider] ??
+                    '料金が未確認です。',
+                ],
+              }
+            : {}),
+          currency: 'JPY',
+          servicePeriod: monthPeriod,
+          evidenceIds: [],
+          origin: 'legacy-monthly',
+        }
+    const period = chargePeriod
+      ? {
+          startedOn:
+            monthPeriod.startedOn > chargePeriod.serviceStartedOn
+              ? monthPeriod.startedOn
+              : chargePeriod.serviceStartedOn,
+          endedOn:
+            monthPeriod.endedOn < chargePeriod.serviceEndedOn
+              ? monthPeriod.endedOn
+              : chargePeriod.serviceEndedOn,
+        }
+      : monthPeriod
     return {
       scopeId,
+      source,
+      period,
       provider,
       billingMonth: month as BillingMonth,
       monthlyFeeJpy,
-      unobservedUsage: {
-        kind: 'estimated' as const,
-        ratio: configuration.unobservedRatio,
-      },
+      unobservedUsage:
+        configuration.unobservedRatio === null
+          ? { kind: 'unknown' as const }
+          : configuration.unobservedRatio === 0
+            ? { kind: 'confirmed-none' as const }
+            : { kind: 'estimated' as const, ratio: configuration.unobservedRatio },
       usageLines,
     }
   }
 
   for (const key of [...providerMonthKeys].sort()) {
     const [provider, month] = key.split(':') as [UsageProvider, string]
-    if ((chargePeriodsByProvider.get(provider) ?? []).length > 0) continue
+    if (chargePeriodsForMonth(provider, month).length > 0) continue
     inputs.push(
       allocationInput(
         `monthly:${key}`,
         provider,
         month,
-        monthlyChargeByKey.get(key) ?? configuration.charges[provider],
+        monthlyChargeByKey.has(key)
+          ? monthlyChargeByKey.get(key)!
+          : configuration.charges[provider],
         byProviderMonth.get(key) ?? [],
       ),
     )
@@ -493,19 +651,79 @@ export function buildDashboard(): DashboardData {
           amount.month,
           amount.amountJpy,
           groupAssignedSessions(periodSessions),
+          period,
         ),
       )
     }
   }
 
   const allocations: Allocation[] = []
+  const costScopes: SubscriptionCostScope[] = []
   for (const input of inputs) {
-    const [result] = allocateSubscriptions([input])
-    if (!result) continue
+    const duplicateChargeWarnings = chargeWarningsForYear(Number(input.billingMonth.slice(0, 4)))
+    const result =
+      input.monthlyFeeJpy === null
+        ? null
+        : (allocateSubscriptions([{ ...input, monthlyFeeJpy: input.monthlyFeeJpy }])[0] ?? null)
+    if (!result && input.monthlyFeeJpy !== null)
+      throw new Error('請求額の配分結果を生成できませんでした。')
     // The sum-equals-fee property is the product's core promise: turn a
     // future regression into a loud error instead of a silently wrong tax
     // figure shown to the user.
-    assertAllocationInvariant(result)
+    if (result) assertAllocationInvariant(result)
+    const targets: Record<string, CostTarget> = {}
+    for (const usage of input.usageLines) {
+      const group = groupById.get(usage.id)!
+      targets[usage.id] =
+        usage.bucket === 'private'
+          ? { kind: 'private' }
+          : group.taxUnitId
+            ? { kind: 'tax-unit', taxUnitId: group.taxUnitId }
+            : group.classification === 'maintenance'
+              ? { kind: 'general' }
+              : { kind: 'unallocated' }
+    }
+    costScopes.push({
+      source: input.source,
+      ...(duplicateChargeWarnings.has(input.source.id)
+        ? { sourceWarnings: duplicateChargeWarnings.get(input.source.id)! }
+        : {}),
+      basisId: `ai:${input.scopeId}:basis`,
+      period: input.period,
+      result,
+      targets,
+    })
+    if (!result) continue
+    if (result.status === 'pending') {
+      allocations.push({
+        id: `${input.scopeId}:pending`,
+        month: displayBillingMonth(input.billingMonth),
+        monthKey: input.billingMonth,
+        provider: providerLabel[input.provider],
+        product: '配分未算定',
+        asset: '対応先を確認',
+        stage: '割合・配分基準の確認待ち',
+        usageRate: null,
+        amount: result.pendingAmountJpy,
+        group: 'review',
+        taxCandidate: '未判断',
+        confidence: 'C',
+        rule: '割合や配分基準が不明な支払を保持',
+        reason: result.warnings.join(' '),
+        missing: '捕捉外の利用割合と、対応先へ配分するための基準を確認してください。',
+        session: {
+          date: input.billingMonth,
+          id: 'pending-allocation',
+          folder: '支払単位',
+          branch: '対象外',
+          model: '対象外',
+          tokens: null,
+          classification: '配分未算定',
+          manualEdit: '不明を保持',
+        },
+      })
+      continue
+    }
     for (const line of result.lines) {
       if (line.kind === 'rounding-adjustment' && line.allocatedAmountJpy === 0) continue
       if (line.kind === 'unobserved' || line.kind === 'rounding-adjustment') {
@@ -529,7 +747,11 @@ export function buildDashboard(): DashboardData {
     const label = displayBillingMonth(month)
     const monthAllocations = allocations.filter((row) => row.month === label)
     return {
+      monthKey: month,
       label,
+      unknownChargeIds: configuredChargePeriods
+        .filter((period) => period.amountJpy === null && chargePeriodCoversMonth(period, month))
+        .map((period) => period.id),
       current: monthAllocations.reduce(
         (sum, row) => sum + (row.group === 'current' ? row.amount : 0),
         0,
@@ -670,8 +892,19 @@ export function buildDashboard(): DashboardData {
   })
 
   const lastScan = overview.recentScans.find((scan) => scan.status === 'complete')
+  inspectCosts?.(costScopes)
 
   return {
+    costProjection: projectWorkspaceCosts(planning, costScopes),
+    unknownCharges: configuredChargePeriods
+      .filter((period) => period.amountJpy === null)
+      .map((period) => ({
+        id: period.id,
+        provider: period.provider,
+        serviceStartedOn: period.serviceStartedOn,
+        serviceEndedOn: period.serviceEndedOn,
+        reason: period.unknownAmountReason!,
+      })),
     meta: {
       source: 'local',
       sessionCount: overview.providers.reduce((sum, row) => sum + row.sessions, 0),
@@ -685,7 +918,9 @@ export function buildDashboard(): DashboardData {
     },
     months,
     allocations,
-    boundaries,
+    boundaries: configuredChargePeriods.some((period) => period.amountJpy === null)
+      ? []
+      : boundaries,
     assets,
     guidance: [
       ...(contractsConfigured
@@ -730,9 +965,15 @@ export function buildDashboard(): DashboardData {
         severity: sessions.length === classifiedSessions ? 'ok' : 'warning',
       },
       {
-        title: `未取得利用 ${Math.round(configuration.unobservedRatio * 100)}%`,
-        description: 'Webチャット等の捕捉外利用として各Provider月額から留保します',
-        severity: 'ok',
+        title:
+          configuration.unobservedRatio === null
+            ? '履歴にない利用の割合が不明です'
+            : `履歴にない利用 ${configuration.unobservedRatio * 100}%`,
+        description:
+          configuration.unobservedRatio === null
+            ? '支払額は配分未算定として保持しています。0%や一定割合を自動的に置かず、確認した割合で再計算します。'
+            : '保存された割合で各Providerの支払を配分します。既存設定は本人確認済みと断定できないため、取得範囲と割合の根拠を確認してください。',
+        severity: configuration.unobservedRatio === null ? 'warning' : 'ok',
       },
     ],
     products: [...projectSummaries.values()],

@@ -13,6 +13,7 @@ import { networkInterfaces, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { emptyPlanningSnapshot, type PlanningSnapshot } from '../../src/planning/types.js'
+import type { DashboardData, LocalConfiguration } from '../../src/client/types.js'
 
 const children: ChildProcess[] = []
 const temporaryDirectories: string[] = []
@@ -382,6 +383,142 @@ describe('local server boundary', () => {
       unobservedRatio: configuration.unobservedRatio,
     })
 
+    const unknownSaveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify({ ...configuration, unobservedRatio: null }),
+    })
+    expect(unknownSaveResponse.status).toBe(200)
+    const unknownConfiguration = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
+      (response) => response.json(),
+    )) as LocalConfiguration
+    expect(unknownConfiguration.unobservedRatio).toBeNull()
+    const pendingDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
+      (response) => response.json(),
+    )) as DashboardData
+    expect(pendingDashboard.allocations.length).toBeGreaterThan(0)
+    for (const row of pendingDashboard.allocations) {
+      expect(row).toMatchObject({ product: '配分未算定', group: 'review', usageRate: null })
+    }
+    expect(
+      pendingDashboard.guidance.some(
+        (item: { title: string }) => item.title === '履歴にない利用の割合が不明です',
+      ),
+    ).toBe(true)
+
+    const unknownMonthConfiguration = {
+      ...configuration,
+      monthlyCharges: [
+        {
+          provider: 'claude',
+          month: '2026-04',
+          amountJpy: null,
+          unknownAmountReason: '当月請求書の確認待ち',
+        },
+      ],
+    }
+    const postMonthly = (body: unknown) =>
+      fetch(`http://127.0.0.1:${port}/api/config`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: `http://127.0.0.1:${port}`,
+          'x-devtax-csrf': runtime.csrfToken,
+        },
+        body: JSON.stringify(body),
+      })
+    expect((await postMonthly(unknownMonthConfiguration)).status).toBe(200)
+    const savedUnknownMonth = (await fetch(`http://127.0.0.1:${port}/api/config`).then((response) =>
+      response.json(),
+    )) as LocalConfiguration
+    expect(savedUnknownMonth.monthlyCharges).toEqual(unknownMonthConfiguration.monthlyCharges)
+    const monthDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard?year=2026`).then(
+      (response) => response.json(),
+    )) as DashboardData
+    expect(
+      monthDashboard.costProjection!.sources.find((row) => row.id === 'ai:monthly:claude:2026-04'),
+    ).toMatchObject({
+      originalAmountJpy: null,
+      unknownOriginalAmountReasons: ['当月請求書の確認待ち'],
+    })
+    expect(monthDashboard.costProjection!.totals.unknownBasisIds.length).toBeGreaterThan(0)
+    expect(
+      monthDashboard.allocations.filter(
+        (row) => row.provider === 'Claude Code' && row.monthKey === '2026-04',
+      ),
+    ).toEqual([])
+    expect(
+      (
+        await postMonthly({
+          ...unknownMonthConfiguration,
+          monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: null }],
+        })
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        (await fetch(`http://127.0.0.1:${port}/api/config`).then((response) =>
+          response.json(),
+        )) as LocalConfiguration
+      ).monthlyCharges,
+    ).toEqual(unknownMonthConfiguration.monthlyCharges)
+
+    const unknownDefaultConfiguration = {
+      ...configuration,
+      charges: { claude: null, codex: 0 },
+      unknownChargeReasons: { claude: '既定の請求額を確認中' },
+      monthlyCharges: [],
+    }
+    expect((await postMonthly(unknownDefaultConfiguration)).status).toBe(200)
+    const defaultDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard?year=2026`).then(
+      (response) => response.json(),
+    )) as DashboardData
+    expect(
+      defaultDashboard.costProjection!.sources.find(
+        (row) => row.id === 'ai:monthly:claude:2026-04',
+      ),
+    ).toMatchObject({
+      originalAmountJpy: null,
+      unknownOriginalAmountReasons: ['既定の請求額を確認中'],
+    })
+    expect(
+      defaultDashboard.allocations.filter(
+        (row) => row.provider === 'Claude Code' && row.monthKey === '2026-04',
+      ),
+    ).toEqual([])
+    expect(
+      (await postMonthly({ ...unknownDefaultConfiguration, unknownChargeReasons: {} })).status,
+    ).toBe(400)
+    expect(
+      (await postMonthly({ ...unknownDefaultConfiguration, charges: { claude: 0, codex: 0 } }))
+        .status,
+    ).toBe(400)
+    expect(
+      (
+        await postMonthly({
+          ...unknownDefaultConfiguration,
+          monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: 1234 }],
+        })
+      ).status,
+    ).toBe(200)
+    const overriddenDashboard = (await fetch(
+      `http://127.0.0.1:${port}/api/dashboard?year=2026`,
+    ).then((response) => response.json())) as DashboardData
+    expect(
+      overriddenDashboard.costProjection!.sources.find(
+        (row) => row.id === 'ai:monthly:claude:2026-04',
+      ),
+    ).toMatchObject({ originalAmountJpy: 1234 })
+    expect(
+      overriddenDashboard.costProjection!.sources.find(
+        (row) => row.id === 'ai:monthly:claude:2026-04',
+      )?.unknownOriginalAmountReasons,
+    ).toBeUndefined()
+
     const datedConfiguration = {
       ...configuration,
       chargePeriods: [
@@ -389,6 +526,11 @@ describe('local server boundary', () => {
           id: 'compatibility-charge',
           provider: 'claude' as const,
           planName: 'Compatibility plan',
+          evidenceIds: ['receipt-ai'],
+          contractConfirmation: {
+            reference: '合成契約', reason: '契約の明細と照合', confirmedAt: '2026-09-09T00:00:00Z',
+            basis: { id: 'compatibility-charge', provider: 'claude' as const, planName: 'Compatibility plan', evidenceIds: ['receipt-ai'], serviceStartedOn: '2026-04-01', serviceEndedOn: '2026-04-30', amountJpy: 30_001 },
+          },
           serviceStartedOn: '2026-04-01',
           serviceEndedOn: '2026-04-30',
           amountJpy: 30_001,
@@ -421,6 +563,19 @@ describe('local server boundary', () => {
       async (response) => await response.json(),
     )) as typeof datedConfiguration
     expect(afterLegacySave.chargePeriods).toEqual(datedConfiguration.chargePeriods)
+    const evidenceDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard?year=2026`).then(
+      (response) => response.json(),
+    )) as DashboardData
+    expect(
+      evidenceDashboard.costProjection!.sources.find(
+        (row) => row.id === 'ai:charge:compatibility-charge',
+      )?.evidenceIds,
+    ).toEqual(['receipt-ai'])
+    expect(
+      evidenceDashboard.costProjection!.bases.find(
+        (row) => row.sourceId === 'ai:charge:compatibility-charge',
+      )?.warnings,
+    ).toContain('請求の証拠参照が現在の記録にありません：receipt-ai')
 
     const restoreEmptyPeriodsResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: 'POST',
@@ -658,7 +813,7 @@ describe('local server boundary', () => {
     if (existsSync(resolve('dist/index.html'))) {
       const staticResponse = await fetch(`http://127.0.0.1:${port}/`)
       expect(staticResponse.status).toBe(200)
-      expect(await staticResponse.text()).toContain('<div id="root"></div>')
+      expect(await staticResponse.text()).toContain('<div id="root">')
     }
 
     const clearedConfiguration = {
@@ -708,6 +863,14 @@ describe('セッション単位のダッシュボード集計', () => {
     databaseModule = await import('../../src/server/database.ts')
     ;({ replaceProviderSessions } = databaseModule)
     ;({ savePlanningSnapshot } = await import('../../src/server/planningRepository.ts'))
+    // These cases verify assignment of known allocations, so establish the
+    // denominator explicitly instead of relying on the former 10% default.
+    databaseModule.saveConfiguration({
+      ...databaseModule.getConfiguration(),
+      charges: { claude: 1000, codex: 0 },
+      unknownChargeReasons: undefined,
+      unobservedRatio: 0,
+    })
 
     dashboardChild = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
       cwd: resolve('.'),

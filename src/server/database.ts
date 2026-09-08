@@ -1,3 +1,38 @@
+import {
+  PROVIDER_SETTINGS_TABLE,
+  requiresDefaultChargeMigration,
+  migrateDefaultCharges,
+} from './defaultChargeMigration.js'
+import {
+  MONTHLY_CHARGE_TABLE,
+  requiresMonthlyChargeMigration,
+  migrateMonthlyCharges,
+} from './monthlyChargeMigration.js'
+import { initializeBalanceSchema } from './balanceRepository.js'
+import { initializeDatasetIdentity } from './datasetIdentity.js'
+import { initializeCostPresenceSchema } from './costPresenceRepository.js'
+import { initializeEquipmentMethodsSchema } from './equipmentMethodsRepository.js'
+import { advanceWorkspaceRevision } from './workspaceRevision.js'
+import {
+  CHARGE_PERIOD_TABLE,
+  requiresChargePeriodMigration,
+  migrateChargePeriods,
+} from './chargePeriodMigration.js'
+import {
+  EQUIPMENT_TABLE,
+  requiresEquipmentCostMigration,
+  migrateEquipmentCosts,
+} from './equipmentCostMigration.js'
+import {
+  HOME_COST_TABLE,
+  requiresHomeCostMigration,
+  migrateHomeCosts,
+} from './homeCostMigration.js'
+import {
+  DIRECT_COST_TABLE,
+  requiresDirectCostMigration,
+  migrateDirectCosts,
+} from './directCostMigration.js'
 import { existsSync, mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -7,6 +42,7 @@ import type { NormalizedUsage, UsageProvider } from '../adapters/types.js'
 import type { ProviderChargePeriod } from '../core/chargePeriods.js'
 import {
   getAppDataDirectory,
+  restoreRequiresReconnect,
   getDefaultHistoryPaths,
   historyRootKey,
   normalizeHistoryRoot,
@@ -35,15 +71,17 @@ export type ProviderContract = {
 }
 
 export type LocalConfiguration = {
-  charges: { claude: number; codex: number }
+  charges: { claude: number | null; codex: number | null }
+  unknownChargeReasons?: Partial<Record<'claude' | 'codex', string>>
   monthlyCharges: Array<{
     provider: 'claude' | 'codex'
     month: string
-    amountJpy: number
+    amountJpy: number | null
+    unknownAmountReason?: string
   }>
   contracts: { claude: ProviderContract; codex: ProviderContract }
   chargePeriods?: ProviderChargePeriod[]
-  unobservedRatio: number
+  unobservedRatio: number | null
 }
 
 export type HistorySourceKind = 'default' | 'configured'
@@ -190,12 +228,13 @@ function sqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`
 }
 
-function createVerifiedMigrationBackup(candidate: DatabaseSync, directory: string): void {
+function createVerifiedMigrationBackup(
+  candidate: DatabaseSync,
+  directory: string,
+  kind = 'multi-source',
+): void {
   const timestamp = new Date().toISOString().replace(/[-:.]/g, '')
-  const backupPath = join(
-    directory,
-    `devtax-radar.before-multi-source-${timestamp}-${randomUUID()}.db`,
-  )
+  const backupPath = join(directory, `devtax-radar.before-${kind}-${timestamp}-${randomUUID()}.db`)
   candidate.exec(`VACUUM INTO ${sqlString(backupPath)}`)
 
   const backup = new DatabaseSync(backupPath, { readOnly: true })
@@ -203,7 +242,7 @@ function createVerifiedMigrationBackup(candidate: DatabaseSync, directory: strin
     const result = backup.prepare('PRAGMA integrity_check').get() as
       { integrity_check?: string } | undefined
     if (result?.integrity_check !== 'ok') {
-      throw new Error('複数読み取り元への移行前バックアップを検証できませんでした。')
+      throw new Error('schema移行前バックアップを検証できませんでした。')
     }
   } finally {
     backup.close()
@@ -229,6 +268,36 @@ export function getDatabase(): DatabaseSync {
 
     if (databaseAlreadyExisted && requiresMultiSourceMigration(database)) {
       createVerifiedMigrationBackup(database, directory)
+    } else if (databaseAlreadyExisted && requiresDirectCostMigration(database)) {
+      createVerifiedMigrationBackup(database, directory, 'direct-cost-unknown')
+    } else if (databaseAlreadyExisted && requiresHomeCostMigration(database)) {
+      createVerifiedMigrationBackup(database, directory, 'home-cost-unknown')
+    } else if (databaseAlreadyExisted && requiresEquipmentCostMigration(database)) {
+      createVerifiedMigrationBackup(database, directory, 'equipment-cost-unknown')
+    } else if (databaseAlreadyExisted && requiresDefaultChargeMigration(database)) {
+      createVerifiedMigrationBackup(database, directory, 'default-charge-unknown')
+    } else if (databaseAlreadyExisted && requiresMonthlyChargeMigration(database)) {
+      createVerifiedMigrationBackup(database, directory, 'monthly-charge-unknown')
+    } else if (databaseAlreadyExisted && requiresChargePeriodMigration(database)) {
+      createVerifiedMigrationBackup(database, directory, 'charge-period-unknown')
+    } else if (
+      databaseAlreadyExisted &&
+      !tableColumns(database, 'provider_charge_periods').has('evidence_ids_json')
+    ) {
+      createVerifiedMigrationBackup(database, directory, 'charge-period-evidence')
+    } else if (databaseAlreadyExisted && !tableColumns(database, 'provider_charge_periods').has('contract_confirmation_json')) {
+      createVerifiedMigrationBackup(database, directory, 'charge-contract-confirmation')
+    } else if (databaseAlreadyExisted && !tableColumns(database, 'balance_draft').has('revision')) {
+      createVerifiedMigrationBackup(database, directory, 'balance-records')
+    } else if (
+      databaseAlreadyExisted &&
+      !tableColumns(database, 'balance_draft_receipts').has('request_id')
+    ) {
+      createVerifiedMigrationBackup(database, directory, 'balance-draft-receipts')
+    } else if (databaseAlreadyExisted && !tableExists(database, 'planning_cost_presence')) {
+      createVerifiedMigrationBackup(database, directory, 'cost-presence')
+    } else if (databaseAlreadyExisted && !tableExists(database, 'planning_equipment_methods')) {
+      createVerifiedMigrationBackup(database, directory, 'equipment-methods')
     }
 
     database.exec('BEGIN IMMEDIATE')
@@ -302,33 +371,13 @@ export function getDatabase(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS history_file_cache_source_provider
       ON history_file_cache(source_id, provider);
 
-    CREATE TABLE IF NOT EXISTS provider_settings (
-      provider TEXT PRIMARY KEY,
-      monthly_fee_jpy INTEGER NOT NULL DEFAULT 0,
-      contract_started_on TEXT,
-      contract_ended_on TEXT
-    ) STRICT;
+    ${PROVIDER_SETTINGS_TABLE.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')}
 
-    INSERT OR IGNORE INTO provider_settings(provider, monthly_fee_jpy)
-    VALUES ('claude', 0), ('codex', 0);
 
-    CREATE TABLE IF NOT EXISTS provider_month_charges (
-      provider TEXT NOT NULL,
-      month TEXT NOT NULL,
-      amount_jpy INTEGER NOT NULL,
-      PRIMARY KEY(provider, month)
-    ) STRICT;
 
-    CREATE TABLE IF NOT EXISTS provider_charge_periods (
-      id TEXT PRIMARY KEY,
-      provider TEXT NOT NULL CHECK(provider IN ('claude', 'codex')),
-      plan_name TEXT NOT NULL,
-      service_started_on TEXT NOT NULL,
-      service_ended_on TEXT NOT NULL,
-      billed_on TEXT,
-      amount_jpy INTEGER NOT NULL CHECK(amount_jpy >= 0),
-      note TEXT
-    ) STRICT;
+    ${MONTHLY_CHARGE_TABLE.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')}
+
+    ${CHARGE_PERIOD_TABLE.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')}
 
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
@@ -336,7 +385,7 @@ export function getDatabase(): DatabaseSync {
     ) STRICT;
 
     INSERT OR IGNORE INTO app_settings(key, value)
-    VALUES ('unobserved_ratio', '0.10');
+    VALUES ('unobserved_ratio', 'null');
 
     CREATE TABLE IF NOT EXISTS planning_profiles (
       singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
@@ -377,51 +426,11 @@ export function getDatabase(): DatabaseSync {
       note TEXT
     ) STRICT;
 
-    CREATE TABLE IF NOT EXISTS planning_equipment (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      equipment_type TEXT NOT NULL,
-      acquisition_cost_jpy INTEGER NOT NULL,
-      ordered_on TEXT,
-      delivered_on TEXT,
-      acquired_on TEXT NOT NULL,
-      business_use_started_on TEXT,
-      converted_from_private INTEGER NOT NULL,
-      opening_unamortized_balance_jpy INTEGER,
-      business_use_ratio REAL NOT NULL,
-      useful_life_years INTEGER,
-      role TEXT NOT NULL,
-      tax_unit_id TEXT REFERENCES planning_tax_units(id),
-      project_allocation_ratio REAL NOT NULL,
-      evidence_ids_json TEXT NOT NULL
-    ) STRICT;
+    ${EQUIPMENT_TABLE.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')}
 
-    CREATE TABLE IF NOT EXISTS planning_home_costs (
-      id TEXT PRIMARY KEY,
-      month TEXT NOT NULL,
-      category TEXT NOT NULL,
-      amount_jpy INTEGER NOT NULL,
-      method TEXT NOT NULL,
-      business_use_ratio REAL NOT NULL,
-      basis TEXT NOT NULL,
-      rationale TEXT NOT NULL,
-      tax_unit_id TEXT REFERENCES planning_tax_units(id),
-      project_allocation_ratio REAL NOT NULL,
-      treatment TEXT NOT NULL,
-      evidence_ids_json TEXT NOT NULL
-    ) STRICT;
+    ${HOME_COST_TABLE.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')}
 
-    CREATE TABLE IF NOT EXISTS planning_direct_costs (
-      id TEXT PRIMARY KEY,
-      tax_unit_id TEXT REFERENCES planning_tax_units(id),
-      incurred_on TEXT NOT NULL,
-      cost_type TEXT NOT NULL,
-      amount_jpy INTEGER NOT NULL,
-      directly_attributable INTEGER NOT NULL,
-      treatment TEXT NOT NULL,
-      note TEXT,
-      evidence_ids_json TEXT NOT NULL
-    ) STRICT;
+    ${DIRECT_COST_TABLE.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')}
 
     CREATE TABLE IF NOT EXISTS planning_evidence (
       id TEXT PRIMARY KEY,
@@ -626,7 +635,10 @@ export function getDatabase(): DatabaseSync {
           root: normalizeHistoryRoot(defaults.codex),
         },
       ]
-      for (const source of defaultRows) {
+      const restoredBindings = database
+        .prepare("SELECT value FROM app_settings WHERE key='restore_source_reconnect'")
+        .get()
+      for (const source of restoreRequiresReconnect() || restoredBindings ? [] : defaultRows) {
         const rootKey = historyRootKey(source.root)
         const previous = existingDefaultRoot.get(source.id) as { rootKey?: string } | undefined
         // A default source keeps its stable ID when a user changes home
@@ -643,6 +655,27 @@ export function getDatabase(): DatabaseSync {
          VALUES (?, ?, ?)`,
         )
         .run(MULTI_SOURCE_MIGRATION_ID, MULTI_SOURCE_MIGRATION_CHECKSUM, now)
+      migrateDirectCosts(database)
+      migrateHomeCosts(database)
+      migrateEquipmentCosts(database)
+      migrateDefaultCharges(database)
+      database.exec(
+        "INSERT OR IGNORE INTO provider_settings(provider, monthly_fee_jpy, unknown_amount_reason) VALUES ('claude', NULL, '既定月額が未入力です。'), ('codex', NULL, '既定月額が未入力です。')",
+      )
+      migrateMonthlyCharges(database)
+      migrateChargePeriods(database)
+      if (!tableColumns(database, 'provider_charge_periods').has('evidence_ids_json')) {
+        database.exec(
+          "ALTER TABLE provider_charge_periods ADD COLUMN evidence_ids_json TEXT CHECK(evidence_ids_json IS NULL OR (json_valid(evidence_ids_json) AND json_type(evidence_ids_json)='array'))",
+        )
+      }
+      if (!tableColumns(database, 'provider_charge_periods').has('contract_confirmation_json')) {
+        database.exec("ALTER TABLE provider_charge_periods ADD COLUMN contract_confirmation_json TEXT CHECK(contract_confirmation_json IS NULL OR (json_valid(contract_confirmation_json) AND json_type(contract_confirmation_json)='object'))")
+      }
+      initializeBalanceSchema(database)
+      initializeDatasetIdentity(database)
+      initializeCostPresenceSchema(database)
+      initializeEquipmentMethodsSchema(database)
       database.exec('COMMIT')
     } catch (error) {
       database.exec('ROLLBACK')
@@ -1385,8 +1418,8 @@ export function replaceHistorySourceSessions(
  * the old way. And a user can scan one provider alone, which must not clear the
  * warning for the other provider's still-stale months.
  */
-export function getLastScanTimeZones(): Record<string, string> {
-  const rows = getDatabase()
+export function getLastScanTimeZones(db: DatabaseSync = getDatabase()): Record<string, string> {
+  const rows = db
     .prepare(
       `SELECT logical_source_id AS sourceId, provider, time_zone AS timeZone
        FROM (
@@ -1418,8 +1451,7 @@ export function getLastScanTimeZones(): Record<string, string> {
   )
 }
 
-export function getUsageOverview(): UsageOverview {
-  const db = getDatabase()
+export function getUsageOverview(db: DatabaseSync = getDatabase()): UsageOverview {
   const providers = db
     .prepare(
       `
@@ -1474,8 +1506,8 @@ export type UsageSessionRow = {
   cacheWriteTokens: number
 }
 
-export function getUsageSessions(): UsageSessionRow[] {
-  return getDatabase()
+export function getUsageSessions(db: DatabaseSync = getDatabase()): UsageSessionRow[] {
+  return db
     .prepare(
       `
     SELECT usage_events.source_id AS sourceId, history_sources.name AS sourceName,
@@ -1535,17 +1567,19 @@ export function getSessionReference(
     SessionReferenceRow | undefined
 }
 
-export function getConfiguration(): LocalConfiguration {
-  const db = getDatabase()
+export function getConfiguration(
+  db: DatabaseSync = getDatabase(),
+): LocalConfiguration & { chargePeriods: ProviderChargePeriod[] } {
   const providerRows = db
     .prepare(
-      `SELECT provider, monthly_fee_jpy AS amount,
+      `SELECT provider, monthly_fee_jpy AS amount, unknown_amount_reason AS unknownAmountReason,
               contract_started_on AS startedOn, contract_ended_on AS endedOn
        FROM provider_settings`,
     )
     .all() as Array<{
     provider: string
-    amount: number
+    amount: number | null
+    unknownAmountReason: string | null
     startedOn: string | null
     endedOn: string | null
   }>
@@ -1569,28 +1603,54 @@ export function getConfiguration(): LocalConfiguration {
   const monthlyCharges = db
     .prepare(
       `
-    SELECT provider, month, amount_jpy AS amountJpy
+    SELECT provider, month, amount_jpy AS amountJpy, unknown_amount_reason AS unknownAmountReason
     FROM provider_month_charges
     ORDER BY month, provider
   `,
     )
-    .all() as LocalConfiguration['monthlyCharges']
+    .all()
+    .map((row) => {
+      const { unknownAmountReason, ...charge } = row
+      return { ...charge, ...(unknownAmountReason === null ? {} : { unknownAmountReason }) }
+    }) as LocalConfiguration['monthlyCharges']
   const chargePeriods = db
     .prepare(
       `SELECT id, provider, plan_name AS planName,
               service_started_on AS serviceStartedOn,
               service_ended_on AS serviceEndedOn,
-              billed_on AS billedOn, amount_jpy AS amountJpy, note
+              billed_on AS billedOn, amount_jpy AS amountJpy, unknown_amount_reason AS unknownAmountReason, note, evidence_ids_json AS evidenceIdsJson, contract_confirmation_json AS contractConfirmationJson
        FROM provider_charge_periods
        ORDER BY service_started_on, provider, id`,
     )
-    .all() as Array<ProviderChargePeriod & { billedOn: string | null; note: string | null }>
+    .all() as Array<
+    Omit<ProviderChargePeriod, 'evidenceIds' | 'contractConfirmation'> & {
+      billedOn: string | null
+      note: string | null
+      evidenceIdsJson: string | null
+      contractConfirmationJson: string | null
+    }
+  >
 
   return {
     charges: {
-      claude: Number(byProvider.get('claude')?.amount ?? 0),
-      codex: Number(byProvider.get('codex')?.amount ?? 0),
+      claude:
+        byProvider.get('claude')?.amount === null
+          ? null
+          : Number(byProvider.get('claude')?.amount ?? 0),
+      codex:
+        byProvider.get('codex')?.amount === null
+          ? null
+          : Number(byProvider.get('codex')?.amount ?? 0),
     },
+    ...(providerRows.some((row) => row.unknownAmountReason !== null)
+      ? {
+          unknownChargeReasons: Object.fromEntries(
+            providerRows
+              .filter((row) => row.unknownAmountReason !== null)
+              .map((row) => [row.provider, row.unknownAmountReason!]),
+          ),
+        }
+      : {}),
     monthlyCharges,
     contracts: { claude: contractFor('claude'), codex: contractFor('codex') },
     chargePeriods: chargePeriods.map((period) => ({
@@ -1600,37 +1660,46 @@ export function getConfiguration(): LocalConfiguration {
       serviceStartedOn: period.serviceStartedOn,
       serviceEndedOn: period.serviceEndedOn,
       amountJpy: period.amountJpy,
+      ...(period.unknownAmountReason ? { unknownAmountReason: period.unknownAmountReason } : {}),
       ...(period.billedOn ? { billedOn: period.billedOn } : {}),
       ...(period.note ? { note: period.note } : {}),
+      ...(period.contractConfirmationJson === null ? {} : { contractConfirmation: JSON.parse(period.contractConfirmationJson) as ProviderChargePeriod['contractConfirmation'] }),
+      ...(period.evidenceIdsJson === null
+        ? {}
+        : { evidenceIds: JSON.parse(period.evidenceIdsJson) as string[] }),
     })),
-    unobservedRatio: Number(ratioRow?.value ?? 0.1),
+    unobservedRatio:
+      ratioRow?.value == null || ratioRow.value === 'null' ? null : Number(ratioRow.value),
   }
 }
 
-export function saveConfiguration(configuration: LocalConfiguration): void {
-  const db = getDatabase()
+export function saveConfiguration(
+  configuration: LocalConfiguration,
+  db: DatabaseSync = getDatabase(),
+): void {
   const updateCharge = db.prepare(`
     UPDATE provider_settings
-    SET monthly_fee_jpy = ?, contract_started_on = ?, contract_ended_on = ?
+    SET monthly_fee_jpy = ?, unknown_amount_reason = ?, contract_started_on = ?, contract_ended_on = ?
     WHERE provider = ?
   `)
   const insertMonthlyCharge = db.prepare(`
-    INSERT INTO provider_month_charges(provider, month, amount_jpy)
-    VALUES (?, ?, ?)
+    INSERT INTO provider_month_charges(provider, month, amount_jpy, unknown_amount_reason)
+    VALUES (?, ?, ?, ?)
   `)
   const insertChargePeriod = db.prepare(`
     INSERT INTO provider_charge_periods(
       id, provider, plan_name, service_started_on, service_ended_on,
-      billed_on, amount_jpy, note
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      billed_on, amount_jpy, note, unknown_amount_reason, evidence_ids_json, contract_confirmation_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
-  db.exec('BEGIN IMMEDIATE')
+  db.exec('SAVEPOINT devtax_config_write')
   try {
     for (const provider of ['claude', 'codex'] as const) {
       const contract = configuration.contracts[provider]
       updateCharge.run(
         configuration.charges[provider],
+        configuration.unknownChargeReasons?.[provider] ?? null,
         contract?.startedOn ?? null,
         contract?.endedOn ?? null,
         provider,
@@ -1644,7 +1713,12 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
     ).run(String(configuration.unobservedRatio))
     db.exec('DELETE FROM provider_month_charges')
     for (const charge of configuration.monthlyCharges) {
-      insertMonthlyCharge.run(charge.provider, charge.month, charge.amountJpy)
+      insertMonthlyCharge.run(
+        charge.provider,
+        charge.month,
+        charge.amountJpy,
+        charge.unknownAmountReason ?? null,
+      )
     }
     if (configuration.chargePeriods !== undefined) {
       db.exec('DELETE FROM provider_charge_periods')
@@ -1658,12 +1732,17 @@ export function saveConfiguration(configuration: LocalConfiguration): void {
           period.billedOn ?? null,
           period.amountJpy,
           period.note ?? null,
+          period.unknownAmountReason ?? null,
+          period.evidenceIds === undefined ? null : JSON.stringify(period.evidenceIds),
+          period.contractConfirmation === undefined ? null : JSON.stringify(period.contractConfirmation),
         )
       }
     }
-    db.exec('COMMIT')
+    advanceWorkspaceRevision(db)
+    db.exec('RELEASE devtax_config_write')
   } catch (error) {
-    db.exec('ROLLBACK')
+    db.exec('ROLLBACK TO devtax_config_write')
+    db.exec('RELEASE devtax_config_write')
     throw error
   }
 }

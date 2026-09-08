@@ -54,7 +54,7 @@ describe('monthly subscription allocation', () => {
     expect(result.lines.reduce((sum, line) => sum + line.allocatedAmountJpy, 0)).toBe(100)
   })
 
-  it('reserves 25 percent when unobserved use is unknown', () => {
+  it('keeps the entire source pending without inventing an unobserved percentage', () => {
     const result = allocateMonthlySubscription({
       provider: 'claude',
       billingMonth: '2026-07',
@@ -63,12 +63,13 @@ describe('monthly subscription allocation', () => {
       unobservedUsage: { kind: 'unknown' },
     })
 
-    expect(result.unobservedUsageRatio).toBe(0.25)
-    expect(result.lines[0]?.allocatedAmountJpy).toBe(750)
-    expect(result.lines[1]).toMatchObject({
-      kind: 'unobserved',
-      allocatedAmountJpy: 250,
-    })
+    expect(result.unobservedUsageRatio).toBeNull()
+    expect(result.unobservedUsageEquivalent).toBeNull()
+    expect(result.status).toBe('pending')
+    expect(result.pendingAmountJpy).toBe(1_000)
+    expect(result.capturedUsageWeight).toBe(10)
+    expect(result.lines).toEqual([])
+    expect(() => assertAllocationInvariant(result)).not.toThrow()
     expect(result.warnings).toHaveLength(1)
   })
 
@@ -81,12 +82,26 @@ describe('monthly subscription allocation', () => {
       unobservedUsage: { kind: 'confirmed-none' },
     })
 
-    expect(result.unobservedUsageRatio).toBe(1)
-    expect(result.lines[0]).toMatchObject({
-      kind: 'unobserved',
-      allocatedAmountJpy: 3_000,
-    })
+    expect(result.unobservedUsageRatio).toBe(0)
+    expect(result.status).toBe('pending')
+    expect(result.pendingAmountJpy).toBe(3_000)
+    expect(result.lines).toEqual([])
     expect(result.invariantSatisfied).toBe(true)
+  })
+
+  it('continues known allocations when another source is unresolved', () => {
+    const shared = {
+      billingMonth: '2026-06' as const,
+      monthlyFeeJpy: 1_000,
+      usageLines: [{ id: 'a', bucket: 'product' as const, usageWeight: 1 }],
+    }
+    const [unknown, known] = allocateSubscriptions([
+      { ...shared, provider: 'claude', unobservedUsage: { kind: 'unknown' } },
+      { ...shared, provider: 'codex', unobservedUsage: { kind: 'confirmed-none' } },
+    ])
+    expect(unknown?.pendingAmountJpy).toBe(1_000)
+    expect(known?.lines[0]?.allocatedAmountJpy).toBe(1_000)
+    expect(known?.status).toBe('allocated')
   })
 
   it('keeps Claude and Codex as separate denominators', () => {

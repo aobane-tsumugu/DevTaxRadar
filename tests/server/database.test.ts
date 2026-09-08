@@ -1,3 +1,4 @@
+import { chargeContractBasis, chargeContractStatus } from '../../src/core/chargePeriods.js'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -126,6 +127,74 @@ describe('session storage', () => {
   it('同じセッションを二重に保存しない', () => {
     db.replaceProviderSessions('claude', [session(), session()], diagnostics)
     expect(db.getUsageSessions()).toHaveLength(1)
+  })
+  it('migrates invoice contract confirmations with backup and preserves snapshots after restart', async () => {
+    const initial = db.getDatabase()
+    const configuration = db.getConfiguration()
+    configuration.chargePeriods = [{id:'contract-invoice',provider:'claude',planName:'既存請求', serviceStartedOn:'2026-01-01',serviceEndedOn:'2026-01-31',amountJpy:1000,evidenceIds:['e']}]
+    db.saveConfiguration(configuration)
+    initial.exec('ALTER TABLE provider_charge_periods DROP COLUMN contract_confirmation_json')
+    initial.close()
+    vi.resetModules()
+    db = await import('../../src/server/database.ts')
+    const restored = db.getConfiguration()
+    expect(restored.chargePeriods).toEqual(configuration.chargePeriods)
+    const filename = readdirSync(sessionDirectory).find((name) => name.includes('before-charge-contract-confirmation-'))!
+    expect(filename).toBeTruthy()
+    const backup = new DatabaseSync(join(sessionDirectory,filename), { readOnly: true })
+    try {
+      expect(backup.prepare('PRAGMA integrity_check').get()).toEqual({integrity_check:'ok'})
+      expect(backup.prepare('SELECT amount_jpy FROM provider_charge_periods').get()).toEqual({amount_jpy:1000})
+    } finally { backup.close() }
+    const period = restored.chargePeriods[0]!
+    period.contractConfirmation = { reference:'業務契約',reason:'請求と契約明細を照合',confirmedAt:'2026-09-09T00:00:00Z',basis:chargeContractBasis(period) }
+    db.saveConfiguration(restored)
+    db.getDatabase().close()
+    vi.resetModules()
+    db = await import('../../src/server/database.ts')
+    expect(db.getConfiguration().chargePeriods).toEqual(restored.chargePeriods)
+    period.amountJpy = 2000
+    db.saveConfiguration(restored)
+    const changed = db.getConfiguration().chargePeriods[0]!
+    expect(chargeContractStatus(changed)).toBe('changed')
+    expect(changed.contractConfirmation!.basis.amountJpy).toBe(1000)
+  })
+  it('adds invoice evidence storage after a verified backup and retains old invoice data', async () => {
+    const initial = db.getDatabase()
+    initial.exec(
+      "INSERT INTO provider_charge_periods(id,provider,plan_name,service_started_on,service_ended_on,amount_jpy,note) VALUES ('old-invoice','claude','既存請求','2026-01-01','2026-01-31',1234,'既存の説明')",
+    )
+    initial.exec('ALTER TABLE provider_charge_periods DROP COLUMN evidence_ids_json')
+    initial.close()
+    vi.resetModules()
+    db = await import('../../src/server/database.ts')
+    const configuration = db.getConfiguration()
+    expect(configuration.chargePeriods[0]).toMatchObject({
+      id: 'old-invoice',
+      amountJpy: 1234,
+      note: '既存の説明',
+    })
+    expect(configuration.chargePeriods[0]!.evidenceIds).toBeUndefined()
+    const file = readdirSync(sessionDirectory).find((name) =>
+      name.includes('before-charge-period-evidence-'),
+    )!
+    expect(file).toBeTruthy()
+    const backup = new DatabaseSync(join(sessionDirectory, file), { readOnly: true })
+    try {
+      expect(backup.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' })
+      expect(backup.prepare('SELECT amount_jpy,note FROM provider_charge_periods').get()).toEqual({
+        amount_jpy: 1234,
+        note: '既存の説明',
+      })
+    } finally {
+      backup.close()
+    }
+    configuration.chargePeriods[0]!.evidenceIds = ['invoice-proof']
+    db.saveConfiguration(configuration)
+    db.getDatabase().close()
+    vi.resetModules()
+    db = await import('../../src/server/database.ts')
+    expect(db.getConfiguration().chargePeriods[0]!.evidenceIds).toEqual(['invoice-proof'])
   })
 
   it('既存のセッションキーと制作物キーを保ったまま読み取り元列を移行し、事前backupを検証する', async () => {

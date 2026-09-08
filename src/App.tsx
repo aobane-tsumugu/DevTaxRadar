@@ -1,4 +1,11 @@
+import WorkspaceAttemptPanel from './client/pages/WorkspaceAttemptPanel'
+import {
+  writeWorkspaceAttempt,
+  removeWorkspaceAttempt,
+  type WorkspaceAttempt,
+} from './client/workspaceAttempt'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import RestoreSourcesPanel from './client/pages/RestoreSourcesPanel'
 import {
   demoDiagnosis,
   demoLedger,
@@ -10,20 +17,17 @@ import {
   type TaxGroup,
 } from './client/dashboard'
 import {
-  getDiagnosis,
-  getConfiguration,
   getFolders,
+  getWorkspace,
+  saveWorkspace,
+  previewWorkspace,
+  ApiRequestError,
   getHistorySources,
   getScanProgress,
-  getLedger,
-  getPlanning,
   getPlanningExport,
   getRuntime,
   createHistorySource,
   removeHistorySource,
-  savePlanning,
-  savePlanningRules,
-  saveConfiguration,
   saveRetention,
   scanHistory,
   testHistorySource,
@@ -42,20 +46,32 @@ import type {
 } from './client/types'
 import type {
   Diagnosis,
-  PlanningLedger,
   PlanningSnapshot,
   ProjectClassification,
   ProjectRuleRecord,
 } from './planning/types'
-import { buildFilingScenarios } from './core/filingScenarios'
+import { annualAiView, belongsToYear } from './client/annualView'
+import AnnualOverview from './client/pages/AnnualOverview'
+import AnnualReviewSummary from './client/pages/AnnualReviewSummary'
 import Onboarding from './client/pages/Onboarding'
+import type { ConsultationNavigation } from './client/consultationNavigation'
 import FolderAssignmentPage from './client/pages/FolderAssignmentPage'
+import CostsPage from './client/pages/CostsPage'
+import BalancesPage from './client/pages/BalancesPage'
+import WorkspaceImpactPanel, {
+  type WorkspaceImpactState,
+} from './client/pages/WorkspaceImpactPanel'
+import WorkspaceConflictPanel, {
+  type WorkspaceComparison,
+} from './client/pages/WorkspaceConflictPanel'
+import type { WorkspaceContents } from './core/workspaceMerge'
+import RecordStatusPanel from './client/pages/RecordStatusPanel'
+import { mergeWorkspaceDrafts } from './core/workspaceMerge'
 import {
   CLASSIFICATION_LABELS,
   categoryLabel,
   EmptyState,
   GROUP_CLASS,
-  GROUP_LABELS,
   incomeCategoryLabel,
   lifecycleLabel,
   PanelHeading,
@@ -63,32 +79,69 @@ import {
   usageModeLabel,
   yen,
 } from './client/pages/shared'
+import type { WorkspaceDraft, WorkspaceView, WorkspaceSave } from './planning/workspace'
 import './index.css'
 
-type Page = 'summary' | 'evidence' | 'folders' | 'guide'
+type Page = 'summary' | 'evidence' | 'folders' | 'guide' | 'costs' | 'balances'
 type Provider = 'すべて' | 'Claude Code' | 'Codex'
 
 function App() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [page, setPage] = useState<Page>('summary')
+  const [balancesOpened, setBalancesOpened] = useState(false)
+  const [balanceNavigation, setBalanceNavigation] = useState<{
+    year: number
+    request: number
+    datasetId?: string
+  }>()
   const [provider, setProvider] = useState<Provider>('すべて')
   const [product, setProduct] = useState('すべて')
   const [onboarding, setOnboarding] = useState(false)
+  const [consultationContext, setConsultationContext] = useState<ConsultationNavigation>()
   const [onboardingStep, setOnboardingStep] = useState(0)
   const [selectedAllocation, setSelectedAllocation] = useState<Allocation | null>(null)
   const [runtime, setRuntime] = useState<RuntimeData | null>(null)
   const [configuration, setConfiguration] = useState<LocalConfiguration | null>(null)
   const [planning, setPlanningState] = useState<PlanningSnapshot>(demoPlanning)
   const [diagnosis, setDiagnosis] = useState<Diagnosis>(demoDiagnosis)
-  const [ledger, setLedger] = useState<PlanningLedger>(demoLedger)
   const [folders, setFolders] = useState<FolderSummary[]>([])
   const [historySources, setHistorySources] = useState<HistorySource[]>([])
   const [rulesBusy, setRulesBusy] = useState(false)
   const [rulesError, setRulesError] = useState<string | null>(null)
   const [runtimeLoading, setRuntimeLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const autoOnboardingShown = useRef(false)
+  const pendingSave = useRef<WorkspaceSave | null>(null)
+  const workspaceBase = useRef<WorkspaceDraft | null>(null)
+  const recoveredWorkspace = useRef(false)
+  const [editorBase, setEditorBase] = useState<WorkspaceDraft | null>(null)
+  const editorBaseRef = useRef<WorkspaceDraft | null>(null)
+  const refreshSequence = useRef(0)
+
+  function updateEditorBase(next: WorkspaceDraft | null): void {
+    editorBaseRef.current = next
+    setEditorBase(next)
+  }
+
+  function openOnboarding(context?: ConsultationNavigation): void {
+    setConsultationContext(context)
+    recoveredWorkspace.current = false
+    updateEditorBase(workspaceBase.current ? structuredClone(workspaceBase.current) : null)
+    setOnboarding(true)
+  }
+  const [comparison, setComparison] = useState<WorkspaceComparison | null>(null)
+  const [resolvedSaveCount, setResolvedSaveCount] = useState(0)
+  const [resolvedSaveMessage, setResolvedSaveMessage] = useState(
+    '比較して選んだ内容を保存しました。入力を続けられます。',
+  )
+  const [impact, setImpact] = useState<WorkspaceImpactState | null>(null)
+  const impactRequest = useRef(0)
+  const reviewCompletion = useRef<((saved: boolean) => void) | null>(null)
 
   useEffect(() => {
+    setLoadError(null)
+    setRuntimeLoading(true)
     if (!isLocalRuntime()) {
       getDashboardData().then(setData)
       setRuntimeLoading(false)
@@ -114,9 +167,14 @@ function App() {
       }
       if (!cancelled) await refreshUsageViews()
     })()
-      .catch(async () => {
-        // The standalone Vite preview intentionally falls back to demo data.
-        if (!cancelled) setData(await getDashboardData())
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setLoadError(
+            error instanceof Error && error.message
+              ? error.message
+              : 'ローカルデータの読込に失敗しました。',
+          )
+        }
       })
       .finally(() => {
         if (!cancelled) setRuntimeLoading(false)
@@ -124,10 +182,15 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadAttempt])
 
   useEffect(() => {
+    if (runtime?.restoreRequiresReconnect) {
+      autoOnboardingShown.current = true
+      return
+    }
     if (
+      onboarding ||
       runtimeLoading ||
       autoOnboardingShown.current ||
       !data ||
@@ -136,44 +199,46 @@ function App() {
     )
       return
     const hasAnyCharge =
+      configuration.charges.claude === null ||
       configuration.charges.claude > 0 ||
+      configuration.charges.codex === null ||
       configuration.charges.codex > 0 ||
-      configuration.monthlyCharges.some((charge) => charge.amountJpy > 0) ||
-      configuration.chargePeriods.some((charge) => charge.amountJpy > 0)
+      configuration.monthlyCharges.length > 0 ||
+      configuration.chargePeriods.some(
+        (charge) => charge.amountJpy === null || charge.amountJpy > 0,
+      )
     if (!hasAnyCharge || data.meta.sessionCount === 0) {
       autoOnboardingShown.current = true
       setOnboardingStep(data.meta.sessionCount > 0 ? 1 : 0)
-      setOnboarding(true)
+      openOnboarding()
     }
-  }, [configuration, data, runtimeLoading])
+  }, [configuration, data, runtimeLoading, onboarding, runtime?.restoreRequiresReconnect])
+
+  function applyWorkspace(next: WorkspaceView, saved = false): void {
+    workspaceBase.current = structuredClone({
+      revision: next.revision,
+      configuration: next.configuration,
+      planning: next.planning,
+    })
+    if (saved && editorBaseRef.current) updateEditorBase(structuredClone(workspaceBase.current))
+    setData(next.dashboard)
+    setConfiguration(next.configuration)
+    setPlanningState(next.planning)
+    setDiagnosis(next.diagnosis)
+  }
 
   async function refreshUsageViews(): Promise<void> {
-    const [
-      nextDashboard,
-      nextConfiguration,
-      nextPlanning,
-      nextDiagnosis,
-      nextLedger,
-      nextFolders,
-      nextSources,
-    ] = await Promise.all([
-      getDashboardData(),
-      getConfiguration(),
-      getPlanning(),
-      getDiagnosis(),
-      getLedger(),
+    const sequence = ++refreshSequence.current
+    const [nextWorkspace, nextFolders, nextSources] = await Promise.all([
+      getWorkspace(),
       getFolders(),
       getHistorySources(),
     ])
-    setData(nextDashboard)
-    setConfiguration(nextConfiguration)
-    setPlanningState(nextPlanning)
-    setDiagnosis(nextDiagnosis)
-    setLedger(nextLedger)
+    if (sequence !== refreshSequence.current) return
+    applyWorkspace(nextWorkspace)
     setFolders(nextFolders.folders)
     setHistorySources(nextSources.sources)
   }
-
   async function runScan(
     providers: ProviderKey[],
     mode: ScanMode = 'incremental',
@@ -223,58 +288,274 @@ function App() {
     return result
   }
 
-  async function storeConfiguration(nextConfiguration: LocalConfiguration): Promise<void> {
-    const activeRuntime = runtime ?? (await getRuntime())
-    if (!runtime) setRuntime(activeRuntime)
-    await saveConfiguration(activeRuntime.csrfToken, nextConfiguration)
-    setConfiguration(nextConfiguration)
-    setData(await getDashboardData())
+  async function storeWorkspace(
+    nextConfiguration: LocalConfiguration,
+    nextPlanning: PlanningSnapshot,
+  ): Promise<void> {
+    const base = editorBaseRef.current ?? workspaceBase.current
+    if (!base) throw new Error('保存元の版を読み込めていません。画面を再読込してください。')
+    await commitWorkspace(nextConfiguration, nextPlanning, base)
   }
 
-  async function storePlanning(nextPlanning: PlanningSnapshot): Promise<void> {
+  async function readComparison(current: WorkspaceComparison): Promise<void> {
+    setComparison(current)
+    try {
+      const latest = await getWorkspace()
+      setComparison((value) => (value === current ? { ...current, latest } : value))
+    } catch (error) {
+      setComparison((value) =>
+        value === current
+          ? {
+              ...current,
+              loadError:
+                error instanceof Error ? error.message : '最新の内容を読み込めませんでした。',
+            }
+          : value,
+      )
+    }
+  }
+
+  async function commitWorkspace(
+    nextConfiguration: LocalConfiguration,
+    nextPlanning: PlanningSnapshot,
+    base: WorkspaceDraft,
+    previewHash?: string,
+  ): Promise<void> {
     const activeRuntime = runtime ?? (await getRuntime())
     if (!runtime) setRuntime(activeRuntime)
-    await savePlanning(activeRuntime.csrfToken, nextPlanning)
-    const [nextDiagnosis, nextLedger, nextDashboard] = await Promise.all([
-      getDiagnosis(),
-      getLedger(),
-      getDashboardData(),
-    ])
-    setPlanningState(nextPlanning)
-    setDiagnosis(nextDiagnosis)
-    setLedger(nextLedger)
-    setData(nextDashboard)
+    const body = {
+      expectedRevision: base.revision,
+      configuration: nextConfiguration,
+      planning: nextPlanning,
+      ...(previewHash ? { previewHash } : {}),
+    }
+    const previous = pendingSave.current
+    const sameRequest =
+      previous && JSON.stringify({ ...previous, requestId: undefined }) === JSON.stringify(body)
+    const request = sameRequest
+      ? previous
+      : structuredClone({ ...body, requestId: crypto.randomUUID() })
+    pendingSave.current = request
+    if (recoveredWorkspace.current) {
+      const currentRuntime = await getRuntime()
+      if (currentRuntime.datasetId !== runtime?.datasetId)
+        throw new Error('接続先のデータが変わっています。再読込してください。')
+      const latest = await getWorkspace()
+      const desired = { configuration: nextConfiguration, planning: nextPlanning }
+      if (mergeWorkspaceDrafts(desired, desired, latest).changes.length === 0) {
+        pendingSave.current = null
+        recoveredWorkspace.current = false
+        applyWorkspace(latest, true)
+        return
+      }
+      if (
+        base.revision !== latest.revision ||
+        mergeWorkspaceDrafts(base, base, latest).changes.length
+      ) {
+        setComparison({
+          base: structuredClone(base),
+          local: request,
+          latest,
+          requirePreview: Boolean(previewHash),
+        })
+        throw new Error('控えの保存元から内容が変わっています。最新との比較で確認してください。')
+      }
+    }
+    const attempt = activeRuntime.datasetId
+      ? writeWorkspaceAttempt(window.localStorage, {
+          version: 1,
+          datasetId: activeRuntime.datasetId,
+          createdAt: new Date().toISOString(),
+          base: structuredClone(base),
+          request,
+        })
+      : null
+    try {
+      const next = await saveWorkspace(activeRuntime.csrfToken, request)
+      pendingSave.current = null
+      refreshSequence.current++
+      applyWorkspace(next, true)
+      if (attempt) removeWorkspaceAttempt(window.localStorage, attempt)
+      recoveredWorkspace.current = false
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.status === 409 &&
+        error.code === 'workspace_conflict'
+      ) {
+        if (previewHash) setImpact(null)
+        await readComparison({
+          base: structuredClone(base),
+          local: request,
+          latest: null,
+          requirePreview: Boolean(previewHash),
+        })
+      }
+      throw error
+    }
+  }
+
+  async function retryWorkspaceAttempt(record: WorkspaceAttempt): Promise<void> {
+    const freshRuntime = await getRuntime()
+    if (freshRuntime.datasetId !== record.datasetId)
+      throw new Error('接続先の資料が変わっています。再読込して確認してください。')
+    // Revalidate the retained request before sending its original ID and content.
+    const retained = writeWorkspaceAttempt(window.localStorage, record)
+    try {
+      const next = await saveWorkspace(freshRuntime.csrfToken, retained.request)
+      refreshSequence.current++
+      applyWorkspace(next)
+      removeWorkspaceAttempt(window.localStorage, retained)
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.status === 409 &&
+        error.code === 'workspace_conflict'
+      ) {
+        await readComparison({
+          base: retained.base,
+          local: retained.request,
+          latest: null,
+          requirePreview: Boolean(retained.request.previewHash),
+        })
+        throw new Error(
+          '別の保存で内容が変わっています。最新との比較で確認してください。元の要求は保持しています。',
+        )
+      }
+      throw error
+    }
+  }
+
+  async function resolveComparison(contents: WorkspaceContents): Promise<void> {
+    if (!comparison?.latest) return
+    if (comparison.requirePreview) {
+      const base = comparison.latest
+      setComparison(null)
+      await openWorkspacePreview(contents.configuration, contents.planning, base)
+      return
+    }
+    await commitWorkspace(contents.configuration, contents.planning, comparison.latest)
+    setComparison(null)
+    setRulesError(null)
+    setResolvedSaveMessage('比較して選んだ内容を保存しました。入力を続けられます。')
+    setResolvedSaveCount((value) => value + 1)
+    try {
+      setFolders((await getFolders()).folders)
+    } catch {
+      setRulesError('選んだ内容は保存しました。フォルダ一覧の再読込に失敗しています。')
+    }
+  }
+
+  async function loadImpact(current: WorkspaceImpactState): Promise<void> {
+    const request = ++impactRequest.current
+    setImpact(current)
+    try {
+      const activeRuntime = runtime ?? (await getRuntime())
+      const report = await previewWorkspace(activeRuntime.csrfToken, current.input)
+      if (request !== impactRequest.current) return
+      setImpact((value) =>
+        value === current ? { ...current, report, error: undefined, stale: false } : value,
+      )
+    } catch (error) {
+      if (request !== impactRequest.current) return
+      if (
+        error instanceof ApiRequestError &&
+        error.status === 409 &&
+        error.code === 'workspace_conflict'
+      ) {
+        setImpact(null)
+        await readComparison({
+          base: current.base,
+          local: { ...current.input, requestId: crypto.randomUUID() },
+          latest: null,
+          requirePreview: true,
+        })
+      } else
+        setImpact((value) =>
+          value === current
+            ? {
+                ...current,
+                error: error instanceof Error ? error.message : '影響を確認できませんでした。',
+              }
+            : value,
+        )
+    }
+  }
+
+  async function openWorkspacePreview(
+    nextConfiguration: LocalConfiguration,
+    nextPlanning: PlanningSnapshot,
+    base = editorBaseRef.current ?? workspaceBase.current,
+  ): Promise<void> {
+    if (!base) throw new Error('保存元の版を読み込めていません。')
+    await loadImpact({
+      base: structuredClone(base),
+      input: structuredClone({
+        expectedRevision: base.revision,
+        configuration: nextConfiguration,
+        planning: nextPlanning,
+      }),
+      report: null,
+    })
+  }
+
+  async function reviewWorkspace(
+    nextConfiguration: LocalConfiguration,
+    nextPlanning: PlanningSnapshot,
+  ): Promise<boolean> {
+    const completed = new Promise<boolean>((resolve) => {
+      reviewCompletion.current = resolve
+    })
+    try {
+      await openWorkspacePreview(nextConfiguration, nextPlanning)
+    } catch (error) {
+      reviewCompletion.current?.(false)
+      reviewCompletion.current = null
+      throw error
+    }
+    return completed
+  }
+
+  async function saveImpact(): Promise<void> {
+    if (!impact?.report || impact.stale) return
+    try {
+      await commitWorkspace(
+        impact.input.configuration,
+        impact.input.planning,
+        impact.base,
+        impact.report.previewHash,
+      )
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.code === 'preview_changed')
+        setImpact((current) => (current ? { ...current, stale: true, error: error.message } : null))
+      throw error
+    }
+    setImpact(null)
+    setRulesError(null)
+    setResolvedSaveMessage('変更の影響を確認した内容を保存しました。入力を続けられます。')
+    setResolvedSaveCount((value) => value + 1)
+    reviewCompletion.current?.(true)
+    reviewCompletion.current = null
+    try {
+      setFolders((await getFolders()).folders)
+    } catch {
+      setRulesError('変更は保存しました。フォルダ一覧の再読込に失敗しています。')
+    }
   }
 
   async function storeRules(rules: ProjectRuleRecord[]): Promise<void> {
     setRulesBusy(true)
     try {
-      const activeRuntime = runtime ?? (await getRuntime())
-      if (!runtime) setRuntime(activeRuntime)
-      await savePlanningRules(activeRuntime.csrfToken, rules)
-      const [nextFolders, nextPlanning, nextDashboard, nextDiagnosis] = await Promise.all([
-        getFolders(),
-        getPlanning(),
-        getDashboardData(),
-        getDiagnosis(),
-      ])
-      setFolders(nextFolders.folders)
-      setPlanningState(nextPlanning)
-      setData(nextDashboard)
-      setDiagnosis(nextDiagnosis)
+      if (!configuration) throw new Error('料金設定を読み込めていません。')
+      await openWorkspacePreview(configuration, { ...planning, projectRules: rules })
       setRulesError(null)
     } catch (error) {
-      const detail = error instanceof Error && error.message ? error.message : undefined
-      setRulesError(
-        detail
-          ? `保存できませんでした。もう一度お試しください。（${detail}）`
-          : '保存できませんでした。もう一度お試しください。',
-      )
+      const detail = error instanceof Error ? error.message : '保存できませんでした。'
+      setRulesError(detail)
     } finally {
       setRulesBusy(false)
     }
   }
-
   async function reclassifyAllocation(
     row: Allocation,
     classification: ProjectClassification,
@@ -311,10 +592,29 @@ function App() {
     if (!data) return []
     return data.allocations.filter(
       (row) =>
+        (page !== 'summary' || belongsToYear(row, planning.profile.taxYear)) &&
         (provider === 'すべて' || row.provider === provider) &&
         (product === 'すべて' || row.product === product),
     )
-  }, [data, product, provider])
+  }, [data, product, provider, page, planning.profile.taxYear])
+
+  if (loadError) {
+    return (
+      <main className="loading-shell" aria-busy="false">
+        <div className="radar-mark">D</div>
+        <h1>ローカルデータを読み込めませんでした</h1>
+        <p role="alert">{loadError}</p>
+        <p>DevTaxが起動していることを確認して、もう一度読み込んでください。</p>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+        >
+          もう一度読み込む
+        </button>
+      </main>
+    )
+  }
 
   if (!data) {
     return (
@@ -325,6 +625,7 @@ function App() {
     )
   }
 
+  const annual = annualAiView(data, planning.profile.taxYear)
   const representativeTotals = allocations.reduce(
     (sum, row) => {
       sum[row.group] += row.amount
@@ -334,7 +635,7 @@ function App() {
   )
   const filteredTotals =
     provider === 'すべて' && product === 'すべて'
-      ? data.months.reduce(
+      ? annual.months.reduce(
           (sum, month) => ({
             current: sum.current + month.current,
             future: sum.future + month.future,
@@ -346,7 +647,7 @@ function App() {
 
   const products = ['すべて', ...new Set(data.allocations.map((row) => row.product))]
   const unassignedFolderCount = folders.filter((folder) => folder.unassignedSessionCount > 0).length
-  const filteredMonths = data.months.map((month) => {
+  const filteredMonths = annual.months.map((month) => {
     if (provider === 'すべて' && product === 'すべて') return month
     const rows = allocations.filter((row) => row.month === month.label)
     return {
@@ -370,12 +671,33 @@ function App() {
 
         <nav aria-label="メインナビゲーション">
           <button
+            className={page === 'costs' ? 'nav-item active' : 'nav-item'}
+            onClick={() => setPage('costs')}
+          >
+            <span aria-hidden="true">01</span>
+            <span>
+              支払と配分<small>全費用の原額・期間・対応先</small>
+            </span>
+          </button>
+          <button
+            className={page === 'balances' ? 'nav-item active' : 'nav-item'}
+            onClick={() => {
+              setBalancesOpened(true)
+              setPage('balances')
+            }}
+          >
+            <span aria-hidden="true">02</span>
+            <span>
+              残高と繰越し<small>期首・増減・期末の記録</small>
+            </span>
+          </button>
+          <button
             className={page === 'summary' ? 'nav-item active' : 'nav-item'}
             onClick={() => setPage('summary')}
           >
             <span aria-hidden="true">⌁</span>
             <span>
-              今年どうなる？<small>年間見込と境界</small>
+              今年どうなる？<small>対象年の費用と確認事項</small>
             </span>
           </button>
           <button
@@ -419,7 +741,7 @@ function App() {
             className="quiet-button"
             onClick={() => {
               setOnboardingStep(0)
-              setOnboarding(true)
+              openOnboarding()
             }}
           >
             設定を確認
@@ -435,7 +757,7 @@ function App() {
       <div className="workspace" id="top">
         <header className="topbar">
           <div>
-            <span className="eyebrow">対象年</span>
+            <span className="eyebrow">{page === 'costs' ? '計画に設定した年' : '対象年'}</span>
             <strong>{planning.profile.taxYear}年</strong>
             <span className="profile-pill">
               {incomeCategoryLabel(planning.profile.incomeCategory)}
@@ -450,7 +772,7 @@ function App() {
                 className="primary-button"
                 onClick={() => {
                   setOnboardingStep(3)
-                  setOnboarding(true)
+                  openOnboarding()
                 }}
               >
                 ＋ 月次確認
@@ -460,6 +782,37 @@ function App() {
         </header>
 
         <main className="content">
+          {runtime?.datasetId && data.meta.source === 'local' && (
+            <WorkspaceAttemptPanel
+              key={runtime.datasetId}
+              datasetId={runtime.datasetId}
+              disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)}
+              onRetry={retryWorkspaceAttempt}
+            />
+          )}
+          {runtime?.restoreRequiresReconnect && (
+            <RestoreSourcesPanel
+              onComplete={() =>
+                setRuntime((current) => current && { ...current, restoreRequiresReconnect: false })
+              }
+            />
+          )}
+          {Boolean(data.unknownCharges?.length) && (
+            <section className="panel" aria-label="未確認のAI請求額">
+              <strong>請求額が未確認のAI契約が{data.unknownCharges!.length}件あります</strong>
+              <p>
+                AIの金額集計は確認済みの請求分です。未確認分の原額・期間・理由は「支払と配分」で確認できます。
+              </p>
+              <ul>
+                {data.unknownCharges!.map((charge) => (
+                  <li key={charge.id}>
+                    {charge.provider === 'claude' ? 'Claude Code' : 'Codex'}：
+                    {charge.serviceStartedOn}～{charge.serviceEndedOn} / {charge.reason}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {data.meta.source === 'demo' && (
             <section className="public-demo-banner" aria-labelledby="public-demo-title">
               <span className="demo-shield" aria-hidden="true">
@@ -487,31 +840,43 @@ function App() {
           <section className="page-heading">
             <div>
               <span className="eyebrow">
-                {page === 'summary'
-                  ? '年間の見通し'
-                  : page === 'evidence'
-                    ? '数字の根拠'
-                    : page === 'folders'
-                      ? '履歴と制作物の対応'
-                      : 'やさしい税務ガイド'}
+                {page === 'balances'
+                  ? '今年の増減と翌年への引継ぎ'
+                  : page === 'costs'
+                    ? '支払から費用の行き先へ'
+                    : page === 'summary'
+                      ? '年間の見通し'
+                      : page === 'evidence'
+                        ? '数字の根拠'
+                        : page === 'folders'
+                          ? '履歴と制作物の対応'
+                          : 'やさしい税務ガイド'}
               </span>
               <h1>
-                {page === 'summary'
-                  ? '今年どうなる？'
-                  : page === 'evidence'
-                    ? 'なぜそうなる？'
-                    : page === 'folders'
-                      ? 'フォルダの割当'
-                      : '税務の言葉を知る'}
+                {page === 'balances'
+                  ? '残高と繰越し'
+                  : page === 'costs'
+                    ? '支払と配分'
+                    : page === 'summary'
+                      ? '今年どうなる？'
+                      : page === 'evidence'
+                        ? 'なぜそうなる？'
+                        : page === 'folders'
+                          ? 'フォルダの割当'
+                          : '税務の言葉を知る'}
               </h1>
               <p>
-                {page === 'summary'
-                  ? '定額のClaude Code／Codexを利用実態で配賦し、今年の費用と将来へ残る原価を見通します。'
-                  : page === 'evidence'
-                    ? '月額料金からAIサービス・月・作っているものまで、数字の由来を辿れます。'
-                    : page === 'folders'
-                      ? 'AI履歴の作業フォルダを、制作物と作業内容へ結び付けます。ここで割り当てた内容が配賦額の分類になります。'
-                      : '取得価額や資本的支出を、1文の結論と具体例から確認できます。'}
+                {page === 'balances'
+                  ? '制作物に関係する種類別残高を記録し、今年の増減と期末を確認します。'
+                  : page === 'costs'
+                    ? 'AI料金・設備・自宅費用・直接費を同じ資料で確認します。不明な費用基礎も原額と理由を残します。'
+                    : page === 'summary'
+                      ? '対象年の全費用、計算できた範囲と未確定の扱いを確認します。原額から今年・翌年への説明をつなぎます。'
+                      : page === 'evidence'
+                        ? '月額料金からAIサービス・月・作っているものまで、数字の由来を辿れます。'
+                        : page === 'folders'
+                          ? 'AI履歴の作業フォルダを、制作物と作業内容へ結び付けます。ここで割り当てた内容が配賦額の分類になります。'
+                          : '取得価額や資本的支出を、1文の結論と具体例から確認できます。'}
               </p>
             </div>
             {(page === 'summary' || page === 'evidence') && (
@@ -539,12 +904,54 @@ function App() {
             )}
           </section>
 
-          {page === 'summary' ? (
+          {balancesOpened && (
+            <div hidden={page !== 'balances'}>
+              <BalancesPage
+                onReviewAnswer={(context) => {
+                  setOnboardingStep(context.answer.kind === 'fact' ? 2 : 3)
+                  openOnboarding(context)
+                }}
+                navigation={balanceNavigation}
+                key={runtime?.datasetId}
+                datasetId={runtime?.datasetId}
+                planning={planning}
+                configuration={configuration}
+                local={data.meta.source === 'local'}
+                onManageUnits={() => {
+                  setOnboardingStep(2)
+                  openOnboarding()
+                }}
+              />
+            </div>
+          )}
+          {page === 'balances' ? null : page === 'costs' ? (
+            <CostsPage
+              initial={data.costProjection}
+              evidence={planning.evidence}
+              local={data.meta.source === 'local'}
+              onEdit={() => {
+                setOnboardingStep(3)
+                openOnboarding()
+              }}
+            />
+          ) : page === 'summary' ? (
             <SummaryPage
+              key={runtime?.datasetId}
+              onOpenBalances={() => {
+                setBalanceNavigation((previous) => ({
+                  year: planning.profile.taxYear,
+                  request: (previous?.request ?? 0) + 1,
+                  datasetId: runtime?.datasetId,
+                }))
+                setBalancesOpened(true)
+                setPage('balances')
+              }}
               data={data}
               planning={planning}
               diagnosis={diagnosis}
               months={filteredMonths}
+              undatedMonths={annual.undatedMonths}
+              onOpenCosts={() => setPage('costs')}
               totals={filteredTotals}
               onOpenEvidence={(allocation) => {
                 setSelectedAllocation(allocation)
@@ -553,7 +960,7 @@ function App() {
               onOpenGuide={() => setPage('guide')}
               onOpenOnboarding={() => {
                 setOnboardingStep(0)
-                setOnboarding(true)
+                openOnboarding()
               }}
               retention={runtime?.retention ?? null}
             />
@@ -561,7 +968,6 @@ function App() {
             <EvidencePage
               data={data}
               planning={planning}
-              ledger={ledger}
               diagnosis={diagnosis}
               allocations={allocations}
               selected={selectedAllocation}
@@ -586,23 +992,37 @@ function App() {
 
       {onboarding && (
         <Onboarding
+          consultation={consultationContext}
+          workspaceBase={editorBase ?? undefined}
+          onRestoreWorkspaceBase={async (base) => {
+            const currentRuntime = await getRuntime()
+            if (!runtime?.datasetId || currentRuntime.datasetId !== runtime.datasetId)
+              throw new Error('接続先のデータが変わっています。再読込してください。')
+            recoveredWorkspace.current = true
+            updateEditorBase(structuredClone(base))
+          }}
           step={onboardingStep}
           data={data}
           runtime={runtime}
           runtimeLoading={runtimeLoading}
           historySources={historySources}
-          configuration={configuration}
-          planning={planning}
+          configuration={editorBase?.configuration ?? configuration}
+          planning={editorBase?.planning ?? planning}
           unassignedFolderCount={unassignedFolderCount}
           onStep={setOnboardingStep}
           onScan={runScan}
           onSaveHistorySource={saveHistorySource}
           onTestHistorySource={testSourceVisibility}
           onRemoveHistorySource={deleteHistorySource}
-          onSave={storeConfiguration}
+          onSaveWorkspace={storeWorkspace}
+          onPreviewWorkspace={openWorkspacePreview}
+          onReviewWorkspace={reviewWorkspace}
+          suspended={comparison !== null || impact !== null}
+          resolvedSaveCount={resolvedSaveCount}
+          resolvedSaveMessage={resolvedSaveMessage}
           onSaveRetention={storeRetention}
-          onSavePlanning={storePlanning}
           onClose={() => {
+            updateEditorBase(null)
             setOnboarding(false)
             setOnboardingStep(0)
           }}
@@ -611,12 +1031,44 @@ function App() {
           }}
         />
       )}
+      {impact && (
+        <WorkspaceImpactPanel
+          key={impact.report?.previewHash ?? 'loading'}
+          impact={impact}
+          onSave={saveImpact}
+          onRefresh={() =>
+            void loadImpact({ ...impact, report: null, error: undefined, stale: false })
+          }
+          onCancel={() => {
+            impactRequest.current++
+            setImpact(null)
+            reviewCompletion.current?.(false)
+            reviewCompletion.current = null
+          }}
+        />
+      )}
+      {comparison && (
+        <WorkspaceConflictPanel
+          key={`${comparison.local.requestId}:${comparison.latest?.revision ?? 'loading'}`}
+          comparison={comparison}
+          onSave={resolveComparison}
+          onCancel={() => {
+            setComparison(null)
+            reviewCompletion.current?.(false)
+            reviewCompletion.current = null
+          }}
+          onRetry={() => void readComparison({ ...comparison, loadError: undefined })}
+        />
+      )}
     </div>
   )
 }
 
 function SummaryPage({
+  onOpenBalances,
   data,
+  undatedMonths,
+  onOpenCosts,
   planning,
   diagnosis,
   months,
@@ -626,9 +1078,12 @@ function SummaryPage({
   onOpenOnboarding,
   retention,
 }: {
+  onOpenBalances: () => void
   data: DashboardData
   planning: PlanningSnapshot
   diagnosis: Diagnosis
+  undatedMonths: number
+  onOpenCosts: () => void
   months: DashboardData['months']
   totals: Record<TaxGroup, number>
   onOpenEvidence: (allocation: Allocation) => void
@@ -637,7 +1092,7 @@ function SummaryPage({
   retention: RuntimeData['retention'] | null
 }) {
   const annualTotal = totals.current + totals.future + totals.review
-  const filingScenarios = buildFilingScenarios(totals)
+
   const maxMonth = Math.max(
     ...months.map((month) => month.current + month.future + month.review),
     1,
@@ -663,41 +1118,26 @@ function SummaryPage({
             </button>
           </div>
         )}
-      <section className="preparation-strip" aria-label="記録の準備状況">
-        <div>
-          <span>準備できた項目</span>
-          <strong>
-            {diagnosis.readiness.confirmed} / {diagnosis.readiness.total}
-          </strong>
-        </div>
-        <div>
-          <span>今月の確認</span>
-          <strong>
-            {data.guidance.filter((item) => item.severity === 'ok').length} / {data.guidance.length}
-          </strong>
-        </div>
-        <div>
-          <span>記録のある月</span>
-          <strong>{months.length}か月</strong>
-        </div>
-        <div className="small-wins" aria-label="できたこと">
-          <span className={data.meta.sessionCount > 0 ? 'done' : ''}>✓ 履歴</span>
-          <span className={planning.taxUnits.length > 0 ? 'done' : ''}>✓ 制作物</span>
-          <span className={planning.equipment.length > 0 ? 'done' : ''}>✓ 設備</span>
-          <span className={planning.homeCosts.length > 0 ? 'done' : ''}>✓ 自宅費用</span>
-          <span className={planning.evidence.length > 0 ? 'done' : ''}>✓ 証拠</span>
-        </div>
-      </section>
+      <AnnualOverview
+        year={planning.profile.taxYear}
+        projection={data.costProjection}
+        onOpenCosts={onOpenCosts}
+      />
+      <AnnualReviewSummary
+        year={planning.profile.taxYear}
+        local={data.meta.source === 'local'}
+        onOpenBalances={onOpenBalances}
+      />
+      <RecordStatusPanel
+        planning={planning}
+        sessionCount={data.meta.sessionCount}
+        onEdit={onOpenOnboarding}
+      />
       <section className="diagnosis-grid" aria-label="現在地診断と次の行動">
         <article className="panel position-panel">
           <PanelHeading
             title="現在地診断"
             subtitle="登録した事実から生成。税務判断を確定するものではありません"
-            trailing={
-              <span className="readiness-chip">
-                確認済み {diagnosis.readiness.confirmed}/{diagnosis.readiness.total}
-              </span>
-            }
           />
           <ul className="position-list">
             {diagnosis.currentPosition.map((item) => (
@@ -743,35 +1183,16 @@ function SummaryPage({
           )}
         </article>
       </section>
-      <section className="panel filing-scenario-panel" aria-label="申告区分ごとの結果比較">
-        <PanelHeading
-          title="申告区分ごとの見え方"
-          subtitle="申告方法を先に決めず、同じ履歴・売上・費用から違いを確認します"
-        />
-        <div className="filing-scenario-grid">
-          {filingScenarios.map((scenario) => (
-            <section key={scenario.id}>
-              <span>{scenario.title}</span>
-              <dl className="filing-scenario-values">
-                <div>
-                  <dt>当年の費用候補</dt>
-                  <dd>{yen.format(scenario.currentExpenseCandidateJpy)}</dd>
-                </div>
-                <div>
-                  <dt>将来分の原価候補</dt>
-                  <dd>{yen.format(scenario.futureCostCandidateJpy)}</dd>
-                </div>
-                <div>
-                  <dt>未分類・私用等</dt>
-                  <dd>{yen.format(scenario.reviewJpy)}</dd>
-                </div>
-              </dl>
-              <p>{scenario.condition}</p>
-            </section>
-          ))}
-        </div>
-      </section>
-      <section className="summary-grid" aria-label="年間サマリー">
+      <h2>{planning.profile.taxYear}年のAI料金の分類内訳</h2>
+      <p>
+        以下は選択したAIサービス・制作物の、確認済み料金の分類です。全費用の税務計算や採用済み残高ではありません。
+      </p>
+      {undatedMonths > 0 && (
+        <p role="status">
+          対象年を確認できない月が{undatedMonths}件あるため、この年の集計には含めていません。
+        </p>
+      )}
+      <section className="summary-grid" aria-label="対象年のAI分類内訳">
         {(['current', 'future', 'review'] as TaxGroup[]).map((group) => (
           <article className={`metric-card ${GROUP_CLASS[group]}`} key={group}>
             <div className="metric-top">
@@ -782,7 +1203,13 @@ function SummaryPage({
                 {group === 'current' ? '今年' : group === 'future' ? 'これから' : 'あとで確認'}
               </span>
             </div>
-            <h2>{GROUP_LABELS[group]}</h2>
+            <h2>
+              {group === 'current'
+                ? '当年処理に分類したAI料金'
+                : group === 'future'
+                  ? '開発原価等に分類したAI料金'
+                  : '私用・未分類・配分未算定等'}
+            </h2>
             <strong className="metric-value">{yen.format(totals[group])}</strong>
             <div className="metric-foot">
               <span>{annualTotal ? Math.round((totals[group] / annualTotal) * 100) : 0}%</span>
@@ -825,7 +1252,7 @@ function SummaryPage({
       <div className="main-grid">
         <section className="panel chart-panel">
           <PanelHeading
-            title="費用の行き先"
+            title="対象年のAI料金の行き先"
             subtitle="AIサービスごとに配賦した月額の積み上げ"
             trailing={
               <span className="confidence">
@@ -835,14 +1262,7 @@ function SummaryPage({
           />
           {months.length === 0 ? (
             <EmptyState
-              // Sessions exist but no month survived: the contract period, not a
-              // missing scan, is why this is empty. Telling the user to scan
-              // again would send them somewhere that cannot fix it.
-              message={
-                data.meta.sessionCount > 0
-                  ? '読み込んだ利用履歴が、入力された契約期間と重なっていません。費用ステップで契約の開始日・終了日を確認してください。'
-                  : 'AIの利用履歴がまだ読み込まれていません。はじめの準備から履歴を走査すると、月ごとの費用がここに出ます。'
-              }
+              message="対象年に対応するAI料金の集計がありません。支払・契約期間と履歴の対象月を確認してください。"
               action={
                 <button className="primary-button" onClick={onOpenOnboarding}>
                   はじめの準備を開く
@@ -854,11 +1274,11 @@ function SummaryPage({
               <div className="chart-legend" aria-hidden="true">
                 <span>
                   <i className="dot coral" />
-                  今年の費用
+                  当年処理への分類
                 </span>
                 <span>
                   <i className="dot indigo" />
-                  将来残高
+                  開発原価等への分類
                 </span>
                 <span>
                   <i className="dot amber" />
@@ -883,11 +1303,14 @@ function SummaryPage({
                           key={group}
                           className={`bar-part ${GROUP_CLASS[group]}`}
                           style={{ height: `${(month[group] / maxMonth) * 100}%` }}
-                          title={`${GROUP_LABELS[group]} ${yen.format(month[group])}`}
+                          title={`${{ current: '当年処理への分類', future: '開発原価等への分類', review: '私用・未分類等' }[group]} ${yen.format(month[group])}`}
                         />
                       ))}
                     </div>
-                    <strong>{month.label}</strong>
+                    <strong>
+                      {month.label}
+                      {month.unknownChargeIds?.length ? ' / 請求額未確認あり' : ''}
+                    </strong>
                   </div>
                 ))}
               </div>
@@ -896,17 +1319,10 @@ function SummaryPage({
         </section>
 
         <section className="panel guide-panel">
-          <PanelHeading title="今月の伴走メモ" subtitle="確認すると説明力が上がる項目" />
-          <div className="guide-score">
-            <div className="score-ring">
-              <strong>{diagnosis.readiness.confirmed}</strong>
-              <small>/{diagnosis.readiness.total}</small>
-            </div>
-            <div>
-              <strong>確認できた事実</strong>
-              <p>不足情報は{diagnosis.missingFacts.length}件です</p>
-            </div>
-          </div>
+          <PanelHeading
+            title="入力・履歴の確認事項"
+            subtitle="保存した入力と取り込んだ履歴からの案内です。確認完了の評価ではありません。"
+          />
           <ul className="guide-list">
             {data.guidance.map((item) => (
               <li key={item.title}>
@@ -925,8 +1341,8 @@ function SummaryPage({
 
       <section className="panel alerts-panel">
         <PanelHeading
-          title="金額境界レーダー"
-          subtitle="金額だけで結論を出さず、資産単位と供用状況も合わせて確認します"
+          title="AI分類額の参考境界"
+          subtitle="全期間のAI分類額による参考表示です。対象年の全費用・採用済み取得価額の判定は未接続です。"
           trailing={
             <button className="text-button" onClick={onOpenGuide}>
               判定ルールを見る →
@@ -935,7 +1351,13 @@ function SummaryPage({
         />
         <div className="alert-list">
           {data.boundaries.length === 0 ? (
-            <EmptyState message="金額境界を確認できる資産がまだありません。フォルダの割当で制作物を決めて分類すると、10万円などの境界に近づいた資産がここに出ます。" />
+            <EmptyState
+              message={
+                data.unknownCharges?.length
+                  ? '未確認のAI請求額があるため、金額境界の表示を保留しています。請求額を確認すると再計算します。'
+                  : '金額境界を確認できる資産がまだありません。フォルダの割当で制作物を決めて分類すると、10万円などの境界に近づいた資産がここに出ます。'
+              }
+            />
           ) : (
             data.boundaries.map((boundary) => {
               const pct = Math.min((boundary.amount / boundary.threshold) * 100, 100)
@@ -980,7 +1402,6 @@ function SummaryPage({
 function EvidencePage({
   data,
   planning,
-  ledger,
   diagnosis,
   allocations,
   selected,
@@ -991,7 +1412,6 @@ function EvidencePage({
 }: {
   data: DashboardData
   planning: PlanningSnapshot
-  ledger: PlanningLedger
   diagnosis: Diagnosis
   allocations: Allocation[]
   selected: Allocation | null
@@ -1010,7 +1430,7 @@ function EvidencePage({
         : new Blob(
             [
               `# DevTax 相談用出力\n\n年分: ${planning.profile.taxYear}\n\n` +
-                ledger.byTaxUnit
+                demoLedger.byTaxUnit
                   .map(
                     (item) => `- ${item.name}: ${yen.format(item.amountJpy)} / ${item.candidate}`,
                   )
@@ -1088,7 +1508,9 @@ function EvidencePage({
                   </td>
                   <td>{row.asset}</td>
                   <td>{row.stage}</td>
-                  <td className="number">{row.usageRate}%</td>
+                  <td className="number">
+                    {row.usageRate === null ? '未算定' : `${row.usageRate}%`}
+                  </td>
                   <td className="number">
                     <strong>{yen.format(row.amount)}</strong>
                   </td>
@@ -1220,7 +1642,11 @@ function EvidencePage({
               </div>
               <div>
                 <dt>加重トークン</dt>
-                <dd>{active.session.tokens.toLocaleString()}</dd>
+                <dd>
+                  {active.session.tokens === null
+                    ? '対象外（支払の確認行）'
+                    : active.session.tokens.toLocaleString()}
+                </dd>
               </div>
               <div>
                 <dt>分類ルール</dt>
@@ -1235,18 +1661,22 @@ function EvidencePage({
         </div>
       )}
 
-      <PlanningEvidenceSections planning={planning} ledger={ledger} diagnosis={diagnosis} />
+      <PlanningEvidenceSections
+        planning={planning}
+        costProjection={data.costProjection}
+        diagnosis={diagnosis}
+      />
     </>
   )
 }
 
 function PlanningEvidenceSections({
   planning,
-  ledger,
+  costProjection,
   diagnosis,
 }: {
   planning: PlanningSnapshot
-  ledger: PlanningLedger
+  costProjection: DashboardData['costProjection']
   diagnosis: Diagnosis
 }) {
   return (
@@ -1288,7 +1718,10 @@ function PlanningEvidenceSections({
                 <div>
                   <strong>{item.name}</strong>
                   <span>
-                    {yen.format(item.acquisitionCostJpy)} · {item.role}
+                    {item.acquisitionCostJpy === null
+                      ? `購入額不明：${item.unknownAmountReason}`
+                      : yen.format(item.acquisitionCostJpy)}{' '}
+                    · {item.role}
                   </span>
                 </div>
                 <small>
@@ -1314,7 +1747,10 @@ function PlanningEvidenceSections({
                   <span>{item.basis}</span>
                 </div>
                 <small>
-                  {yen.format(item.amountJpy)} × {Math.round(item.businessUseRatio * 100)}%
+                  {item.amountJpy === null
+                    ? `支払額不明：${item.unknownAmountReason}`
+                    : yen.format(item.amountJpy)}
+                  {' / '}業務割合 {Math.round(item.businessUseRatio * 100)}%
                 </small>
               </li>
             ))}
@@ -1349,39 +1785,53 @@ function PlanningEvidenceSections({
       </div>
       <article className="panel ledger-balance">
         <PanelHeading
-          title="設備・自宅費用の配賦チェック"
-          subtitle="原額から私用・未配賦までを残し、二重計上を防ぎます"
+          title="全費用の配分チェック"
+          subtitle="支払と配分の画面と同じ費用基礎を表示します。詳細は支払と配分で確認できます。"
         />
-        {/* buildPlanningLedger filters homeCosts and directCosts by taxYear, so
-            an entry dated outside it is not "missing" -- naming the year keeps
-            this from reading as data loss. */}
-        {ledger.contributions.length === 0 && (
-          <EmptyState
-            message={`${planning.profile.taxYear}年の設備・自宅費用・その他直接費がまだ入力されていません。はじめの準備の費用ステップで入力すると、この年の費用候補がここに出ます。対象年の外の入力はここには出ません。`}
-          />
+        {!costProjection ? (
+          <p>この表示には全費用の資料が登録されていません。</p>
+        ) : (
+          <>
+            <p>
+              {costProjection.year}
+              年の作業中資料。税務上の当年費用・資産残高の確定値ではありません。
+            </p>
+            <dl>
+              <div>
+                <dt>算定済みの費用基礎</dt>
+                <dd>{yen.format(costProjection.totals.knownBasisJpy)}</dd>
+              </div>
+              <div>
+                <dt>通常業務</dt>
+                <dd>{yen.format(costProjection.totals.generalJpy)}</dd>
+              </div>
+              <div>
+                <dt>制作物へ配賦</dt>
+                <dd>{yen.format(costProjection.totals.taxUnitJpy)}</dd>
+              </div>
+              <div>
+                <dt>私用</dt>
+                <dd>{yen.format(costProjection.totals.privateJpy)}</dd>
+              </div>
+              <div>
+                <dt>未配分・配分未算定</dt>
+                <dd>{yen.format(costProjection.totals.unallocatedJpy)}</dd>
+              </div>
+              <div>
+                <dt>捕捉外の利用</dt>
+                <dd>{yen.format(costProjection.totals.unobservedJpy)}</dd>
+              </div>
+              <div>
+                <dt>端数調整</dt>
+                <dd>{yen.format(costProjection.totals.roundingJpy)}</dd>
+              </div>
+              <div>
+                <dt>費用基礎が未算定</dt>
+                <dd>{costProjection.totals.unknownBasisIds.length}件</dd>
+              </div>
+            </dl>
+          </>
         )}
-        <dl>
-          <div>
-            <dt>原額</dt>
-            <dd>{yen.format(ledger.totals.grossAmountJpy)}</dd>
-          </div>
-          <div>
-            <dt>業務利用額</dt>
-            <dd>{yen.format(ledger.totals.businessAmountJpy)}</dd>
-          </div>
-          <div>
-            <dt>制作物へ配賦</dt>
-            <dd>{yen.format(ledger.totals.allocatedAmountJpy)}</dd>
-          </div>
-          <div>
-            <dt>私用</dt>
-            <dd>{yen.format(ledger.totals.privateAmountJpy)}</dd>
-          </div>
-          <div>
-            <dt>未配賦・一般管理</dt>
-            <dd>{yen.format(ledger.totals.unallocatedAmountJpy)}</dd>
-          </div>
-        </dl>
       </article>
     </section>
   )

@@ -13,6 +13,7 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { build } from 'esbuild'
+import { verifyReleaseLifecycle } from './release-smoke.js'
 
 type PackageMetadata = {
   name: string
@@ -41,7 +42,11 @@ if (!existsSync(join(root, 'dist', 'index.html'))) {
   throw new Error('dist/index.html is missing. Run `npm run build` before packaging.')
 }
 
-cpSync(join(root, 'dist'), join(releaseRoot, 'dist'), { recursive: true })
+cpSync(join(root, 'dist'), join(releaseRoot, 'dist'), {
+  recursive: true,
+  // These files configure Cloudflare hosting; the local server owns routing and headers.
+  filter: (source) => !['_headers', '_redirects'].includes(relative(join(root, 'dist'), source)),
+})
 copyRequiredFile('README.md')
 copyRequiredFile('LICENSE')
 if (existsSync(join(root, 'docs', 'SECURITY.md'))) {
@@ -49,8 +54,13 @@ if (existsSync(join(root, 'docs', 'SECURITY.md'))) {
 }
 
 await build({
-  entryPoints: [join(root, 'src', 'server', 'index.ts')],
-  outfile: join(releaseRoot, 'runtime', 'server', 'index.mjs'),
+  entryPoints: {
+    'server/index': join(root, 'src', 'server', 'index.ts'),
+    'tools/data-backup': join(root, 'scripts', 'data-backup.ts'),
+    'tools/restore-sources': join(root, 'scripts', 'restore-sources.ts'),
+  },
+  outdir: join(releaseRoot, 'runtime'),
+  outExtension: { '.js': '.mjs' },
   bundle: true,
   platform: 'node',
   target: 'node24',
@@ -74,6 +84,8 @@ writeFileSync(
       engines: packageMetadata.engines,
       scripts: {
         start: 'node runtime/server/index.mjs',
+        'data:backup': 'node runtime/tools/data-backup.mjs',
+        'data:reconnect': 'node runtime/tools/restore-sources.mjs',
       },
     },
     null,
@@ -94,11 +106,24 @@ writeFileSync(
     'Your Claude Code and Codex histories remain on this computer.',
     'No npm install is required for this Release package.',
     '',
+    'Backup: npm run data:backup -- create "DATA_DIRECTORY" "NEW_BACKUP_DIRECTORY"',
+    'Verify: npm run data:backup -- verify "BACKUP_DIRECTORY"',
+    'Restore: npm run data:backup -- restore "BACKUP_DIRECTORY" "NEW_DATA_DIRECTORY"',
+    'Start with restored data (PowerShell):',
+    '$env:DEVTAX_RADAR_DATA_DIR = "NEW_DATA_DIRECTORY"',
+    'npm start',
+    'Confirm the original history folders in the restore panel before resuming scans.',
+    'Original history files and evidence originals must be stored separately.',
+    'Backups contain private local settings and notes; do not publish them.',
+    '',
   ].join('\n'),
 )
 
 inspectReleaseTree(releaseRoot)
 smokeTestBundle(join(releaseRoot, 'runtime', 'server', 'index.mjs'))
+smokeTestBundle(join(releaseRoot, 'runtime', 'tools', 'data-backup.mjs'))
+smokeTestBundle(join(releaseRoot, 'runtime', 'tools', 'restore-sources.mjs'))
+await verifyReleaseLifecycle(releaseRoot)
 
 mkdirSync(artifactsDirectory, { recursive: true })
 const zipPath = join(artifactsDirectory, `${releaseName}.zip`)

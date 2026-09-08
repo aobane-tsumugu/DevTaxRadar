@@ -1,5 +1,17 @@
+import {
+  planningSnapshotSchema,
+  planningSaveSchema,
+  PlanningValidationError,
+} from '../planning/schema.js'
+export {
+  planningSnapshotSchema,
+  planningSaveSchema,
+  projectRulesSchema,
+  PlanningValidationError,
+} from '../planning/schema.js'
+import { advanceWorkspaceRevision } from './workspaceRevision.js'
 import type { DatabaseSync } from 'node:sqlite'
-import { z } from 'zod'
+
 import {
   emptyPlanningSnapshot,
   type Diagnosis,
@@ -8,305 +20,8 @@ import {
   type ProjectRuleRecord,
 } from '../planning/types.js'
 import { getDatabase } from './database.js'
-
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
-const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)
-const identifier = z.string().trim().min(1).max(120)
-const ratio = z.number().min(0).max(1)
-const evidenceIds = z.array(identifier).max(100)
-
-const profileSchema = z.object({
-  taxYear: z.number().int().min(2000).max(2100),
-  journeyMode: z.enum(['early', 'retrospective']),
-  incomeCategory: z.enum(['undecided', 'miscellaneous', 'business']),
-  filingType: z.enum(['undecided', 'white', 'blue']),
-  activityStartedOn: date.optional(),
-  monetizationStatus: z.enum(['none', 'planned', 'earning']),
-  hasBookkeeping: z.boolean(),
-  notes: z.string().trim().max(2_000).optional(),
-})
-
-const taxUnitSchema = z.object({
-  id: identifier,
-  name: z.string().trim().min(1).max(160),
-  unitType: z.enum(['new-software', 'improvement-plan', 'sales-production']),
-  usageMode: z.enum(['internal', 'external', 'mixed', 'undecided']),
-  revenueModel: z.enum([
-    'sales',
-    'subscription',
-    'advertising',
-    'affiliate',
-    'efficiency',
-    'oss',
-    'other',
-    'undecided',
-  ]),
-  lifecycleStatus: z.enum([
-    'idea',
-    'prototype',
-    'developing',
-    'evaluating',
-    'in-use',
-    'maintaining',
-    'improving',
-    'retired',
-    'abandoned',
-  ]),
-  journeyMode: z.enum(['early', 'retrospective']).optional(),
-  monetizationStatus: z.enum(['none', 'planned', 'earning']).optional(),
-  completionCriteria: z.string().trim().max(2_000).optional(),
-  predecessorId: identifier.optional(),
-  sameAsExternalVersion: z.enum(['yes', 'no', 'undecided']).optional(),
-  notes: z.string().trim().max(2_000).optional(),
-})
-
-const projectRuleSchema = z.object({
-  id: identifier,
-  projectKey: z.string().trim().min(8).max(120),
-  provider: z.enum(['claude', 'codex']).optional(),
-  effectiveFrom: date,
-  effectiveTo: date.optional(),
-  taxUnitId: identifier.optional(),
-  classification: z.enum([
-    'new-development',
-    'maintenance',
-    'feature-addition',
-    'general-learning',
-    'private',
-    'unclassified',
-  ]),
-  reason: z.string().trim().max(1_000).optional(),
-})
-
-export const projectRulesSchema = z.object({
-  rules: z.array(projectRuleSchema).max(5_000),
-})
-
-export class PlanningValidationError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'PlanningValidationError'
-  }
-}
-
-const lifecycleEventSchema = z.object({
-  id: identifier,
-  taxUnitId: identifier,
-  eventType: z.enum([
-    'development-started',
-    'evaluation-started',
-    'internal-use-started',
-    'external-released',
-    'first-sale',
-    'improvement-started',
-    'retired',
-    'abandoned',
-  ]),
-  occurredOn: date,
-  recordedAt: z.string().datetime({ offset: true }),
-  evidenceIds,
-  note: z.string().trim().max(2_000).optional(),
-})
-
-const equipmentSchema = z.object({
-  id: identifier,
-  name: z.string().trim().min(1).max(160),
-  equipmentType: z.enum(['pc', 'gpu', 'dgx', 'server', 'desk', 'peripheral', 'other']),
-  acquisitionCostJpy: z.number().int().nonnegative(),
-  orderedOn: date.optional(),
-  deliveredOn: date.optional(),
-  acquiredOn: date,
-  businessUseStartedOn: date.optional(),
-  convertedFromPrivate: z.boolean(),
-  openingUnamortizedBalanceJpy: z.number().int().nonnegative().optional(),
-  businessUseRatio: ratio,
-  usefulLifeYears: z.number().int().positive().max(100).optional(),
-  role: z.string().trim().min(1).max(1_000),
-  taxUnitId: identifier.optional(),
-  projectAllocationRatio: ratio,
-  evidenceIds,
-})
-
-const homeCostSchema = z.object({
-  id: identifier,
-  month,
-  category: z.enum(['rent', 'electricity', 'internet']),
-  amountJpy: z.number().int().nonnegative(),
-  method: z.enum(['area', 'area-time', 'meter', 'watt-hour', 'usage-time', 'fixed-ratio']),
-  businessUseRatio: ratio,
-  basis: z.string().trim().min(1).max(2_000),
-  rationale: z.string().trim().min(1).max(2_000),
-  taxUnitId: identifier.optional(),
-  projectAllocationRatio: ratio,
-  treatment: z.enum(['direct', 'shared', 'general']),
-  evidenceIds,
-})
-
-const directCostSchema = z.object({
-  id: identifier,
-  taxUnitId: identifier.optional(),
-  incurredOn: date,
-  costType: z.enum([
-    'outsource',
-    'material',
-    'cloud',
-    'domain',
-    'license',
-    'old-version-balance',
-    'other',
-  ]),
-  amountJpy: z.number().int().nonnegative(),
-  directlyAttributable: z.boolean(),
-  treatment: z.enum(['direct', 'shared', 'general']),
-  note: z.string().trim().max(2_000).optional(),
-  evidenceIds,
-})
-
-const evidenceSchema = z.object({
-  id: identifier,
-  evidenceType: z.enum([
-    'deployment',
-    'sale-page',
-    'store-release',
-    'first-use',
-    'file',
-    'screenshot',
-    'receipt',
-    'card-statement',
-    'memo',
-    'ai-session',
-    'other',
-  ]),
-  strength: z.enum(['automatic', 'external', 'self-recorded']),
-  occurredOn: date.optional(),
-  recordedAt: z.string().datetime({ offset: true }),
-  localReference: z.string().trim().max(2_000).optional(),
-  note: z.string().trim().min(1).max(4_000),
-  taxUnitId: identifier.optional(),
-})
-
-const decisionSchema = z.object({
-  id: identifier,
-  taxUnitId: identifier,
-  taxYear: z.number().int().min(2000).max(2100),
-  engineVersion: z.string().trim().min(1).max(120),
-  candidate: z.string().trim().min(1).max(160),
-  status: z.enum(['pending', 'confirmed', 'overridden']),
-  selectedCandidate: z.string().trim().min(1).max(160).optional(),
-  reason: z.string().trim().max(2_000).optional(),
-  createdAt: z.string().datetime({ offset: true }),
-  confirmedAt: z.string().datetime({ offset: true }).optional(),
-})
-
-export const planningSnapshotSchema = z
-  .object({
-    version: z.literal(1),
-    profile: profileSchema,
-    taxUnits: z.array(taxUnitSchema).max(1_000),
-    projectRules: z.array(projectRuleSchema).max(5_000),
-    lifecycleEvents: z.array(lifecycleEventSchema).max(10_000),
-    equipment: z.array(equipmentSchema).max(5_000),
-    homeCosts: z.array(homeCostSchema).max(20_000),
-    directCosts: z.array(directCostSchema).max(20_000),
-    evidence: z.array(evidenceSchema).max(20_000),
-    decisions: z.array(decisionSchema).max(20_000),
-  })
-  .superRefine((snapshot, context) => {
-    const unitIds = new Set(snapshot.taxUnits.map((unit) => unit.id))
-    const knownEvidence = new Set(snapshot.evidence.map((item) => item.id))
-    const collections = [
-      ['taxUnits', snapshot.taxUnits],
-      ['projectRules', snapshot.projectRules],
-      ['lifecycleEvents', snapshot.lifecycleEvents],
-      ['equipment', snapshot.equipment],
-      ['homeCosts', snapshot.homeCosts],
-      ['directCosts', snapshot.directCosts],
-      ['evidence', snapshot.evidence],
-      ['decisions', snapshot.decisions],
-    ] as const
-
-    for (const [name, records] of collections) {
-      const seen = new Set<string>()
-      records.forEach((record, index) => {
-        if (seen.has(record.id)) {
-          context.addIssue({
-            code: 'custom',
-            path: [name, index, 'id'],
-            message: 'IDが重複しています。',
-          })
-        }
-        seen.add(record.id)
-      })
-    }
-
-    snapshot.taxUnits.forEach((unit, index) => {
-      if (unit.predecessorId && !unitIds.has(unit.predecessorId)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['taxUnits', index, 'predecessorId'],
-          message: '旧版が存在しません。',
-        })
-      }
-      if (unit.predecessorId === unit.id) {
-        context.addIssue({
-          code: 'custom',
-          path: ['taxUnits', index, 'predecessorId'],
-          message: '自分自身を旧版にできません。',
-        })
-      }
-    })
-
-    const withTaxUnit = [
-      ['projectRules', snapshot.projectRules],
-      ['lifecycleEvents', snapshot.lifecycleEvents],
-      ['equipment', snapshot.equipment],
-      ['homeCosts', snapshot.homeCosts],
-      ['directCosts', snapshot.directCosts],
-      ['evidence', snapshot.evidence],
-      ['decisions', snapshot.decisions],
-    ] as const
-    for (const [name, records] of withTaxUnit) {
-      records.forEach((record, index) => {
-        if (record.taxUnitId && !unitIds.has(record.taxUnitId)) {
-          context.addIssue({
-            code: 'custom',
-            path: [name, index, 'taxUnitId'],
-            message: '制作物・改良計画が存在しません。',
-          })
-        }
-      })
-    }
-
-    snapshot.projectRules.forEach((rule, index) => {
-      if (rule.effectiveTo && rule.effectiveTo < rule.effectiveFrom) {
-        context.addIssue({
-          code: 'custom',
-          path: ['projectRules', index, 'effectiveTo'],
-          message: '終了日は開始日以後にしてください。',
-        })
-      }
-    })
-
-    const evidenceOwners = [
-      ['lifecycleEvents', snapshot.lifecycleEvents],
-      ['equipment', snapshot.equipment],
-      ['homeCosts', snapshot.homeCosts],
-      ['directCosts', snapshot.directCosts],
-    ] as const
-    for (const [name, records] of evidenceOwners) {
-      records.forEach((record, index) => {
-        record.evidenceIds.forEach((evidenceId, evidenceIndex) => {
-          if (!knownEvidence.has(evidenceId)) {
-            context.addIssue({
-              code: 'custom',
-              path: [name, index, 'evidenceIds', evidenceIndex],
-              message: '証拠レコードが存在しません。',
-            })
-          }
-        })
-      })
-    }
-  })
+import { readCostPresence, writeCostPresence } from './costPresenceRepository.js'
+import { readEquipmentMethods, writeEquipmentMethods } from './equipmentMethodsRepository.js'
 
 function optional<T>(value: T | null): T | undefined {
   return value === null ? undefined : value
@@ -392,7 +107,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
       db
         .prepare(
           `SELECT id, name, equipment_type AS equipmentType,
-      acquisition_cost_jpy AS acquisitionCostJpy, ordered_on AS orderedOn,
+      acquisition_cost_jpy AS acquisitionCostJpy, unknown_amount_reason AS unknownAmountReason, ordered_on AS orderedOn,
       delivered_on AS deliveredOn, acquired_on AS acquiredOn,
       business_use_started_on AS businessUseStartedOn,
       converted_from_private AS convertedFromPrivate,
@@ -411,36 +126,41 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
       usefulLifeYears: optional(row.usefulLifeYears as number | null),
       taxUnitId: optional(row.taxUnitId as string | null),
       convertedFromPrivate: Boolean(row.convertedFromPrivate),
+      unknownAmountReason: optional(row.unknownAmountReason as string | null),
       evidenceIds: parseIds(evidenceIdsJson as string),
     })),
     homeCosts: (
       db
         .prepare(
-          `SELECT id, month, category, amount_jpy AS amountJpy, method,
+          `SELECT id, month, category, amount_jpy AS amountJpy, unknown_amount_reason AS unknownAmountReason, method,
       business_use_ratio AS businessUseRatio, basis, rationale, tax_unit_id AS taxUnitId,
       project_allocation_ratio AS projectAllocationRatio, treatment,
-      evidence_ids_json AS evidenceIdsJson FROM planning_home_costs ORDER BY rowid`,
+      targets_json AS targetsJson, evidence_ids_json AS evidenceIdsJson FROM planning_home_costs ORDER BY rowid`,
         )
         .all() as Array<Record<string, unknown>>
-    ).map(({ evidenceIdsJson, ...row }) => ({
+    ).map(({ evidenceIdsJson, targetsJson, ...row }) => ({
       ...row,
+      ...(targetsJson === null ? {} : { targets: JSON.parse(targetsJson as string) }),
       taxUnitId: optional(row.taxUnitId as string | null),
+      unknownAmountReason: optional(row.unknownAmountReason as string | null),
       evidenceIds: parseIds(evidenceIdsJson as string),
     })),
     directCosts: (
       db
         .prepare(
           `SELECT id, tax_unit_id AS taxUnitId, incurred_on AS incurredOn,
-      cost_type AS costType, amount_jpy AS amountJpy,
+      cost_type AS costType, amount_jpy AS amountJpy, unknown_amount_reason AS unknownAmountReason,
       directly_attributable AS directlyAttributable, treatment, note,
-      evidence_ids_json AS evidenceIdsJson FROM planning_direct_costs ORDER BY rowid`,
+      evidence_ids_json AS evidenceIdsJson, targets_json AS targetsJson FROM planning_direct_costs ORDER BY rowid`,
         )
         .all() as Array<Record<string, unknown>>
-    ).map(({ evidenceIdsJson, ...row }) => ({
+    ).map(({ evidenceIdsJson, targetsJson, ...row }) => ({
       ...row,
+      ...(targetsJson === null ? {} : { targets: JSON.parse(targetsJson as string) }),
       taxUnitId: optional(row.taxUnitId as string | null),
       note: optional(row.note as string | null),
       directlyAttributable: Boolean(row.directlyAttributable),
+      unknownAmountReason: optional(row.unknownAmountReason as string | null),
       evidenceIds: parseIds(evidenceIdsJson as string),
     })),
     evidence: (
@@ -474,16 +194,24 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
       confirmedAt: optional(row.confirmedAt as string | null),
     })),
   }
-  return planningSnapshotSchema.parse(snapshot)
+  const costPresence = readCostPresence(db)
+  const equipmentMethods = readEquipmentMethods(db)
+  return planningSnapshotSchema.parse({
+    ...snapshot,
+    ...(costPresence.length ? { costPresence } : {}),
+    ...(equipmentMethods.length ? { equipmentMethods } : {}),
+  })
 }
 
 export function savePlanningSnapshot(
   snapshot: PlanningSnapshot,
   db: DatabaseSync = getDatabase(),
 ): void {
-  const parsed = planningSnapshotSchema.parse(snapshot)
-  db.exec('BEGIN IMMEDIATE')
+  const parsed = planningSaveSchema.parse(snapshot)
+  db.exec('SAVEPOINT devtax_planning_write')
   try {
+    writeCostPresence(db, parsed.costPresence ?? [])
+    db.exec('DELETE FROM planning_equipment_methods')
     for (const table of [
       'planning_decisions',
       'planning_lifecycle_events',
@@ -563,8 +291,8 @@ export function savePlanningSnapshot(
     const equipment = db.prepare(`INSERT INTO planning_equipment(id, name, equipment_type,
       acquisition_cost_jpy, ordered_on, delivered_on, acquired_on, business_use_started_on,
       converted_from_private, opening_unamortized_balance_jpy, business_use_ratio,
-      useful_life_years, role, tax_unit_id, project_allocation_ratio, evidence_ids_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      useful_life_years, role, tax_unit_id, project_allocation_ratio, evidence_ids_json, unknown_amount_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     for (const item of parsed.equipment)
       equipment.run(
         item.id,
@@ -583,11 +311,12 @@ export function savePlanningSnapshot(
         item.taxUnitId ?? null,
         item.projectAllocationRatio,
         JSON.stringify(item.evidenceIds),
+        item.unknownAmountReason ?? null,
       )
 
     const home = db.prepare(`INSERT INTO planning_home_costs(id, month, category, amount_jpy,
       method, business_use_ratio, basis, rationale, tax_unit_id, project_allocation_ratio,
-      treatment, evidence_ids_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      treatment, evidence_ids_json, unknown_amount_reason, targets_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     for (const item of parsed.homeCosts)
       home.run(
         item.id,
@@ -602,11 +331,13 @@ export function savePlanningSnapshot(
         item.projectAllocationRatio,
         item.treatment,
         JSON.stringify(item.evidenceIds),
+        item.unknownAmountReason ?? null,
+        item.targets === undefined ? null : JSON.stringify(item.targets),
       )
 
     const direct = db.prepare(`INSERT INTO planning_direct_costs(id, tax_unit_id, incurred_on,
-      cost_type, amount_jpy, directly_attributable, treatment, note, evidence_ids_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      cost_type, amount_jpy, directly_attributable, treatment, note, evidence_ids_json, unknown_amount_reason, targets_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     for (const item of parsed.directCosts)
       direct.run(
         item.id,
@@ -618,8 +349,11 @@ export function savePlanningSnapshot(
         item.treatment,
         item.note ?? null,
         JSON.stringify(item.evidenceIds),
+        item.unknownAmountReason ?? null,
+        item.targets === undefined ? null : JSON.stringify(item.targets),
       )
 
+    writeEquipmentMethods(db, parsed.equipmentMethods ?? [])
     const evidence = db.prepare(`INSERT INTO planning_evidence(id, evidence_type, strength,
       occurred_on, recorded_at, local_reference, note, tax_unit_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     for (const item of parsed.evidence)
@@ -650,9 +384,11 @@ export function savePlanningSnapshot(
         item.createdAt,
         item.confirmedAt ?? null,
       )
-    db.exec('COMMIT')
+    advanceWorkspaceRevision(db)
+    db.exec('RELEASE devtax_planning_write')
   } catch (error) {
-    db.exec('ROLLBACK')
+    db.exec('ROLLBACK TO devtax_planning_write')
+    db.exec('RELEASE devtax_planning_write')
     throw error
   }
 }
@@ -699,6 +435,7 @@ export function replaceProjectRules(
         rule.reason ?? null,
       )
     }
+    advanceWorkspaceRevision(db)
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')
@@ -729,21 +466,73 @@ export function planningMarkdown(
       `- ${unit.name}: ${unit.unitType} / ${unit.usageMode} / ${unit.lifecycleStatus} / ${journey} / 売上状況:${monetization}`,
     )
   }
+  lines.push(
+    '',
+    '## 年度別の費用項目の確認',
+    '',
+    '本人の記録です。費用の不存在や税務上の適用条件を検証したものではありません。',
+    '',
+  )
+  for (const item of snapshot.costPresence ?? []) {
+    const label = { equipment: '設備', home: '自宅費用', direct: '直接費' }[item.category]
+    lines.push(
+      `- ${item.taxYear}年 ${label}: ${item.status === 'not-applicable' ? '該当なし' : '保留'} / 理由: ${item.reason.replace(/\r?\n/g, ' ')} / 記録日時: ${item.recordedAt} / ID: ${item.id}`,
+    )
+  }
+  if (!snapshot.costPresence?.length) lines.push('確認記録なし。該当なしを意味しません。')
   lines.push('', '## 設備', '')
   for (const item of snapshot.equipment) {
     lines.push(
-      `- ${item.name}: ${item.acquisitionCostJpy.toLocaleString('ja-JP')}円、業務利用${Math.round(item.businessUseRatio * 100)}%`,
+      `- ${item.name}: ${item.acquisitionCostJpy === null ? '不明' : item.acquisitionCostJpy.toLocaleString('ja-JP') + '円'}、業務利用${Math.round(item.businessUseRatio * 100)}%`,
+    )
+    if (item.unknownAmountReason)
+      lines.push(`  - 購入額が不明な理由: ${item.unknownAmountReason.replace(/\r?\n/g, ' ')}`)
+  }
+  lines.push(
+    '### 設備の年度別計算条件',
+    '',
+    '本人が記録した計算前提です。適用条件や前年残高の参照先は未検証です。',
+  )
+  for (const row of snapshot.equipmentMethods ?? []) {
+    if (row.priorReviewId)
+      lines.push(
+        `- ${row.taxYear}年 / 設備ID ${row.equipmentId} / 取り込んだ前年資料ID ${row.priorReviewId}`,
+      )
+    lines.push(
+      `- ${row.taxYear}年 / 設備ID ${row.equipmentId} / ${row.method} / 耐用年数 ${row.usefulLifeYears ?? '未確認'} / 根拠 ${row.methodReason.replace(/\r?\n/g, ' ')} / 前年残高 ${row.priorClosing ? `${row.priorClosing.taxYear}年 ${row.priorClosing.amountJpy}円 (${row.priorClosing.reference.replace(/\r?\n/g, ' ')})` : '未確認'} / ${row.recordedAt}`,
+    )
+    lines.push(
+      row.allocation?.targets !== undefined
+        ? `  年度別業務割合 ${row.allocation.businessUseRatio === null ? '未確認' : row.allocation.businessUseRatio * 100 + '%'} / 業務分の制作物別配分: ${row.allocation.targets.map((target) => `${target.taxUnitId}: ${target.shareBps === null ? '未確認' : target.shareBps / 100 + '%'}`).join(' / ') || '対応先なし・全額未配分'} / 配分根拠 ${row.allocation.reason.replace(/\r?\n/g, ' ') || '未確認'}`
+        : row.allocation
+          ? `  年度別対応先 ${row.allocation.taxUnitId === undefined ? '旧設備の共通対応先' : (row.allocation.taxUnitId ?? '未確認・未配分')} / 年度別業務割合 ${row.allocation.businessUseRatio === null ? '未確認' : row.allocation.businessUseRatio * 100 + '%'} / 業務分の制作物割合 ${row.allocation.projectAllocationRatio === null ? '未確認' : row.allocation.projectAllocationRatio * 100 + '%'} / 配分根拠 ${row.allocation.reason.replace(/\r?\n/g, ' ') || '未確認'}`
+          : '  年度別配分条件は未登録。旧設備の共通割合を使用。',
     )
   }
   lines.push('', '## 家賃・電気・通信費', '')
   for (const item of snapshot.homeCosts) {
+    if (item.targets !== undefined)
+      lines.push(
+        `- ${item.month} ${item.category} / 業務分の制作物別配分: ${item.targets.map((target) => target.taxUnitId + ': ' + (target.shareBps === null ? '未確認' : target.shareBps / 100 + '%')).join(' / ') || '対応先なし・全額未配分'}`,
+      )
+
     lines.push(
-      `- ${item.month} ${item.category}: ${item.amountJpy.toLocaleString('ja-JP')}円、${item.method}（${item.rationale}）`,
+      `- ${item.month} ${item.category}: ${item.amountJpy === null ? '不明' : item.amountJpy.toLocaleString('ja-JP') + '円'}、${item.method}（${item.rationale}）`,
     )
+    if (item.unknownAmountReason)
+      lines.push(`  - 支払額が不明な理由: ${item.unknownAmountReason.replace(/\r?\n/g, ' ')}`)
   }
   lines.push('', '## 直接費', '')
   for (const item of snapshot.directCosts) {
-    lines.push(`- ${item.incurredOn} ${item.costType}: ${item.amountJpy.toLocaleString('ja-JP')}円`)
+    if (item.targets !== undefined)
+      lines.push(
+        `- ${item.incurredOn} ${item.costType} / 制作物別配分: ${item.targets.map((target) => target.taxUnitId + ': ' + (target.shareBps === null ? '未確認' : target.shareBps / 100 + '%')).join(' / ') || '対応先なし・全額未配分'}`,
+      )
+    lines.push(
+      `- ${item.incurredOn} ${item.costType}: ${item.amountJpy === null ? '不明' : item.amountJpy.toLocaleString('ja-JP') + '円'}`,
+    )
+    if (item.unknownAmountReason)
+      lines.push(`  - 金額が不明な理由: ${item.unknownAmountReason.replace(/\r?\n/g, ' ')}`)
   }
   if (ledger) {
     lines.push('', '## 原価集計', '')

@@ -2092,6 +2092,24 @@ th.number {
     Consolas,
     monospace;
 }
+.monthly-charge-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.monthly-charge-row input[type='checkbox'] {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+}
+.monthly-charge-row input:not([type='number']) {
+  text-align: left;
+}
+@media (max-width: 640px) {
+  .monthly-charge-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .ratio-field {
   margin-top: 11px;
   padding: 13px;
@@ -3983,4 +4001,201 @@ td > .empty-setup {
   .assignment-row-actions {
     align-items: flex-start;
   }
+}
+
+.cost-page {
+  display: grid;
+  gap: 20px;
+  font-size: 16px;
+}
+.cost-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.cost-toolbar input {
+  width: 7em;
+  padding: 8px;
+  font: inherit;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+.cost-overview,
+.cost-source {
+  padding: 24px;
+}
+.cost-page p,
+.cost-page li,
+.cost-page summary {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.cost-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+.cost-totals dt {
+  color: var(--muted);
+}
+.cost-totals dd {
+  margin: 6px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+.cost-unit-list,
+.cost-contributions {
+  list-style: none;
+  padding: 0;
+}
+.cost-unit-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cost-basis {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.cost-contributions li {
+  margin: 10px 0;
+  padding: 12px;
+  background: var(--surface-soft, #f5f7fb);
+  border-radius: 8px;
+}
+.cost-contributions li > strong {
+  margin-left: 16px;
+}
+.cost-contributions p {
+  margin: 6px 0 0;
+}
+.cost-page summary {
+  cursor: pointer;
+}
+@media (max-width: 620px) {
+  .cost-overview,
+  .cost-source {
+    padding: 16px;
+  }
+  .cost-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .cost-totals {
+    grid-template-columns: 1fr;
+  }
+}
+.workspace-comparison {
+  background: #fff;
+  color: #172638;
+  width: min(1180px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 28px;
+  border-radius: 16px;
+  font-size: 16px;
+}
+.workspace-comparison p {
+  overflow-wrap: anywhere;
+}
+.workspace-comparison fieldset {
+  margin: 20px 0;
+  padding: 18px;
+  border: 1px solid #cbd5e1;
+}
+.workspace-comparison legend {
+  font-weight: 700;
+}
+.workspace-comparison .comparison-conflict {
+  border-color: #b66a22;
+}
+.comparison-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.comparison-columns article {
+  min-width: 0;
+  background: #f5f7fa;
+  padding: 14px;
+}
+.comparison-columns label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 700;
+}
+.comparison-columns dt {
+  font-size: 14px;
+  color: #526176;
+  margin-top: 10px;
+}
+.comparison-columns dd {
+  margin-left: 0;
+}
+.comparison-columns p {
+  margin: 4px 0;
+}
+.comparison-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 12px;
+}
+.workspace-comparison button {
+  font-size: 16px;
+}
+@media (max-width: 760px) {
+  .comparison-columns {
+    grid-template-columns: 1fr;
+  }
+  .workspace-comparison {
+    padding: 16px;
+  }
+}
+.impact-table {
+  overflow-x: auto;
+  margin: 14px 0;
+}
+.impact-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+.impact-table th,
+.impact-table td {
+  text-align: left;
+  padding: 12px;
+  border-bottom: 1px solid #cbd5e1;
+}
+.impact-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.impact-columns > article {
+  min-width: 0;
+}
+.workspace-impact summary {
+  cursor: pointer;
+  padding: 16px 0;
+  font-weight: 700;
+}
+.workspace-impact li {
+  margin-bottom: 8px;
+}
+@media (max-width: 900px) {
+  .impact-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.balance-source-choice {
+  display: block;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
 }

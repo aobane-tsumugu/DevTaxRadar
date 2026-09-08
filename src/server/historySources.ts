@@ -1,4 +1,6 @@
 import { createHmac } from 'node:crypto'
+import { applyRestoreSources } from './restoreSources.js'
+import { getAppDataDirectory } from './paths.js'
 import { opendir, realpath } from 'node:fs/promises'
 import { isAbsolute, relative, sep } from 'node:path'
 
@@ -24,6 +26,7 @@ import {
 import { discoverJsonlFiles, readFileSnapshot } from '../adapters/jsonl.js'
 import {
   createHistorySource,
+  getDatabase,
   getHistoryFileCacheEntries,
   getHistorySourceScanStatuses,
   getHistorySources,
@@ -36,7 +39,7 @@ import {
   type HistorySource,
   type HistorySourceInput,
 } from './database.js'
-import { getIdentifierSalt, normalizeHistoryRoot } from './paths.js'
+import { getIdentifierSalt, normalizeHistoryRoot, restoreRequiresReconnect } from './paths.js'
 import { aggregateSessions, type AggregationDiagnostics } from './sessionAggregation.js'
 import { beginScan, finishScan, reportScannedFile } from './scanProgress.js'
 
@@ -567,7 +570,13 @@ export function scanHistorySources(
   sourceIds?: string[],
   mode: HistoryScanMode = 'incremental',
 ): Promise<HistoryScanResult> {
-  return enqueueSourceOperation(() => executeHistoryScan(providers, sourceIds, mode))
+  return enqueueSourceOperation(() => {
+    if (restoreRequiresReconnect())
+      throw new Error(
+        '復元した資料の読み取り元を再接続するまで走査できません。保存済みの記録は保持しています。',
+      )
+    return executeHistoryScan(providers, sourceIds, mode)
+  })
 }
 
 export function createConfiguredHistorySource(input: HistorySourceInput): Promise<HistorySource> {
@@ -586,5 +595,11 @@ export function removeConfiguredHistorySource(id: string): Promise<void> {
 }
 
 export function automaticSourceScanEnabled(): boolean {
-  return process.env.DEVTAX_RADAR_AUTO_SCAN !== '0'
+  return process.env.DEVTAX_RADAR_AUTO_SCAN !== '0' && !restoreRequiresReconnect()
+}
+
+export function reconnectRestoredSources(input: unknown) {
+  return enqueueSourceOperation(() =>
+    applyRestoreSources(getDatabase(), getAppDataDirectory(), input),
+  )
 }

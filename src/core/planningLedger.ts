@@ -87,6 +87,10 @@ function contribution(params: {
 }
 
 function equipmentContribution(item: EquipmentRecord, year: number): CostContribution {
+  if (item.acquisitionCostJpy === null)
+    throw new Error(
+      '旧形式の原価集計は不明原額に対応していません。共通費用projectionを使用してください。',
+    )
   const warnings: string[] = []
   const acquisitionCost = positiveYen(item.acquisitionCostJpy, `${item.name}の取得価額`, warnings)
   const missingOpeningBalance =
@@ -181,6 +185,10 @@ export function buildPlanningLedger(snapshot: PlanningSnapshot): PlanningLedger 
   )
 
   for (const item of snapshot.homeCosts.filter((cost) => cost.month.startsWith(`${year}-`))) {
+    if (item.amountJpy === null)
+      throw new Error(
+        '旧形式の原価集計は不明原額に対応していません。共通費用projectionを使用してください。',
+      )
     const warnings: string[] = []
     const gross = positiveYen(item.amountJpy, `${item.month} ${item.category}の金額`, warnings)
     const businessRatio = clampRatio(
@@ -219,6 +227,10 @@ export function buildPlanningLedger(snapshot: PlanningSnapshot): PlanningLedger 
   for (const item of snapshot.directCosts.filter((cost) =>
     cost.incurredOn.startsWith(`${year}-`),
   )) {
+    if (item.amountJpy === null)
+      throw new Error(
+        '旧形式の原価集計は不明原額に対応していません。共通費用projectionを使用してください。',
+      )
     const warnings: string[] = []
     const gross = positiveYen(item.amountJpy, `${item.costType}の金額`, warnings)
     const allocatable =

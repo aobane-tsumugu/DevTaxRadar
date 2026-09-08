@@ -47,9 +47,7 @@ export type AllocationUsageLine = {
 }
 
 export type UnobservedUsage =
-  | { kind: 'confirmed-none' }
-  | { kind: 'estimated'; ratio: number }
-  | { kind: 'unknown'; reserveRatio?: number }
+  { kind: 'confirmed-none' } | { kind: 'estimated'; ratio: number } | { kind: 'unknown' }
 
 export type MonthlyAllocationInput = {
   provider: Provider
@@ -76,8 +74,11 @@ export type MonthlyAllocationResult = {
   billingMonth: BillingMonth
   monthlyFeeJpy: number
   capturedUsageWeight: number
-  unobservedUsageRatio: number
-  unobservedUsageEquivalent: number
+  status: 'allocated' | 'pending'
+  /** The fee awaiting allocation is not an estimate of unobserved use. */
+  pendingAmountJpy: number
+  unobservedUsageRatio: number | null
+  unobservedUsageEquivalent: number | null
   lines: AllocationLine[]
   warnings: string[]
   invariantSatisfied: boolean

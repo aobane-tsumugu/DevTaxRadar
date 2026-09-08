@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readdirSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -142,6 +143,61 @@ afterEach(async () => {
 })
 
 describe('planning repository', () => {
+  it.each(['cost-presence', 'equipment-methods'])(
+    'backs up the old database before %s and does not repeat the migration',
+    async (kind) => {
+      const table =
+        kind === 'cost-presence' ? 'planning_cost_presence' : 'planning_equipment_methods'
+      const directory = mkdtempSync(join(tmpdir(), 'devtax-presence-migration-'))
+      directories.push(directory)
+      process.env.DEVTAX_RADAR_DATA_DIR = directory
+      const first = await import('../../src/server/database.js')
+      const oldDb = first.getDatabase()
+      oldDb.exec(
+        "INSERT INTO app_settings(key,value) VALUES ('migration_sentinel','preserve-me'); DROP TABLE " +
+          table,
+      )
+      oldDb.close()
+      vi.resetModules()
+      const next = await import('../../src/server/database.js')
+      const migrated = next.getDatabase()
+      try {
+        expect(
+          migrated.prepare("SELECT value FROM app_settings WHERE key='migration_sentinel'").get()
+            ?.value,
+        ).toBe('preserve-me')
+        expect(migrated.prepare('SELECT * FROM ' + table).all()).toEqual([])
+        const backups = readdirSync(directory).filter((name) =>
+          name.startsWith('devtax-radar.before-' + kind + '-'),
+        )
+        expect(backups).toHaveLength(1)
+        const backup = new DatabaseSync(join(directory, backups[0]!), { readOnly: true })
+        try {
+          expect(backup.prepare('PRAGMA integrity_check').get()?.integrity_check).toBe('ok')
+          expect(
+            backup.prepare("SELECT value FROM app_settings WHERE key='migration_sentinel'").get()
+              ?.value,
+          ).toBe('preserve-me')
+          expect(
+            backup.prepare('SELECT name FROM sqlite_master WHERE name=?').get(table),
+          ).toBeUndefined()
+        } finally {
+          backup.close()
+        }
+      } finally {
+        migrated.close()
+      }
+      vi.resetModules()
+      const restarted = await import('../../src/server/database.js')
+      restarted.getDatabase().close()
+      expect(
+        readdirSync(directory).filter((name) =>
+          name.startsWith('devtax-radar.before-' + kind + '-'),
+        ),
+      ).toHaveLength(1)
+    },
+  )
+
   it('round-trips every normalized planning record', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'devtax-planning-'))
     directories.push(directory)
@@ -157,6 +213,80 @@ describe('planning repository', () => {
       )
     } finally {
       database.getDatabase().close()
+    }
+  })
+
+  it('saves annual declarations atomically, rejects duplicates, and rolls back a later SQL failure', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'devtax-presence-'))
+    directories.push(directory)
+    process.env.DEVTAX_RADAR_DATA_DIR = directory
+    const repository = await import('../../src/server/planningRepository.js')
+    const database = await import('../../src/server/database.js')
+    const db = database.getDatabase()
+    try {
+      const snapshot = samplePlanning()
+      snapshot.costPresence = [
+        {
+          id: 'presence',
+          taxYear: 2026,
+          category: 'home',
+          status: 'deferred',
+          reason: '明細を確認中',
+          recordedAt: '2026-09-08T00:00:00Z',
+        },
+      ]
+      snapshot.equipmentMethods = [
+        {
+          id: 'method',
+          equipmentId: snapshot.equipment[0]!.id,
+          taxYear: 2026,
+          taxpayer: 'individual',
+          assetKind: 'tangible-equipment',
+          method: 'straight-line',
+          methodReason: '年度別の確認',
+          usefulLifeYears: 4,
+          useThroughYearEnd: 'confirmed',
+          ordinaryTreatment: 'confirmed',
+          priorClosing: null,
+          recordedAt: '2026-09-08T00:00:00Z',
+        },
+      ]
+      snapshot.homeCosts[0]!.targets = [{ taxUnitId: snapshot.taxUnits[0]!.id, shareBps: null }]
+      snapshot.directCosts[0]!.targets = [{ taxUnitId: snapshot.taxUnits[0]!.id, shareBps: null }]
+      repository.savePlanningSnapshot(snapshot, db)
+      const before = repository.getPlanningSnapshot(db)
+      expect(before.homeCosts[0]!.targets).toEqual([
+        { taxUnitId: snapshot.taxUnits[0]!.id, shareBps: null },
+      ])
+      expect(before.directCosts[0]!.targets).toEqual([
+        { taxUnitId: snapshot.taxUnits[0]!.id, shareBps: null },
+      ])
+      expect(before.costPresence).toEqual(snapshot.costPresence)
+      expect(before.equipmentMethods).toEqual(snapshot.equipmentMethods)
+      expect(repository.planningMarkdown(before)).toContain(
+        '2026年 自宅費用: 保留 / 理由: 明細を確認中',
+      )
+      const invalid = structuredClone(snapshot)
+      invalid.costPresence!.push({ ...invalid.costPresence![0]!, id: 'duplicate' })
+      expect(() => repository.savePlanningSnapshot(invalid, db)).toThrow()
+      expect(repository.getPlanningSnapshot(db)).toEqual(before)
+      db.exec(
+        "CREATE TEMP TRIGGER fail_profile BEFORE INSERT ON planning_profiles BEGIN SELECT RAISE(ABORT, 'forced later failure'); END",
+      )
+      const changed = structuredClone(snapshot)
+      changed.costPresence![0]!.reason = '更新した理由'
+      changed.equipmentMethods![0]!.usefulLifeYears = 5
+      expect(() => repository.savePlanningSnapshot(changed, db)).toThrow('forced later failure')
+      expect(repository.getPlanningSnapshot(db)).toEqual(before)
+      db.exec('DROP TRIGGER fail_profile')
+      delete changed.costPresence
+      delete changed.equipmentMethods
+      repository.savePlanningSnapshot(changed, db)
+      expect(repository.getPlanningSnapshot(db).costPresence).toBeUndefined()
+      expect(repository.getPlanningSnapshot(db).equipmentMethods).toBeUndefined()
+      expect(repository.getPlanningSnapshot(db).homeCosts).toEqual(before.homeCosts)
+    } finally {
+      db.close()
     }
   })
 
