@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerStaticFiles } from './staticFiles.js'
 import { configurationSchema } from './configurationSchema.js'
+import { workspaceRequestOptions } from './workspaceHttp.js'
 import Fastify, { type FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { localDateFromTimestamp } from '../adapters/localTime.js'
@@ -347,7 +348,7 @@ function workspaceView(draft: WorkspaceDraft) {
 
 app.get('/api/workspace', async () => readWorkspace(workspaceView))
 
-app.post('/api/workspace/preview', async (request, reply) => {
+app.post('/api/workspace/preview', workspaceRequestOptions, async (request, reply) => {
   const parsed = workspacePreviewSchema.safeParse(request.body)
   if (!parsed.success)
     return reply.code(400).send({
@@ -371,7 +372,7 @@ app.post('/api/workspace/preview', async (request, reply) => {
   }
 })
 
-app.put('/api/workspace', async (request, reply) => {
+app.put('/api/workspace', workspaceRequestOptions, async (request, reply) => {
   const parsed = workspaceSaveSchema.safeParse(request.body)
   if (!parsed.success) {
     return reply.code(400).send({
