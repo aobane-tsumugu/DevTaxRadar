@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { PlanningSnapshot } from '../../src/planning/types.js'
 import { emptyPlanningSnapshot } from '../../src/planning/types.js'
 import type { AnnualCostProjection } from '../../src/accounting/costs.js'
+import { saveWorkspaceFixture, savePlanningFixture, saveRulesFixture } from './helpers/workspace-fixture.js'
 
 const children: ChildProcess[] = []
 const directories: string[] = []
@@ -198,6 +199,25 @@ afterEach(async () => {
 })
 
 describe('planning HTTP API', () => {
+  it('rejects all retired unversioned writers without changing the saved workspace', async () => {
+    const config = await startServer()
+    expect((await savePlanningFixture(snapshot(), config)).status).toBe(200)
+    const before = (await getJson('/api/workspace', config)) as WorkspaceView
+    for (const [url, method, body] of [
+      ['/api/planning', 'PUT', before.planning],
+      ['/api/planning/rules', 'PUT', { rules: [] }],
+      ['/api/config', 'POST', before.configuration],
+    ] as const) {
+      const response = await fetch(`http://127.0.0.1:${config.port}${url}`, {
+        method,
+        headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${config.port}`, 'x-devtax-csrf': config.csrfToken },
+        body: JSON.stringify(body),
+      })
+      expect(response.status).toBe(404)
+      expect(await getJson('/api/workspace', config)).toEqual(before)
+    }
+  })
+
   it('persists multiple home allocations and rejects missing or excessive targets atomically', async () => {
     const config = await startServer()
     const planning = emptyPlanningSnapshot(2026)
@@ -228,7 +248,7 @@ describe('planning HTTP API', () => {
         ],
       },
     ]
-    expect((await put('/api/planning', planning, config)).status).toBe(200)
+    expect((await savePlanningFixture(planning, config)).status).toBe(200)
     const saved = (await getJson('/api/planning', config)) as PlanningSnapshot
     expect(saved.homeCosts).toEqual(planning.homeCosts)
     const before = await getJson('/api/workspace', config)
@@ -240,7 +260,7 @@ describe('planning HTTP API', () => {
       ],
     ]) {
       planning.homeCosts[0]!.targets = targets
-      expect((await put('/api/planning', planning, config)).status).toBe(400)
+      expect((await savePlanningFixture(planning, config)).status).toBe(400)
       expect(await getJson('/api/workspace', config)).toEqual(before)
     }
   })
@@ -321,7 +341,7 @@ describe('planning HTTP API', () => {
         reason: '合成根拠',
       },
     ]
-    expect((await put('/api/planning', planning, server)).status).toBe(200)
+    expect((await savePlanningFixture(planning, server)).status).toBe(200)
     const costs = (await getJson('/api/projections?year=2026', server)) as AnnualCostProjection
     const contribution = costs.contributions.find(
       (row) => row.sourceIds.includes('direct:direct-api-test') && row.target.kind === 'tax-unit',
@@ -395,7 +415,7 @@ describe('planning HTTP API', () => {
     expect(response.status).toBe(200)
     const adopted = (await response.json()) as { review: { id: string } }
     planning.directCosts[0]!.amountJpy = 1000
-    expect((await put('/api/planning', planning, server)).status).toBe(200)
+    expect((await savePlanningFixture(planning, server)).status).toBe(200)
     const changed = (await getJson('/api/balances/preview?year=2026', server)) as BalancePreview
     expect(changed.materials!.costLinks!.check.status).toBe('invalid')
     const fixed = (await getJson('/api/balances/reviews/' + adopted.review.id, server)) as {
@@ -483,7 +503,7 @@ describe('planning HTTP API', () => {
         { taxUnitId: 'second-target', shareBps: 5000 },
       ],
     }
-    const annualSaved = await put('/api/planning', annualPlanning, server)
+    const annualSaved = await savePlanningFixture(annualPlanning, server)
     expect(annualSaved.status).toBe(200)
     const annualRead = (await getJson('/api/workspace', server)) as WorkspaceView
     expect(annualRead.planning.equipmentMethods![0]!.allocation).toEqual(
@@ -493,16 +513,16 @@ describe('planning HTTP API', () => {
     saved.revision = annualRead.revision
     const excessive = structuredClone(annualPlanning)
     excessive.equipmentMethods![0]!.allocation!.targets![0]!.shareBps = 6000
-    expect((await put('/api/planning', excessive, server)).status).toBe(400)
+    expect((await savePlanningFixture(excessive, server)).status).toBe(400)
     const missingTarget = structuredClone(annualPlanning)
     missingTarget.equipmentMethods![0]!.allocation!.targets![0]!.taxUnitId = 'missing'
-    expect((await put('/api/planning', missingTarget, server)).status).toBe(400)
+    expect((await savePlanningFixture(missingTarget, server)).status).toBe(400)
     expect(((await getJson('/api/workspace', server)) as WorkspaceView).revision).toBe(
       saved.revision,
     )
     const badDate = structuredClone(planning)
     badDate.equipment[0]!.acquiredOn = '2026-02-30'
-    expect((await put('/api/planning', badDate, server)).status).toBe(400)
+    expect((await savePlanningFixture(badDate, server)).status).toBe(400)
     expect(
       (
         await put(
@@ -1004,7 +1024,7 @@ describe('planning HTTP API', () => {
 
   it('backs up an existing product database before adding balance tables and retains planning records', async () => {
     let server = await startServer()
-    expect((await put('/api/planning', snapshot(), server)).status).toBe(200)
+    expect((await savePlanningFixture(snapshot(), server)).status).toBe(200)
     const running = children.at(-1)!
     await new Promise<void>((resolveExit) => {
       running.once('exit', () => resolveExit())
@@ -1043,7 +1063,7 @@ describe('planning HTTP API', () => {
   })
   it('exposes restored-data hold and rejects manual scans without changing saved planning', async () => {
     const server = await startServer()
-    expect((await put('/api/planning', snapshot(), server)).status).toBe(200)
+    expect((await savePlanningFixture(snapshot(), server)).status).toBe(200)
     writeFileSync(
       join(server.data, 'restore-reconnect-required.json'),
       JSON.stringify({ version: 1 }),
@@ -1284,7 +1304,7 @@ describe('planning HTTP API', () => {
         evidenceIds: [],
       },
     ]
-    expect((await put('/api/planning', initial, server)).status).toBe(200)
+    expect((await savePlanningFixture(initial, server)).status).toBe(200)
     const running = children.at(-1)!
     await new Promise<void>((resolveExit) => {
       running.once('exit', () => resolveExit())
@@ -1658,7 +1678,7 @@ describe('planning HTTP API', () => {
 
   it('saves chosen record merges against the latest revision and rejects a merged dangling reference atomically', async () => {
     const config = await startServer()
-    expect((await put('/api/planning', snapshot(), config)).status).toBe(200)
+    expect((await savePlanningFixture(snapshot(), config)).status).toBe(200)
     const base = (await getJson('/api/workspace', config)) as WorkspaceView
     const local = structuredClone(base)
     local.configuration.unobservedRatio = 0.1
@@ -1765,9 +1785,9 @@ describe('planning HTTP API', () => {
     }
     expect((await put('/api/workspace', invalid, config)).status).toBe(400)
     expect(await getJson('/api/workspace', config)).toEqual(saved)
-    // The legacy route also advances the shared revision, including an ABA edit.
-    expect((await put('/api/planning', before.planning, config)).status).toBe(200)
-    expect((await put('/api/planning', saved.planning, config)).status).toBe(200)
+    // Two ordinary versioned saves must still invalidate an earlier ABA request.
+    expect((await savePlanningFixture(before.planning, config)).status).toBe(200)
+    expect((await savePlanningFixture(saved.planning, config)).status).toBe(200)
     expect((await put('/api/workspace', request, config)).status).toBe(409)
     expect(((await getJson('/api/workspace', config)) as WorkspaceView).revision).toBeGreaterThan(
       saved.revision,
@@ -1848,15 +1868,9 @@ describe('planning HTTP API', () => {
         evidenceIds: [],
       },
     ]
-    expect((await put('/api/planning', planning, config)).status).toBe(200)
-    const saved = await fetch(`http://127.0.0.1:${config.port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${config.port}`,
-        'x-devtax-csrf': config.csrfToken,
-      },
-      body: JSON.stringify({
+    expect((await savePlanningFixture(planning, config)).status).toBe(200)
+    const saved = await saveWorkspaceFixture(config, {
+      configuration: {
         charges: { claude: 0, codex: 0 },
         monthlyCharges: [],
         contracts: { claude: {}, codex: {} },
@@ -1871,7 +1885,7 @@ describe('planning HTTP API', () => {
             amountJpy: 6200,
           },
         ],
-      }),
+      },
     })
     expect(saved.status).toBe(200)
     const projected = (await getJson('/api/projections?year=2026', config)) as AnnualCostProjection
@@ -1932,35 +1946,18 @@ describe('planning HTTP API', () => {
     const { csrfToken } = await runtime(testPort)
     const planning = snapshot()
 
-    const missingCsrf = await fetch(`http://127.0.0.1:${testPort}/api/planning`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(planning),
-    })
+    const missingCsrf = await saveWorkspaceFixture({ port: testPort }, { planning })
     expect(missingCsrf.status).toBe(403)
 
-    const invalid = await fetch(`http://127.0.0.1:${testPort}/api/planning`, {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${testPort}`,
-        'x-devtax-csrf': csrfToken,
-      },
-      body: JSON.stringify({ ...planning, version: 2 }),
-    })
+    const invalid = await saveWorkspaceFixture(
+      { port: testPort, csrfToken },
+      { planning: { ...planning, version: 2 } },
+    )
     expect(invalid.status).toBe(400)
 
-    const saved = await fetch(`http://127.0.0.1:${testPort}/api/planning`, {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${testPort}`,
-        'x-devtax-csrf': csrfToken,
-      },
-      body: JSON.stringify(planning),
-    })
+    const saved = await saveWorkspaceFixture({ port: testPort, csrfToken }, { planning })
     expect(saved.status).toBe(200)
-    expect(await saved.json()).toEqual({ saved: true })
+    expect(await saved.json()).toMatchObject({ planning })
 
     const restored = await fetch(`http://127.0.0.1:${testPort}/api/planning`).then(
       async (response) => await response.json(),
@@ -1998,8 +1995,7 @@ describe('planning HTTP API', () => {
 
   it('ルールだけを置き換えられる', async () => {
     const config = await startServer()
-    await put(
-      '/api/planning',
+    await savePlanningFixture(
       {
         ...emptyPlanningSnapshot(2026),
         taxUnits: [
@@ -2016,8 +2012,7 @@ describe('planning HTTP API', () => {
       config,
     )
 
-    const response = await put(
-      '/api/planning/rules',
+    const response = await saveRulesFixture(
       {
         rules: [
           {
@@ -2040,8 +2035,7 @@ describe('planning HTTP API', () => {
 
   it('存在しない制作物を指すルールを拒否する', async () => {
     const config = await startServer()
-    const response = await put(
-      '/api/planning/rules',
+    const response = await saveRulesFixture(
       {
         rules: [
           {
@@ -2060,8 +2054,7 @@ describe('planning HTTP API', () => {
 
   it('重複するルールIDを拒否する', async () => {
     const config = await startServer()
-    const response = await put(
-      '/api/planning/rules',
+    const response = await saveRulesFixture(
       {
         rules: [
           {
@@ -2104,16 +2097,12 @@ describe('planning HTTP API', () => {
     children.push(child)
     const { csrfToken } = await runtime(testPort)
 
-    const response = await fetch(`http://127.0.0.1:${testPort}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${testPort}`,
-        'x-devtax-csrf': csrfToken,
-      },
-      body: JSON.stringify({
+    const response = await saveWorkspaceFixture({ port: testPort, csrfToken }, {
+      configuration: {
         charges: { claude: 30000, codex: 20000 },
         monthlyCharges: [],
+        contracts: { claude: {}, codex: {} },
+        chargePeriods: [],
         unobservedRatio: 0.1,
         mappings: [
           {
@@ -2123,7 +2112,7 @@ describe('planning HTTP API', () => {
             classification: 'private',
           },
         ],
-      }),
+      },
     })
     expect(response.status).toBe(400)
   }, 20_000)
