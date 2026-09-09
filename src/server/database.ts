@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { resolvedTimeZone } from '../adapters/localTime.js'
+import { localMonthFromTimestamp, resolvedTimeZone } from '../adapters/localTime.js'
 import type { NormalizedUsage, UsageProvider } from '../adapters/types.js'
 import type { ProviderChargePeriod } from '../core/chargePeriods.js'
 import {
@@ -14,10 +14,15 @@ import {
     // reintroduce a localReference or arbitrary transcript-shaped payload.
     return parsed.map((event) => {
       const cached = event as CachedNormalizedUsage
+      // Rebase both unchanged and deferred cached events onto the current
+      // scan calendar. Saved annual materials and the cached source instant
+      // are not rewritten when the host's time zone changes.
+      const month = localMonthFromTimestamp(cached.observedAt)
+      if (!month) throw new Error('Invalid cached observation timestamp')
       return {
         provider: cached.provider,
         ...(cached.eventKey === undefined ? {} : { eventKey: cached.eventKey }),
-        month: cached.month,
+        month,
         observedAt: cached.observedAt,
         sessionKey: cached.sessionKey,
         projectKey: cached.projectKey,

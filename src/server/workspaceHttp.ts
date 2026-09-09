@@ -1,8 +1,7 @@
 import type { RouteShorthandOptions } from 'fastify'
+import { WORKSPACE_BODY_LIMIT } from '../planning/workspaceLimits.js'
 
-// The whole UTF-8 JSON request, including its revision and preview/save fields.
-// Keep the ordinary 64 KiB default and the separate balance/adoption limits intact.
-export const WORKSPACE_BODY_LIMIT = 2 * 1024 * 1024
+export { WORKSPACE_BODY_LIMIT } from '../planning/workspaceLimits.js'
 
 export const workspaceRequestOptions: RouteShorthandOptions = {
   bodyLimit: WORKSPACE_BODY_LIMIT,

@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { mergeWorkspaceDrafts } from '../../core/workspaceMerge'
+import { WORKSPACE_ATTEMPT_LIMIT } from '../../planning/workspaceLimits'
 import WorkspaceValue from './WorkspaceValue'
 import {
+  decodeWorkspaceAttempt,
   listWorkspaceAttempts,
   removeWorkspaceAttempt,
   type WorkspaceAttempt,
@@ -30,7 +32,7 @@ export default function WorkspaceAttemptPanel({
             : '未確認の保存要求はありません。',
       )
     } catch {
-      setMessage('保存要求の控えを読み込めませんでした。')
+      setMessage('ブラウザ内の控えを読み込めません。ファイル控えは下から読み込めます。')
     }
   }
   return (
@@ -42,6 +44,42 @@ export default function WorkspaceAttemptPanel({
       <button disabled={busy || disabled} onClick={inspect}>
         料金・計画の保存要求を確認
       </button>
+      <label>
+        個人用の送信控えファイルを読み込む
+        <input
+          type="file"
+          accept=".json,application/json"
+          disabled={busy || disabled}
+          onChange={async (event) => {
+            const input = event.currentTarget
+            const file = input.files?.[0]
+            if (!file) return
+            setBusy(true)
+            try {
+              if (file.size > WORKSPACE_ATTEMPT_LIMIT) throw new Error('控えファイルが大きすぎます。')
+              const record = decodeWorkspaceAttempt(await file.text())
+              if (record.datasetId !== datasetId)
+                throw new Error('別のデータセットの控えです。この資料へは再送できません。')
+              const existing = records.find((row) => row.request.requestId === record.request.requestId)
+              if (
+                existing &&
+                JSON.stringify([existing.base, existing.request]) !== JSON.stringify([record.base, record.request])
+              )
+                throw new Error('同じ要求IDで内容の異なる控えがあります。送信せず確認してください。')
+              setRecords([record, ...records.filter((row) => row.request.requestId !== record.request.requestId)])
+              setMessage('ファイル控えを読み込みました。まだ送信していません。対象と変更内容を確認してください。')
+            } catch (error) {
+              setMessage(error instanceof Error ? error.message : '控えファイルを読み込めませんでした。')
+            } finally {
+              input.value = ''
+              setBusy(false)
+            }
+          }}
+        />
+      </label>
+      <p>
+        ファイル控えは料金・計画と自由記述を含む個人用です。第三者へ渡す相談資料とは異なります。読込みだけでは保存せず、元ファイルも削除しません。
+      </p>
       {message && <p role="status">{message}</p>}
       {records.map((record) => (
         <article key={record.request.requestId}>
@@ -65,7 +103,8 @@ export default function WorkspaceAttemptPanel({
             onClick={() => {
               try {
                 removeWorkspaceAttempt(window.localStorage, record)
-                inspect()
+                setRecords((current) => current.filter((row) => row.request.requestId !== record.request.requestId))
+                setMessage('ブラウザの控えと一覧から取り除きました。端末上のファイル控えは削除していません。')
               } catch (error) {
                 setMessage(error instanceof Error ? error.message : '控えを削除できませんでした。')
               }
@@ -79,8 +118,8 @@ export default function WorkspaceAttemptPanel({
               setBusy(true)
               try {
                 await onRetry(record)
-                inspect()
-                setMessage('保存結果を確認しました。')
+                setRecords((current) => current.filter((row) => row.request.requestId !== record.request.requestId))
+                setMessage('保存結果を確認しました。端末上のファイル控えは必要に応じてご自身で整理してください。')
               } catch (error) {
                 setMessage(
                   error instanceof Error ? error.message : '保存結果を確認できませんでした。',
