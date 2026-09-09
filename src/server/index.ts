@@ -5,7 +5,6 @@ import { registerBalanceRoutes } from './balanceRoutes.js'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerStaticFiles } from './staticFiles.js'
-import { configurationSchema } from './configurationSchema.js'
 import { workspaceRequestOptions } from './workspaceHttp.js'
 import Fastify, { type FastifyReply } from 'fastify'
 import { z } from 'zod'
@@ -15,7 +14,6 @@ import {
   getDatabase,
   getHistorySources,
   HistorySourceError,
-  saveConfiguration,
 } from './database.js'
 import { buildDashboard } from './dashboard.js'
 import { diagnosePlanning } from '../core/diagnosis.js'
@@ -401,45 +399,11 @@ app.put('/api/workspace', workspaceRequestOptions, async (request, reply) => {
   }
 })
 
+// Legacy GETs remain readable. Planning/configuration writes use only the
+// revision-checked, atomic workspace endpoint; retired write URLs return 404.
 app.get('/api/planning', async () => {
   const { getPlanningSnapshot } = await import('./planningRepository.js')
   return getPlanningSnapshot()
-})
-
-app.put('/api/planning', async (request, reply) => {
-  const { planningSaveSchema, savePlanningSnapshot } = await import('./planningRepository.js')
-  const parsed = planningSaveSchema.safeParse(request.body)
-  if (!parsed.success) {
-    await reply.code(400).send({
-      error: 'invalid_request',
-      details: parsed.error.flatten(),
-    })
-    return
-  }
-  savePlanningSnapshot(parsed.data)
-  return { saved: true }
-})
-
-app.put('/api/planning/rules', async (request, reply) => {
-  const { projectRulesSchema, replaceProjectRules, PlanningValidationError } =
-    await import('./planningRepository.js')
-  const parsed = projectRulesSchema.safeParse(request.body)
-  if (!parsed.success) {
-    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
-    return
-  }
-  try {
-    replaceProjectRules(parsed.data.rules)
-  } catch (error) {
-    const message =
-      error instanceof PlanningValidationError ? error.message : 'ルールを保存できませんでした。'
-    await reply.code(400).send({
-      error: 'invalid_request',
-      message,
-    })
-    return
-  }
-  return { saved: true }
 })
 
 app.get('/api/diagnosis', async () => {
@@ -485,19 +449,6 @@ app.get('/api/export', async (request, reply) => {
     throw error
   }
   await reply.type('text/markdown; charset=utf-8').send(markdown)
-})
-
-app.post('/api/config', async (request, reply) => {
-  const parsed = configurationSchema.safeParse(request.body)
-  if (!parsed.success) {
-    await reply.code(400).send({
-      error: 'invalid_request',
-      details: parsed.error.flatten(),
-    })
-    return
-  }
-  saveConfiguration(parsed.data)
-  return { saved: true }
 })
 
 const retentionRequestSchema = z
