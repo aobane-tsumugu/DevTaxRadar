@@ -1,3 +1,5 @@
+import type { ChargeUsageScope } from './contractUsage.js'
+
 export type ChargeProvider = 'claude' | 'codex'
 
 export type ChargeContractBasis = {
@@ -18,16 +20,21 @@ export type ChargeContractConfirmation = {
   reason: string
   confirmedAt?: string
   basis: ChargeContractBasis
+  usageScope?: ChargeUsageScope
 }
+
 export type ProviderChargePeriod = ChargeContractBasis & {
   contractConfirmation?: ChargeContractConfirmation
 }
 
-/** Explicit whitelist keeps the confirmation out of its own snapshot. */
+/** Explicit whitelist keeps the correspondence out of its own invoice snapshot. */
 export function chargeContractBasis(period: ProviderChargePeriod): ChargeContractBasis {
   return {
-    id: period.id, provider: period.provider, planName: period.planName.trim(),
-    serviceStartedOn: period.serviceStartedOn, serviceEndedOn: period.serviceEndedOn,
+    id: period.id,
+    provider: period.provider,
+    planName: period.planName.trim(),
+    serviceStartedOn: period.serviceStartedOn,
+    serviceEndedOn: period.serviceEndedOn,
     amountJpy: period.amountJpy,
     ...(period.billedOn ? { billedOn: period.billedOn } : {}),
     ...(period.unknownAmountReason ? { unknownAmountReason: period.unknownAmountReason.trim() } : {}),
@@ -35,21 +42,30 @@ export function chargeContractBasis(period: ProviderChargePeriod): ChargeContrac
     evidenceIds: [...(period.evidenceIds ?? [])].sort(),
   }
 }
-export function chargeContractStatus(period: ProviderChargePeriod): 'unreviewed' | 'draft' | 'changed' | 'confirmed' {
+
+export function chargeContractStatus(
+  period: ProviderChargePeriod,
+): 'unreviewed' | 'draft' | 'changed' | 'confirmed' {
   const confirmation = period.contractConfirmation
   if (!confirmation) return 'unreviewed'
   if (!confirmation.confirmedAt || !confirmation.reference.trim() || !confirmation.reason.trim()) return 'draft'
-  return JSON.stringify(chargeContractBasis(period)) === JSON.stringify(chargeContractBasis(confirmation.basis)) ? 'confirmed' : 'changed'
+  return JSON.stringify(chargeContractBasis(period)) === JSON.stringify(chargeContractBasis(confirmation.basis))
+    ? 'confirmed' : 'changed'
 }
+
 export function distinctChargeContracts(periods: readonly ProviderChargePeriod[]): boolean {
-  return periods.length > 1 && periods.every((period) => chargeContractStatus(period) === 'confirmed') &&
+  return periods.length > 1 &&
+    periods.every((period) => chargeContractStatus(period) === 'confirmed') &&
     new Set(periods.map((period) => period.contractConfirmation!.reference.trim())).size === periods.length
 }
+
 export function chargeContractMessage(period: ProviderChargePeriod): string | undefined {
   const record = period.contractConfirmation
   if (!record) return undefined
   const status = chargeContractStatus(period)
-  const label = status === 'confirmed' ? '契約との対応を確認済み' : status === 'changed' ? '請求内容変更のため契約との対応を再確認してください' : '契約との対応は確認途中'
+  const label = status === 'confirmed' ? '契約との対応を確認済み'
+    : status === 'changed' ? '請求内容変更のため契約との対応を再確認してください'
+      : '契約との対応は確認途中'
   return `${label}。契約の呼び名：${record.reference || '未入力'}。理由：${record.reason || '未入力'}。確認日時：${record.confirmedAt ?? '未確認'}。`
 }
 
@@ -60,12 +76,7 @@ export function duplicateChargeGroups(periods: readonly ProviderChargePeriod[]):
   const groups = new Map<string, Set<string>>()
   for (const period of periods) {
     if (period.amountJpy === null || !chargePeriodIsValid(period)) continue
-    const key = JSON.stringify([
-      period.provider,
-      period.serviceStartedOn,
-      period.serviceEndedOn,
-      period.amountJpy,
-    ])
+    const key = JSON.stringify([period.provider, period.serviceStartedOn, period.serviceEndedOn, period.amountJpy])
     const ids = groups.get(key) ?? new Set<string>()
     ids.add(period.id)
     groups.set(key, ids)
@@ -79,32 +90,19 @@ export function validIsoCalendarDate(value: string): boolean {
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value
 }
 
-/** Connected overlapping intervals, not a claim that every pair overlaps. End dates are inclusive. */
+/** Connected overlapping intervals. End dates are inclusive; not every pair must overlap. */
 export function overlappingChargeGroups(periods: readonly ProviderChargePeriod[]): string[][] {
   const groups: string[][] = []
   for (const provider of ['claude', 'codex'] as const) {
-    const rows = periods
-      .filter(
-        (row) =>
-          row.provider === provider &&
-          validIsoCalendarDate(row.serviceStartedOn) &&
-          validIsoCalendarDate(row.serviceEndedOn) &&
-          row.serviceStartedOn <= row.serviceEndedOn,
-      )
-      .sort(
-        (a, b) => a.serviceStartedOn.localeCompare(b.serviceStartedOn) || a.id.localeCompare(b.id),
-      )
-    let ids = new Set<string>(),
-      end = ''
-    const flush = () => {
-      if (ids.size > 1) groups.push([...ids].sort())
-    }
+    const rows = periods.filter((row) => row.provider === provider &&
+      validIsoCalendarDate(row.serviceStartedOn) && validIsoCalendarDate(row.serviceEndedOn) &&
+      row.serviceStartedOn <= row.serviceEndedOn)
+      .sort((a, b) => a.serviceStartedOn.localeCompare(b.serviceStartedOn) || a.id.localeCompare(b.id))
+    let ids = new Set<string>()
+    let end = ''
+    const flush = () => { if (ids.size > 1) groups.push([...ids].sort()) }
     for (const row of rows) {
-      if (row.serviceStartedOn > end) {
-        flush()
-        ids = new Set()
-        end = ''
-      }
+      if (row.serviceStartedOn > end) { flush(); ids = new Set(); end = '' }
       ids.add(row.id)
       if (row.serviceEndedOn > end) end = row.serviceEndedOn
     }
@@ -118,45 +116,29 @@ export function chargeReviewGroups(
   year?: number,
 ): { kind: 'duplicate' | 'overlap'; ids: string[] }[] {
   if (year !== undefined) {
-    if (!Number.isInteger(year) || year < 0 || year > 9999)
-      throw new RangeError('Invalid charge review year')
+    if (!Number.isInteger(year) || year < 0 || year > 9999) throw new RangeError('Invalid charge review year')
     const label = String(year).padStart(4, '0')
-    periods = periods.filter(
-      (row) => row.serviceStartedOn <= `${label}-12-31` && row.serviceEndedOn >= `${label}-01-01`,
-    )
+    periods = periods.filter((row) => row.serviceStartedOn <= `${label}-12-31` && row.serviceEndedOn >= `${label}-01-01`)
   }
   const duplicates = duplicateChargeGroups(periods)
   const exact = new Set(duplicates.map((ids) => JSON.stringify(ids)))
   return [
     ...duplicates.map((ids) => ({ kind: 'duplicate' as const, ids })),
-    ...overlappingChargeGroups(periods)
-      .filter((ids) => !exact.has(JSON.stringify(ids)))
+    ...overlappingChargeGroups(periods).filter((ids) => !exact.has(JSON.stringify(ids)))
       .map((ids) => ({ kind: 'overlap' as const, ids })),
   ]
 }
 
 function utcDay(value: string): number | undefined {
-  if (!validIsoCalendarDate(value)) return undefined
-  return Date.parse(`${value}T00:00:00.000Z`)
-}
-
-function monthKey(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(0, 7)
+  return validIsoCalendarDate(value) ? Date.parse(`${value}T00:00:00.000Z`) : undefined
 }
 
 export function chargePeriodIsValid(period: ProviderChargePeriod): boolean {
   const start = utcDay(period.serviceStartedOn)
   const end = utcDay(period.serviceEndedOn)
-  return Boolean(
-    start !== undefined &&
-    end !== undefined &&
-    start <= end &&
-    (period.amountJpy === null
-      ? Boolean(period.unknownAmountReason?.trim())
-      : Number.isSafeInteger(period.amountJpy) &&
-        period.amountJpy >= 0 &&
-        !period.unknownAmountReason),
-  )
+  return start !== undefined && end !== undefined && start <= end &&
+    (period.amountJpy === null ? Boolean(period.unknownAmountReason?.trim())
+      : Number.isSafeInteger(period.amountJpy) && period.amountJpy >= 0 && !period.unknownAmountReason)
 }
 
 export function chargePeriodCoversDate(period: ProviderChargePeriod, date: string): boolean {
@@ -164,73 +146,63 @@ export function chargePeriodCoversDate(period: ProviderChargePeriod, date: strin
 }
 
 export function chargePeriodCoversMonth(period: ProviderChargePeriod, month: string): boolean {
-  const monthStart = `${month}-01`
-  const [year, monthNumber] = month.split('-').map(Number)
-  if (!year || !monthNumber) return false
-  const nextMonth = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 10)
-  return period.serviceStartedOn < nextMonth && period.serviceEndedOn >= monthStart
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return false
+  const start = Date.parse(`${month}-01T00:00:00.000Z`)
+  const next = new Date(start)
+  next.setUTCMonth(next.getUTCMonth() + 1)
+  const periodStart = utcDay(period.serviceStartedOn)
+  const periodEnd = utcDay(period.serviceEndedOn)
+  return periodStart !== undefined && periodEnd !== undefined &&
+    periodStart < next.getTime() && periodEnd >= start
 }
 
-/** Split one actual charge across calendar months while preserving its exact yen total. */
+/** Exact day-based invoice proration, in O(months), without floating-point yen loss. */
 export function monthlyAmountsForCharge(
   period: ProviderChargePeriod,
 ): Array<{ provider: ChargeProvider; month: string; amountJpy: number | null }> {
   const start = utcDay(period.serviceStartedOn)
   const end = utcDay(period.serviceEndedOn)
   if (start === undefined || end === undefined || !chargePeriodIsValid(period)) return []
-
-  const daysByMonth = new Map<string, number>()
-  for (let day = start; day <= end; day += DAY_MS) {
-    const month = monthKey(day)
-    daysByMonth.set(month, (daysByMonth.get(month) ?? 0) + 1)
+  const months: Array<{ month: string; days: number }> = []
+  for (let cursor = start; cursor <= end;) {
+    const next = new Date(cursor)
+    next.setUTCDate(1)
+    next.setUTCMonth(next.getUTCMonth() + 1)
+    const last = Math.min(end, next.getTime() - DAY_MS)
+    months.push({ month: new Date(cursor).toISOString().slice(0, 7), days: (last - cursor) / DAY_MS + 1 })
+    cursor = last + DAY_MS
   }
-  const totalDays = [...daysByMonth.values()].reduce((sum, days) => sum + days, 0)
-  const originalAmount = period.amountJpy
-  if (originalAmount === null)
-    return [...daysByMonth.keys()].map((month) => ({
-      provider: period.provider,
-      month,
-      amountJpy: null,
-    }))
-  const allocations = [...daysByMonth].map(([month, days]) => {
-    const exact = (originalAmount * days) / totalDays
-    const amountJpy = Math.floor(exact)
-    return { provider: period.provider, month, amountJpy, remainder: exact - amountJpy }
+  const original = period.amountJpy
+  if (original === null) return months.map(({ month }) => ({ provider: period.provider, month, amountJpy: null }))
+  const denominator = BigInt((end - start) / DAY_MS + 1)
+  const rows = months.map(({ month, days }) => {
+    const numerator = BigInt(original) * BigInt(days)
+    return { provider: period.provider, month, amountJpy: Number(numerator / denominator), remainder: numerator % denominator }
   })
-  let remaining = originalAmount - allocations.reduce((sum, item) => sum + item.amountJpy, 0)
-  for (const item of [...allocations].sort(
-    (left, right) => right.remainder - left.remainder || left.month.localeCompare(right.month),
-  )) {
+  let remaining = original - rows.reduce((sum, row) => sum + row.amountJpy, 0)
+  const ranked = [...rows].sort((a, b) => a.remainder === b.remainder
+    ? a.month.localeCompare(b.month) : a.remainder > b.remainder ? -1 : 1)
+  for (const row of ranked) {
     if (remaining <= 0) break
-    item.amountJpy += 1
-    remaining -= 1
+    row.amountJpy++
+    remaining--
   }
-  return allocations.map(({ provider, month, amountJpy }) => ({ provider, month, amountJpy }))
+  return rows.map(({ provider, month, amountJpy }) => ({ provider, month, amountJpy }))
 }
 
 export function monthlyAmountsForCharges(
   periods: ProviderChargePeriod[],
 ): Array<{ provider: ChargeProvider; month: string; amountJpy: number | null }> {
-  const totals = new Map<
-    string,
-    { provider: ChargeProvider; month: string; amountJpy: number | null }
-  >()
+  const totals = new Map<string, { provider: ChargeProvider; month: string; amountJpy: number | null }>()
   for (const period of periods) {
     for (const amount of monthlyAmountsForCharge(period)) {
       const key = `${amount.provider}:${amount.month}`
       const current = totals.get(key)
-      totals.set(key, {
-        provider: amount.provider,
-        month: amount.month,
-        amountJpy:
-          current?.amountJpy === null || amount.amountJpy === null
-            ? null
-            : (current?.amountJpy ?? 0) + amount.amountJpy,
-      })
+      const amountJpy = current?.amountJpy === null || amount.amountJpy === null
+        ? null : (current?.amountJpy ?? 0) + amount.amountJpy
+      if (amountJpy !== null && !Number.isSafeInteger(amountJpy)) throw new RangeError('Monthly charge total exceeds exact yen range')
+      totals.set(key, { provider: amount.provider, month: amount.month, amountJpy })
     }
   }
-  return [...totals.values()].sort(
-    (left, right) =>
-      left.month.localeCompare(right.month) || left.provider.localeCompare(right.provider),
-  )
+  return [...totals.values()].sort((a, b) => a.month.localeCompare(b.month) || a.provider.localeCompare(b.provider))
 }

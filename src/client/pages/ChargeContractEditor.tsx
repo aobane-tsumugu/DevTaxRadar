@@ -1,5 +1,6 @@
 import { chargeContractBasis, chargeContractStatus, chargePeriodIsValid, type ProviderChargePeriod } from '../../core/chargePeriods'
 import { recordedTime } from '../recordedTime'
+import ChargeUsageEditor from './ChargeUsageEditor'
 
 export default function ChargeContractEditor({ period, index, onChange }: {
   period: ProviderChargePeriod
@@ -10,8 +11,9 @@ export default function ChargeContractEditor({ period, index, onChange }: {
   const status = chargeContractStatus(period)
   function edit(field: 'reference' | 'reason', value: string) {
     onChange({ ...period, contractConfirmation: {
+      ...record,
       reference: record?.reference ?? '', reason: record?.reason ?? '',
-      basis: chargeContractBasis(period),
+      basis: chargeContractBasis(period), confirmedAt: undefined,
       [field]: value,
     } })
   }
@@ -23,8 +25,11 @@ export default function ChargeContractEditor({ period, index, onChange }: {
     <label>対応を確認した理由<textarea aria-label={`請求${index + 1} 契約確認の理由`} maxLength={2000} value={record?.reason ?? ''} onChange={(event) => edit('reason', event.target.value)} /></label>
     {record?.confirmedAt && <p>前回の確認日時：{recordedTime(record.confirmedAt)} / 対象：{record.basis.planName || 'プラン名未入力'} / {record.basis.serviceStartedOn}～{record.basis.serviceEndedOn} / {record.basis.amountJpy === null ? '原額不明' : `${record.basis.amountJpy}円`}</p>}
     <button type="button" disabled={!record?.reference.trim() || !record?.reason.trim() || !chargePeriodIsValid(period)} onClick={() => onChange({ ...period, contractConfirmation: {
-      reference: record!.reference.trim(), reason: record!.reason.trim(), confirmedAt: new Date().toISOString(), basis: chargeContractBasis(period),
+      ...record!,
+      reference: record!.reference.trim(), reason: record!.reason.trim(),
+      confirmedAt: new Date().toISOString(), basis: chargeContractBasis(period),
     } })}>請求{index + 1}の契約対応を確認</button>
-    <p>この操作は編集中の記録へ反映します。「ここまで保存」または変更の影響確認から保存してください。金額の除外や税務処理の確定は行いません。</p>
+    <ChargeUsageEditor period={period} index={index} onChange={onChange} />
+    <p>この操作は編集中の記録へ反映します。「ここまで保存」から保存してください。金額の除外や税務処理の確定は行いません。</p>
   </fieldset>
 }
