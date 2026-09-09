@@ -30,6 +30,27 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      # Temporary, private, one-day validation bundle. No .git, credentials,
+      # environment dump, user data or transcript directories are included.
+      - name: Prepare isolated validation inputs
+        if: always() && github.event_name == 'push'
+        run: |
+          mkdir -p /tmp/devtax-validation
+          git archive --format=tar HEAD | gzip > /tmp/devtax-validation/source.tar.gz
+          cp "$(command -v node)" /tmp/devtax-validation/node24
+          if test -d node_modules; then
+            tar -czf /tmp/devtax-validation/dependencies.tar.gz node_modules
+          fi
+
+      - name: Retain isolated validation inputs for this repair
+        if: always() && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: devtax-validation-inputs
+          path: /tmp/devtax-validation/
+          retention-days: 1
+          compression-level: 1
+
       - name: Type-check
         run: npm run typecheck
 
