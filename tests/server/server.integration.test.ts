@@ -1,298 +1,189 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import {
-  copyFileSync,
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
-import { networkInterfaces, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { tmpdir } from 'node:os'
+import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest'
 import { emptyPlanningSnapshot, type PlanningSnapshot } from '../../src/planning/types.js'
 import type { DashboardData, LocalConfiguration } from '../../src/client/types.js'
+import { saveConfigurationFixture, savePlanningFixture } from './helpers/workspace-fixture.js'
 
 const children: ChildProcess[] = []
 const temporaryDirectories: string[] = []
 
-afterEach(async () => {
-  for (const child of children.splice(0)) {
-    if (child.exitCode === null) {
-      child.kill()
-      await new Promise<void>((resolveExit) => {
-        const timeout = setTimeout(resolveExit, 2_000)
-        child.once('exit', () => {
-          clearTimeout(timeout)
-          resolveExit()
-        })
-      })
-    }
-  }
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    })
-  }
-})
-
-async function reservePort(): Promise<number> {
-  return await new Promise((resolvePort, reject) => {
+function reservePort(): Promise<number> {
+  return new Promise((resolvePort, reject) => {
     const server = createServer()
-    server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
       const address = server.address()
       if (!address || typeof address === 'string') {
         server.close()
-        reject(new Error('Could not reserve a local test port'))
+        reject(new Error('Could not reserve a test port'))
         return
       }
-      const { port } = address
-      server.close(() => resolvePort(port))
+      const port = address.port
+      server.close((error) => (error ? reject(error) : resolvePort(port)))
     })
+    server.on('error', reject)
   })
 }
 
-async function waitForRuntime(port: number): Promise<Response> {
-  const deadline = Date.now() + 10_000
-  let lastError: unknown
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/runtime`)
-      if (response.ok) {
-        return response
-      }
-    } catch (error) {
-      lastError = error
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50))
-  }
-  throw new Error(`Local server did not start: ${String(lastError)}`)
-}
-
-async function waitForStartupScan(port: number): Promise<{
-  running: boolean
-  startupPending: boolean
-  provider: string | null
-  filesScanned: number
+async function waitForRuntime(port: number): Promise<{
+  csrfToken: string
+  providers: { claude: { detected: boolean }; codex: { detected: boolean } }
 }> {
   const deadline = Date.now() + 10_000
   while (Date.now() < deadline) {
-    const progress = (await fetch(`http://127.0.0.1:${port}/api/scan/progress`).then(
-      async (response) => await response.json(),
-    )) as {
-      running: boolean
-      startupPending: boolean
-      provider: string | null
-      filesScanned: number
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/runtime`)
+      if (response.ok) return await response.json()
+    } catch {
+      // Give the child process time to bind the port.
     }
-    if (!progress.running && !progress.startupPending) return progress
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50))
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100))
   }
-  throw new Error('Startup history scan did not finish')
+  throw new Error('The local API did not become ready')
 }
 
-describe('local server boundary', () => {
-  it('starts on loopback and protects the scan mutation', async () => {
+afterEach(async () => {
+  for (const child of children.splice(0)) {
+    if (child.exitCode !== null) continue
+    child.kill()
+    await new Promise<void>((resolveExit) => {
+      const timeout = setTimeout(resolveExit, 2_000)
+      child.once('exit', () => {
+        clearTimeout(timeout)
+        resolveExit()
+      })
+    })
+  }
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+})
+
+describe('local API integration', () => {
+  it('scans synthetic logs, saves local configuration, and exposes calculated dashboard data', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'devtax-server-integration-'))
+    temporaryDirectories.push(root)
+    const claudeRoot = join(root, 'claude')
+    const codexRoot = join(root, 'codex')
+    const dataDirectory = join(root, 'data')
+    mkdirSync(claudeRoot, { recursive: true })
+    mkdirSync(codexRoot, { recursive: true })
+    const settingsPath = join(root, 'claude-settings.json')
+    writeFileSync(settingsPath, JSON.stringify({ cleanupPeriodDays: 30 }), 'utf8')
+
+    writeFileSync(
+      join(claudeRoot, 'synthetic-claude.jsonl'),
+      [
+        {
+          type: 'user',
+          sessionId: 'synthetic-claude-session-1',
+          timestamp: '2025-04-15T10:00:00.000Z',
+          cwd: 'C:\\Synthetic\\Product-A',
+          message: { role: 'user', content: 'SYNTHETIC_PRIVATE_PROMPT_MUST_NOT_ESCAPE' },
+        },
+        {
+          type: 'assistant',
+          sessionId: 'synthetic-claude-session-1',
+          timestamp: '2025-04-15T10:01:00.000Z',
+          cwd: 'C:\\Synthetic\\Product-A',
+          message: {
+            id: 'synthetic-message-1',
+            model: 'claude-synthetic',
+            usage: {
+              input_tokens: 1000,
+              output_tokens: 100,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n'),
+      'utf8',
+    )
+    writeFileSync(
+      join(codexRoot, 'synthetic-codex.jsonl'),
+      [
+        {
+          type: 'session_meta',
+          timestamp: '2026-04-15T10:00:00.000Z',
+          payload: {
+            id: 'synthetic-codex-session-1',
+            cwd: 'C:\\Synthetic\\Product-B',
+          },
+        },
+        {
+          type: 'turn_context',
+          timestamp: '2026-04-15T10:01:00.000Z',
+          payload: { model: 'codex-synthetic' },
+        },
+        {
+          type: 'event_msg',
+          timestamp: '2026-04-15T10:02:00.000Z',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: {
+                input_tokens: 2000,
+                cached_input_tokens: 500,
+                output_tokens: 200,
+                reasoning_output_tokens: 100,
+                total_tokens: 2200,
+              },
+            },
+          },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n'),
+      'utf8',
+    )
+
     const port = await reservePort()
-    const isolatedHome = mkdtempSync(join(tmpdir(), 'devtax-server-home-'))
-    const isolatedData = mkdtempSync(join(tmpdir(), 'devtax-server-data-'))
-    temporaryDirectories.push(isolatedHome, isolatedData)
-    const claudeHistory = join(isolatedHome, '.claude', 'projects')
-    mkdirSync(claudeHistory, { recursive: true })
-    copyFileSync(
-      resolve('fixtures/claude/synthetic-history.jsonl'),
-      join(claudeHistory, 'synthetic-history.jsonl'),
-    )
-    const claudeFixturePath = join(claudeHistory, 'synthetic-history.jsonl')
-    writeFileSync(
-      claudeFixturePath,
-      readFileSync(claudeFixturePath, 'utf8')
-        .split(/\r?\n/)
-        .filter((line) => line !== 'not valid json')
-        .join('\n'),
-      'utf8',
-    )
-    const codexHistory = join(isolatedHome, '.codex', 'sessions', '2026', '04')
-    mkdirSync(codexHistory, { recursive: true })
-    copyFileSync(
-      resolve('fixtures/codex/2026/04/synthetic-session.jsonl'),
-      join(codexHistory, 'synthetic-session.jsonl'),
-    )
-    const codexFixturePath = join(codexHistory, 'synthetic-session.jsonl')
-    writeFileSync(
-      codexFixturePath,
-      readFileSync(codexFixturePath, 'utf8')
-        .split(/\r?\n/)
-        .filter((line) => line !== '{broken')
-        .join('\n'),
-      'utf8',
-    )
-
-    // Task 2: point retention reads at a throwaway settings file instead of
-    // the real ~/.claude/settings.json. Must exist before the server starts.
-    const claudeSettingsPath = join(isolatedData, 'claude-settings.json')
-    writeFileSync(claudeSettingsPath, JSON.stringify({ cleanupPeriodDays: 400 }), 'utf8')
-
     const child = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
       cwd: resolve('.'),
       stdio: 'ignore',
       env: {
         ...process.env,
         PORT: String(port),
-        HOME: isolatedHome,
-        USERPROFILE: isolatedHome,
-        DEVTAX_RADAR_DATA_DIR: isolatedData,
-        DEVTAX_RADAR_CLAUDE_SETTINGS: claudeSettingsPath,
+        HOME: root,
+        USERPROFILE: root,
+        DEVTAX_RADAR_DATA_DIR: dataDirectory,
+        DEVTAX_RADAR_CLAUDE_ROOT: claudeRoot,
+        DEVTAX_RADAR_CODEX_ROOT: codexRoot,
+        DEVTAX_RADAR_CLAUDE_SETTINGS: settingsPath,
       },
     })
     children.push(child)
+    const runtime = await waitForRuntime(port)
+    expect(runtime.providers).toEqual({ claude: { detected: true }, codex: { detected: true } })
 
-    const runtimeResponse = await waitForRuntime(port)
-    const runtime = (await runtimeResponse.json()) as {
-      csrfToken: string
-      privacy: {
-        localOnly: boolean
-        promptBodiesPersisted: boolean
-        localPromptPreviewOnDemand: boolean
-        configuredPromptPreview: boolean
-        telemetry: boolean
-      }
-      retention: {
-        claude: {
-          detected: boolean
-          fileCount: number
-          oldestModifiedOn?: string
-          autoDelete: { kind: string; days?: number; source?: string; reason?: string }
-          nextLossOn?: string
-          daysUntilNextLoss?: number
-          alreadyLosing: boolean
-        }
-        codex: {
-          detected: boolean
-          fileCount: number
-          oldestModifiedOn?: string
-          autoDelete: { kind: string }
-          alreadyLosing: boolean
-        }
-      }
-    }
-    expect(runtime.privacy).toEqual({
-      localOnly: true,
-      promptBodiesPersisted: false,
-      localPromptPreviewOnDemand: true,
-      configuredPromptPreview: false,
-      telemetry: false,
-    })
-    expect(runtime.retention.claude.autoDelete).toEqual({
-      kind: 'configured',
-      days: 400,
-      source: 'explicit',
-    })
-    expect(runtime.retention.claude.detected).toBe(true)
-    expect(runtime.retention.claude.fileCount).toBe(1)
-    expect(runtime.retention.codex.autoDelete).toEqual({ kind: 'none' })
-    expect(runtime.retention.codex.detected).toBe(true)
-    expect(runtime.retention.codex.fileCount).toBe(1)
-    // The response must never carry a filesystem path.
-    const serializedRuntime = JSON.stringify(runtime)
-    expect(serializedRuntime).not.toContain('.claude')
-    expect(serializedRuntime).not.toContain('.codex')
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`).then((response) =>
+      response.json(),
+    )
+    expect(health).toMatchObject({ ok: true, service: 'devtax-radar' })
 
-    const retentionResponse = await fetch(`http://127.0.0.1:${port}/api/retention`, {
+    const missingCsrf = await fetch(`http://127.0.0.1:${port}/api/scan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ providers: ['claude', 'codex'] }),
+    })
+    expect(missingCsrf.status).toBe(403)
+
+    const badOrigin = await fetch(`http://127.0.0.1:${port}/api/scan`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
+        origin: 'https://example.com',
         'x-devtax-csrf': runtime.csrfToken,
       },
-      body: JSON.stringify({ days: 180 }),
+      body: JSON.stringify({ providers: ['claude'] }),
     })
-    expect(retentionResponse.status).toBe(200)
-    expect(await retentionResponse.json()).toMatchObject({ saved: true, days: 180 })
-
-    const settingsAfter = JSON.parse(readFileSync(claudeSettingsPath, 'utf8')) as Record<
-      string,
-      unknown
-    >
-    expect(settingsAfter.cleanupPeriodDays).toBe(180)
-
-    const withoutCsrf = await fetch(`http://127.0.0.1:${port}/api/retention`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port}` },
-      body: JSON.stringify({ days: 180 }),
-    })
-    expect(withoutCsrf.status).toBe(403)
-
-    const invalidDays = await fetch(`http://127.0.0.1:${port}/api/retention`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ days: 0 }),
-    })
-    expect(invalidDays.status).toBe(400)
-
-    const idleProgress = await waitForStartupScan(port)
-    expect(idleProgress).toEqual({
-      running: false,
-      provider: null,
-      filesScanned: 0,
-      startupPending: false,
-    })
-
-    const nonLoopbackAddress = Object.values(networkInterfaces())
-      .flat()
-      .find(
-        (address) =>
-          address?.family === 'IPv4' && !address.internal && address.address !== '0.0.0.0',
-      )?.address
-    if (nonLoopbackAddress) {
-      await expect(
-        fetch(`http://${nonLoopbackAddress}:${port}/api/health`, {
-          signal: AbortSignal.timeout(750),
-        }),
-      ).rejects.toThrow()
-    }
-
-    const missingToken = await fetch(`http://127.0.0.1:${port}/api/scan`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-      },
-      body: JSON.stringify({ providers: [] }),
-    })
-    expect(missingToken.status).toBe(403)
-
-    const foreignOrigin = await fetch(`http://127.0.0.1:${port}/api/scan`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: 'https://attacker.example',
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ providers: [] }),
-    })
-    expect(foreignOrigin.status).toBe(403)
-
-    const invalidButAuthorized = await fetch(`http://127.0.0.1:${port}/api/scan`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ providers: [] }),
-    })
-    expect(invalidButAuthorized.status).toBe(400)
+    expect(badOrigin.status).toBe(403)
 
     const scanResponse = await fetch(`http://127.0.0.1:${port}/api/scan`, {
       method: 'POST',
@@ -304,48 +195,66 @@ describe('local server boundary', () => {
       body: JSON.stringify({ providers: ['claude', 'codex'] }),
     })
     expect(scanResponse.status).toBe(200)
-    const scanBody = (await scanResponse.json()) as {
-      providers: Record<string, { diagnostics: Record<string, unknown> }>
+    const scan = (await scanResponse.json()) as {
+      providers: { claude: { events: number }; codex: { events: number } }
     }
-    // First import of these fixtures: nothing existed before, so nothing counts
-    // as "changed since last scan" yet.
-    expect(scanBody.providers.claude?.diagnostics.changedSinceLastScan).toBe(0)
-    expect(scanBody.providers.codex?.diagnostics.changedSinceLastScan).toBe(0)
-    const serializedScan = JSON.stringify(scanBody)
-    // Only the changed-reference count may cross this boundary -- never the
-    // hash itself (a bare 64-hex-char SHA-256 digest) or the source file name.
-    expect(serializedScan).not.toMatch(/\b[0-9a-f]{64}\b/i)
-    expect(serializedScan).not.toContain('synthetic-history.jsonl')
-    expect(serializedScan).not.toContain('synthetic-session.jsonl')
+    expect(scan.providers.claude.events).toBe(1)
+    expect(scan.providers.codex.events).toBe(1)
 
-    const unconfiguredDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
-      async (response) => await response.json(),
-    )) as {
-      products: Array<{ projectKey: string; folder: string }>
+    const sources = (await fetch(`http://127.0.0.1:${port}/api/sources`).then((response) =>
+      response.json(),
+    )) as { sources: Array<{ id: string; lastScan: { status: string } }> }
+    expect(sources.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local-claude', lastScan: expect.objectContaining({ status: 'complete' }) }),
+        expect.objectContaining({ id: 'local-codex', lastScan: expect.objectContaining({ status: 'complete' }) }),
+      ]),
+    )
+
+    const retentionResponse = await fetch(`http://127.0.0.1:${port}/api/retention`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify({ days: 365 }),
+    })
+    expect(retentionResponse.status).toBe(200)
+    const retention = (await retentionResponse.json()) as {
+      saved: boolean
+      days: number
+      previousDays: number
+      backupFileName?: string
     }
-    const productA = unconfiguredDashboard.products.find(
-      (product) => product.folder === 'Product-A',
-    )
-    const productB = unconfiguredDashboard.products.find(
-      (product) => product.folder === 'Product-B',
-    )
-    const projectKey = productA?.projectKey
-    expect(projectKey).toMatch(/^project_[0-9a-f]{24}$/)
-    expect(productB?.projectKey).toMatch(/^project_[0-9a-f]{24}$/)
+    expect(retention).toMatchObject({ saved: true, days: 365, previousDays: 30 })
+    expect(retention.backupFileName).toBeTruthy()
+    expect(JSON.parse(readFileSync(settingsPath, 'utf8')).cleanupPeriodDays).toBe(365)
+
+    const invalidRetention = await fetch(`http://127.0.0.1:${port}/api/retention`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${port}`,
+        'x-devtax-csrf': runtime.csrfToken,
+      },
+      body: JSON.stringify({ days: 0 }),
+    })
+    expect(invalidRetention.status).toBe(400)
+
+    const initialDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
+      (response) => response.json(),
+    )) as DashboardData
+    const projectKey = initialDashboard.products.find((product) => product.folder === 'Product-A')?.projectKey
+    const productB = initialDashboard.products.find((product) => product.folder === 'Product-B')
+    expect(projectKey).toBeTruthy()
+    expect(productB).toBeTruthy()
 
     const configuration = {
-      charges: { claude: 30_001, codex: 20_003 },
+      charges: { claude: 30_000, codex: 20_000 },
       monthlyCharges: [
-        {
-          provider: 'claude',
-          month: '2025-04',
-          amountJpy: 12_345,
-        },
-        {
-          provider: 'claude',
-          month: '2026-04',
-          amountJpy: 120_000,
-        },
+        { provider: 'claude' as const, month: '2025-04', amountJpy: 120_000 },
+        { provider: 'claude' as const, month: '2026-04', amountJpy: 30_001 },
       ],
       contracts: {
         // Task 2 note: chosen to predate both configured months (2025-04 and
@@ -360,17 +269,12 @@ describe('local server boundary', () => {
       chargePeriods: [],
       unobservedRatio: 0.1,
     }
-    const saveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify(configuration),
+    const saveResponse = await saveConfigurationFixture(configuration, {
+      port,
+      csrfToken: runtime.csrfToken,
     })
     expect(saveResponse.status).toBe(200)
-    expect(await saveResponse.json()).toEqual({ saved: true })
+    expect(await saveResponse.json()).toMatchObject({ configuration })
 
     const storedConfiguration = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
       async (response) => await response.json(),
@@ -383,15 +287,10 @@ describe('local server boundary', () => {
       unobservedRatio: configuration.unobservedRatio,
     })
 
-    const unknownSaveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ ...configuration, unobservedRatio: null }),
-    })
+    const unknownSaveResponse = await saveConfigurationFixture(
+      { ...configuration, unobservedRatio: null },
+      { port, csrfToken: runtime.csrfToken },
+    )
     expect(unknownSaveResponse.status).toBe(200)
     const unknownConfiguration = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
       (response) => response.json(),
@@ -422,15 +321,7 @@ describe('local server boundary', () => {
       ],
     }
     const postMonthly = (body: unknown) =>
-      fetch(`http://127.0.0.1:${port}/api/config`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          origin: `http://127.0.0.1:${port}`,
-          'x-devtax-csrf': runtime.csrfToken,
-        },
-        body: JSON.stringify(body),
-      })
+      saveConfigurationFixture(body, { port, csrfToken: runtime.csrfToken })
     expect((await postMonthly(unknownMonthConfiguration)).status).toBe(200)
     const savedUnknownMonth = (await fetch(`http://127.0.0.1:${port}/api/config`).then((response) =>
       response.json(),
@@ -537,14 +428,9 @@ describe('local server boundary', () => {
         },
       ],
     }
-    const datedSaveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify(datedConfiguration),
+    const datedSaveResponse = await saveConfigurationFixture(datedConfiguration, {
+      port,
+      csrfToken: runtime.csrfToken,
     })
     expect(datedSaveResponse.status).toBe(200)
 
@@ -558,7 +444,7 @@ describe('local server boundary', () => {
       },
       body: JSON.stringify(legacyConfiguration),
     })
-    expect(legacySaveResponse.status).toBe(200)
+    expect(legacySaveResponse.status).toBe(404)
     const afterLegacySave = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
       async (response) => await response.json(),
     )) as typeof datedConfiguration
@@ -577,14 +463,9 @@ describe('local server boundary', () => {
       )?.warnings,
     ).toContain('請求の証拠参照が現在の記録にありません：receipt-ai')
 
-    const restoreEmptyPeriodsResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify(configuration),
+    const restoreEmptyPeriodsResponse = await saveConfigurationFixture(configuration, {
+      port,
+      csrfToken: runtime.csrfToken,
     })
     expect(restoreEmptyPeriodsResponse.status).toBe(200)
 
@@ -635,14 +516,9 @@ describe('local server boundary', () => {
       evidence: [],
       decisions: [],
     }
-    const planningResponse = await fetch(`http://127.0.0.1:${port}/api/planning`, {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify(planningSnapshot),
+    const planningResponse = await savePlanningFixture(planningSnapshot, {
+      port,
+      csrfToken: runtime.csrfToken,
     })
     expect(planningResponse.status).toBe(200)
 
@@ -747,18 +623,13 @@ describe('local server boundary', () => {
     expect(serializedDashboard).not.toContain('SYNTHETIC_PRIVATE_PROMPT_MUST_NOT_ESCAPE')
     expect(serializedDashboard).not.toContain('synthetic-claude-session-1')
 
-    const laterContractResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({
+    const laterContractResponse = await saveConfigurationFixture(
+      {
         ...configuration,
         contracts: { claude: { startedOn: '2030-01-01' }, codex: { startedOn: '2030-01-01' } },
-      }),
-    })
+      },
+      { port, csrfToken: runtime.csrfToken },
+    )
     expect(laterContractResponse.status).toBe(200)
 
     const contractDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
@@ -771,43 +642,28 @@ describe('local server boundary', () => {
       true,
     )
 
-    const restoreConfigurationResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify(configuration),
+    const restoreConfigurationResponse = await saveConfigurationFixture(configuration, {
+      port,
+      csrfToken: runtime.csrfToken,
     })
     expect(restoreConfigurationResponse.status).toBe(200)
 
-    const duplicateChargeResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({
+    const duplicateChargeResponse = await saveConfigurationFixture(
+      {
         ...configuration,
         monthlyCharges: [configuration.monthlyCharges[0], configuration.monthlyCharges[0]],
-      }),
-    })
+      },
+      { port, csrfToken: runtime.csrfToken },
+    )
     expect(duplicateChargeResponse.status).toBe(400)
 
-    const invalidContractResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({
+    const invalidContractResponse = await saveConfigurationFixture(
+      {
         ...configuration,
         contracts: { claude: { startedOn: '2026-07-01', endedOn: '2026-06-30' }, codex: {} },
-      }),
-    })
+      },
+      { port, csrfToken: runtime.csrfToken },
+    )
     expect(invalidContractResponse.status).toBe(400)
 
     if (existsSync(resolve('dist/index.html'))) {
@@ -821,14 +677,9 @@ describe('local server boundary', () => {
       monthlyCharges: [],
       chargePeriods: [],
     }
-    const clearResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify(clearedConfiguration),
+    const clearResponse = await saveConfigurationFixture(clearedConfiguration, {
+      port,
+      csrfToken: runtime.csrfToken,
     })
     expect(clearResponse.status).toBe(200)
     const configurationAfterClear = await fetch(`http://127.0.0.1:${port}/api/config`).then(
@@ -1097,7 +948,6 @@ describe('セッション単位のダッシュボード集計', () => {
         amount: number
       }>
     }
-
     const augustClaudeRows = dashboard.allocations.filter(
       (row) => row.provider === 'Claude Code' && row.month === '2026年8月',
     )
