@@ -67,7 +67,7 @@ import type {
   SessionSummary,
   SessionDetail,
 } from './types'
-import type { Diagnosis, PlanningSnapshot, ProjectRuleRecord } from '../planning/types'
+import type { Diagnosis, PlanningSnapshot } from '../planning/types'
 import type { AnnualCostProjection } from '../accounting/costs'
 import type {
   WorkspaceSave,
@@ -127,11 +127,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     try {
       const payload = (await response.json()) as { error?: string; message?: string }
       code = payload.error
-      // `message` is the specific, human-readable reason (e.g. a dangling
-      // taxUnitId or a reversed period from PUT /api/planning/rules).
-      // `error` is a machine-readable code (e.g. "invalid_request") meant
-      // for branching, not for showing to the user -- fall back to it only
-      // when the server had nothing more specific to say.
+      // Prefer the human-readable validation reason over the machine code.
       if (payload.message) detail = payload.message
       else if (payload.error) detail = payload.error
     } catch {
@@ -228,20 +224,6 @@ export function getScanProgress(): Promise<ScanProgress> {
   return requestJson('/api/scan/progress')
 }
 
-export function saveConfiguration(
-  csrfToken: string,
-  configuration: LocalConfiguration,
-): Promise<{ saved: true }> {
-  return requestJson('/api/config', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-DevTax-CSRF': csrfToken,
-    },
-    body: JSON.stringify(configuration),
-  })
-}
-
 export function saveRetention(
   csrfToken: string,
   days: number,
@@ -258,34 +240,6 @@ export function saveRetention(
 
 export function getPlanning(): Promise<PlanningSnapshot> {
   return requestJson('/api/planning')
-}
-
-export function savePlanning(
-  csrfToken: string,
-  planning: PlanningSnapshot,
-): Promise<{ saved: true }> {
-  return requestJson('/api/planning', {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-DevTax-CSRF': csrfToken,
-    },
-    body: JSON.stringify(planning),
-  })
-}
-
-export function savePlanningRules(
-  csrfToken: string,
-  rules: ProjectRuleRecord[],
-): Promise<{ saved: true }> {
-  return requestJson('/api/planning/rules', {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-DevTax-CSRF': csrfToken,
-    },
-    body: JSON.stringify({ rules }),
-  })
 }
 
 export function getDiagnosis(): Promise<Diagnosis> {
