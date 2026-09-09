@@ -1,6 +1,6 @@
 import WorkspaceAttemptPanel from './client/pages/WorkspaceAttemptPanel'
 import {
-  writeWorkspaceAttempt,
+  retainWorkspaceAttempt,
   removeWorkspaceAttempt,
   type WorkspaceAttempt,
 } from './client/workspaceAttempt'
@@ -362,7 +362,7 @@ function App() {
       }
     }
     const attempt = activeRuntime.datasetId
-      ? writeWorkspaceAttempt(window.localStorage, {
+      ? retainWorkspaceAttempt({
           version: 1,
           datasetId: activeRuntime.datasetId,
           createdAt: new Date().toISOString(),
@@ -375,7 +375,14 @@ function App() {
       pendingSave.current = null
       refreshSequence.current++
       applyWorkspace(next, true)
-      if (attempt) removeWorkspaceAttempt(window.localStorage, attempt)
+      if (attempt) {
+        try {
+          removeWorkspaceAttempt(window.localStorage, attempt)
+        } catch {
+          // The server commit succeeded. A retained copy can be reconciled
+          // idempotently later; cleanup failure must not undo that success.
+        }
+      }
       recoveredWorkspace.current = false
     } catch (error) {
       if (
@@ -400,12 +407,19 @@ function App() {
     if (freshRuntime.datasetId !== record.datasetId)
       throw new Error('接続先の資料が変わっています。再読込して確認してください。')
     // Revalidate the retained request before sending its original ID and content.
-    const retained = writeWorkspaceAttempt(window.localStorage, record)
+    const localCopy = retainWorkspaceAttempt(record)
+    const retained = localCopy ?? record
     try {
       const next = await saveWorkspace(freshRuntime.csrfToken, retained.request)
       refreshSequence.current++
       applyWorkspace(next)
-      removeWorkspaceAttempt(window.localStorage, retained)
+      if (localCopy) {
+        try {
+          removeWorkspaceAttempt(window.localStorage, localCopy)
+        } catch {
+          // Keep a successful save successful even when cleanup is blocked.
+        }
+      }
     } catch (error) {
       if (
         error instanceof ApiRequestError &&
