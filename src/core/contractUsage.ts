@@ -26,6 +26,7 @@ export type ContractObservation = {
   month: string
   startedAt: string
   endedAt: string
+  timePrecision?: 'instant' | 'interval' | 'unknown'
   projectLabel?: string | null
   model?: string | null
   inputTokens: number
@@ -139,11 +140,20 @@ export function selectContractUsage<T extends ContractObservation>(
   const selected: T[] = []
   let ambiguous = false
   for (const row of observations) {
-    if (row.provider !== period.provider || row.month !== month) continue
+    if (row.provider !== period.provider) continue
     const choices = selectionIntervals(row, period)
     if (choices.length === 0) continue
     const start = localDate(row.startedAt)
     const end = localDate(row.endedAt)
+    // Unknown timing is not made precise by a stored month derived from a
+    // session start. It can affect later invoices for this same selected use.
+    if (row.timePrecision === 'unknown') {
+      const nonzero = row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens > 0
+      if (nonzero && (!start || choices.some((range) => range.end >= start)))
+        return pending('選択した履歴に利用時点が不明な数値があります。会話開始月を利用月とみなさず、原額を配分未算定として保持します。時点付き履歴の再取得または対象会話の対応を確認してください。')
+      continue
+    }
+    if (row.month !== month) continue
     if (!start || !end || end < start) {
       ambiguous = true
       continue
