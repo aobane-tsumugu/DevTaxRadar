@@ -1,3 +1,4 @@
+import { sanitizedCaptureContext } from './observationRecords.js'
 import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { ReviewMaterials } from '../accounting/reviewMaterials.js'
@@ -73,6 +74,7 @@ export function buildReviewMaterials(
     configuration: { ...configuration, chargePeriods: configuration.chargePeriods ?? [] },
     planning,
     observations,
+    ...(observation.sourceCaptures ? { sourceCaptures: sanitizedCaptureContext(observation.sourceCaptures) } : {}),
     scanTimeZones: Object.fromEntries(
       Object.entries(observation.lastScanTimeZones).map(([key, zone]) => [
         opaque(['scan-source', key]),

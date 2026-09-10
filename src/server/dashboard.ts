@@ -1,3 +1,6 @@
+import { readSourceCaptureContext } from './observationRecords.js'
+import type { SourceCaptureContext } from '../accounting/observationRecord.js'
+import { captureWarnings } from '../core/captureProvenance.js'
 import {
   allocateSubscriptions,
   assertAllocationInvariant,
@@ -202,9 +205,16 @@ export function buildDashboard(year?: number): DashboardData {
   }
 }
 
-export function readDashboardObservation(db: DatabaseSync = getDatabase()) {
+export function readDashboardObservation(db: DatabaseSync = getDatabase()): {
+  sessions: UsageSessionRow[]
+  overview: ReturnType<typeof getUsageOverview>
+  lastScanTimeZones: Record<string, string>
+  sourceCaptures?: SourceCaptureContext[]
+} {
+  const sessions = getUsageSessions(db)
   return {
-    sessions: getUsageSessions(db),
+    sessions,
+    sourceCaptures: readSourceCaptureContext(db, sessions),
     overview: getUsageOverview(db),
     lastScanTimeZones: getLastScanTimeZones(db),
   }
@@ -346,7 +356,12 @@ function buildDashboardFromSnapshot(year?: number,
       unobservedUsage: captureRatio === null ? { kind: 'unknown' as const }
         : captureRatio === 0 ? { kind: 'confirmed-none' as const }
           : { kind: 'estimated' as const, ratio: captureRatio },
-      sourceWarnings: scopeWarnings,
+      sourceWarnings: [...scopeWarnings, ...captureWarnings(
+        observation.sourceCaptures, provider,
+        chargePeriod?.contractConfirmation?.usageScope?.kind === 'selected'
+          ? [...new Set(chargePeriod.contractConfirmation.usageScope.selectors.map((selector) => selector.sourceId))]
+          : undefined,
+      )],
       usesLegacyRatio: !chargePeriod?.contractConfirmation?.usageScope,
       usageLines,
     }

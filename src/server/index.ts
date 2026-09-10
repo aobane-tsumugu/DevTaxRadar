@@ -1,3 +1,4 @@
+import { registerObservationRoutes } from './observationRoutes.js'
 import { existsSync } from 'node:fs'
 import { datasetIdentity } from './datasetIdentity.js'
 import { previewRestoreSources, RestoreSourceConflict } from './restoreSources.js'
@@ -69,6 +70,7 @@ const app = Fastify({
 app.addHook('preHandler', createLoopbackHostGuard(port))
 app.addHook('preHandler', protectMutation)
 registerBalanceRoutes(app, getDatabase)
+registerObservationRoutes(app, getDatabase)
 
 app.get('/api/health', async () => ({
   ok: true,
@@ -329,7 +331,7 @@ app.patch('/api/sources/:id', async (request, reply) => {
 app.delete('/api/sources/:id', async (request, reply) => {
   const parsed = historySourceParamsSchema.safeParse(request.params)
   if (!parsed.success) {
-    await reply.code(400).send({ error: 'invalid_request' })
+    await reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() })
     return
   }
   try {

@@ -1,3 +1,4 @@
+import ObservationRecordsPanel from './ObservationRecordsPanel'
 import type { PlanningSnapshot } from '../../planning/types'
 import { assessCostPresence } from '../../planning/costPresence'
 
@@ -66,6 +67,7 @@ export default function RecordStatusPanel({
       <button className="text-button" onClick={onEdit}>
         登録内容を確認・編集
       </button>
+      <ObservationRecordsPanel />
     </section>
   )
 }

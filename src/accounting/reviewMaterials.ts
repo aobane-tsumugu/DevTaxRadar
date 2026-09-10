@@ -1,3 +1,4 @@
+import type { SourceCaptureContext } from './observationRecord.js'
 import type { LocalConfiguration } from '../client/types.js'
 import type { PlanningSnapshot } from '../planning/types.js'
 import type { AnnualCostProjection } from './costs.js'
@@ -34,6 +35,8 @@ export type ReviewMaterials = {
     cacheReadTokens: number
     cacheWriteTokens: number
   }>
+  /** Absent in older saved materials; never reconstructed from current capture state. */
+  sourceCaptures?: SourceCaptureContext[]
   scanTimeZones: Record<string, string>
   /** Latest ten scans from the current observation reader; not a complete source audit history. */
   recentScans: Array<{

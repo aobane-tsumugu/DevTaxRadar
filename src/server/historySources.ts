@@ -1,3 +1,6 @@
+import { archiveCurrentObservation, recordSourceCapture } from './observationRecordService.js'
+import { readSourceCapture } from './observationRecords.js'
+import type { FileCapture } from '../accounting/observationRecord.js'
 import { createHmac } from 'node:crypto'
 import { applyRestoreSources } from './restoreSources.js'
 import { getAppDataDirectory } from './paths.js'
@@ -276,7 +279,6 @@ async function discoverSourceFiles(
     left.canonicalRelativeIdentity.localeCompare(right.canonicalRelativeIdentity),
   )
 }
-
 function cacheMatches(
   cached: ReturnType<typeof getHistoryFileCacheEntries>[number] | undefined,
   file: DiscoveredHistoryFile,
@@ -318,6 +320,13 @@ function cachedEvent(event: NormalizedUsage): CachedNormalizedUsage {
   }
 }
 
+function captureReferences(events: readonly NormalizedUsage[]) {
+  const refs = new Map<string, { sessionKey: string; projectKey: string; month: string }>()
+  for (const { sessionKey, projectKey, month } of events)
+    refs.set(JSON.stringify([sessionKey, projectKey, month]), { sessionKey, projectKey, month })
+  return [...refs.values()]
+}
+
 function restoredCachedEvents(events: CachedNormalizedUsage[]): NormalizedUsage[] {
   // Cache rows have been explicitly decoded in database.ts and contain no
   // localReference. A copy keeps aggregation from ever mutating an object that
@@ -339,6 +348,7 @@ type IncrementalSourceRead = {
   events: NormalizedUsage[]
   diagnostics: AdapterDiagnostics
   fileCache: HistoryFileCacheMutation
+  captures: FileCapture[]
   failed: boolean
 }
 
@@ -354,9 +364,14 @@ async function readSourceIncrementally(
   const cacheSalt = sourceIdentifierSalt(identifierSalt, source.id)
   const files = await discoverSourceFiles(source.root, cacheSalt, diagnostics)
   if (!files) {
-    return { events: [], diagnostics, fileCache: { upsert: [], deleteFileKeys: [] }, failed: true }
+    return { events: [], diagnostics, fileCache: { upsert: [], deleteFileKeys: [] }, captures: [], failed: true }
   }
 
+  const captures: FileCapture[] = []
+  const previousFiles = new Map(
+    (readSourceCapture(getDatabase(), source.id, source.provider)?.files ?? [])
+      .map((file) => [file.fileKey, file]),
+  )
   const cacheEntries = getHistoryFileCacheEntries(source.id, source.provider)
   const cachedByFileKey = new Map(cacheEntries.map((entry) => [entry.fileKey, entry]))
   const seenFileKeys = new Set<string>()
@@ -395,6 +410,13 @@ async function readSourceIncrementally(
     if (mode === 'incremental' && cacheMatches(cached, file, signature)) {
       diagnostics.filesReused += 1
       appendCachedContribution(cached!.events)
+      captures.push({
+        fileKey: file.fileKey, state: 'reused', adapter: cached!.adapter,
+        schemaVersion: cached!.schemaVersion, eventCount: cached!.events.length,
+        observationRefs: captureReferences(cached!.events),
+        ...(previousFiles.get(file.fileKey)?.acceptedAt
+          ? { acceptedAt: previousFiles.get(file.fileKey)!.acceptedAt } : {}),
+      })
       continue
     }
 
@@ -408,11 +430,18 @@ async function readSourceIncrementally(
         events: [],
         diagnostics,
         fileCache: { upsert: [], deleteFileKeys: [] },
+        captures: [],
         failed: true,
       }
     }
     if (parsed.state === 'accepted' && parsed.snapshot) {
       appendContribution(parsed.events)
+      captures.push({
+        fileKey: file.fileKey, state: 'read', adapter: signature.adapter,
+        schemaVersion: signature.schemaVersion, eventCount: parsed.events.length,
+        observationRefs: captureReferences(parsed.events),
+        acceptedAt: new Date().toISOString(),
+      })
       upsert.push({
         fileKey: file.fileKey,
         byteSize: parsed.snapshot.byteSize,
@@ -429,6 +458,15 @@ async function readSourceIncrementally(
     // contributes zero and can be retried next incremental scan.
     diagnostics.filesDeferred += 1
     if (cached?.valid) appendCachedContribution(cached.events)
+    captures.push({
+      fileKey: file.fileKey, state: cached?.valid ? 'deferred-previous' : 'deferred-missing',
+      adapter: cached?.valid ? cached.adapter : signature.adapter,
+      schemaVersion: cached?.valid ? cached.schemaVersion : signature.schemaVersion,
+      eventCount: cached?.valid ? cached.events.length : 0,
+      observationRefs: captureReferences(cached?.valid ? cached.events : []),
+      ...(cached?.valid && previousFiles.get(file.fileKey)?.acceptedAt
+        ? { acceptedAt: previousFiles.get(file.fileKey)!.acceptedAt } : {}),
+    })
   }
 
   return {
@@ -440,6 +478,7 @@ async function readSourceIncrementally(
         .filter((entry) => !seenFileKeys.has(entry.fileKey))
         .map((entry) => entry.fileKey),
     },
+    captures,
     failed: false,
   }
 }
@@ -473,6 +512,7 @@ async function executeHistoryScan(
           'unavailable',
           availability.reason ?? 'not_readable',
         )
+        recordSourceCapture(source.id, source.provider, mode, 'unavailable')
         outcomes.push({
           sourceId: source.id,
           sourceName: source.name,
@@ -496,6 +536,7 @@ async function executeHistoryScan(
         // cache and do not block unrelated files in the same source.
         if (result.failed || result.diagnostics.ioErrors > 0) {
           recordHistorySourceScanFailure(source.id, source.provider, 'failed', 'scan_failed')
+          recordSourceCapture(source.id, source.provider, mode, 'failed')
           outcomes.push({
             sourceId: source.id,
             sourceName: source.name,
@@ -509,6 +550,9 @@ async function executeHistoryScan(
 
         const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
         const sessions = aggregateSessions(result.events, aggregationDiagnostics)
+        // Reads above await filesystem I/O. Capture again here so changes saved
+        // during that wait are paired with the values about to be replaced.
+        archiveCurrentObservation('before-scan')
         const { changedReferences } = replaceHistorySourceSessions(
           source.id,
           source.provider,
@@ -519,6 +563,7 @@ async function executeHistoryScan(
           },
           result.fileCache,
         )
+        recordSourceCapture(source.id, source.provider, mode, 'complete', result.captures)
         addDiagnostics(providerResult.diagnostics, {
           nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
           changedSinceLastScan: changedReferences.length,
@@ -538,6 +583,7 @@ async function executeHistoryScan(
         })
       } catch {
         recordHistorySourceScanFailure(source.id, source.provider, 'failed', 'scan_failed')
+        recordSourceCapture(source.id, source.provider, mode, 'failed')
         outcomes.push({
           sourceId: source.id,
           sourceName: source.name,
@@ -570,12 +616,15 @@ export function scanHistorySources(
   sourceIds?: string[],
   mode: HistoryScanMode = 'incremental',
 ): Promise<HistoryScanResult> {
-  return enqueueSourceOperation(() => {
+  return enqueueSourceOperation(async () => {
     if (restoreRequiresReconnect())
       throw new Error(
         '復元した資料の読み取り元を再接続するまで走査できません。保存済みの記録は保持しています。',
       )
-    return executeHistoryScan(providers, sourceIds, mode)
+    archiveCurrentObservation('before-scan')
+    const result = await executeHistoryScan(providers, sourceIds, mode)
+    archiveCurrentObservation('after-scan')
+    return result
   })
 }
 
@@ -587,11 +636,17 @@ export function updateConfiguredHistorySource(
   id: string,
   input: HistorySourceInput,
 ): Promise<HistorySource> {
-  return enqueueSourceOperation(() => updateHistorySource(id, input))
+  return enqueueSourceOperation(() => {
+    archiveCurrentObservation('before-source-change')
+    return updateHistorySource(id, input)
+  })
 }
 
 export function removeConfiguredHistorySource(id: string): Promise<void> {
-  return enqueueSourceOperation(() => removeHistorySource(id))
+  return enqueueSourceOperation(() => {
+    archiveCurrentObservation('before-source-change')
+    return removeHistorySource(id)
+  })
 }
 
 export function automaticSourceScanEnabled(): boolean {
