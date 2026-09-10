@@ -1,1184 +1,241 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { once } from 'node:events'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest'
-import { emptyPlanningSnapshot, type PlanningSnapshot } from '../../src/planning/types.js'
+import { join, resolve } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { AnnualCostProjection } from '../../src/accounting/costs.js'
 import type { DashboardData, LocalConfiguration } from '../../src/client/types.js'
+import { emptyPlanningSnapshot } from '../../src/planning/types.js'
+import type { WorkspaceView } from '../../src/planning/workspace.js'
 import { saveConfigurationFixture, savePlanningFixture } from './helpers/workspace-fixture.js'
 
-const children: ChildProcess[] = []
-const temporaryDirectories: string[] = []
-
-function reservePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const server = createServer()
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address()
-      if (!address || typeof address === 'string') {
-        server.close()
-        reject(new Error('Could not reserve a test port'))
-        return
-      }
-      const port = address.port
-      server.close((error) => (error ? reject(error) : resolvePort(port)))
-    })
-    server.on('error', reject)
-  })
+async function portNumber() {
+  const server = createServer()
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('No test port')
+  await new Promise<void>((done, reject) => server.close((error) => error ? reject(error) : done()))
+  return address.port
 }
 
-async function waitForRuntime(port: number): Promise<{
-  csrfToken: string
-  providers: { claude: { detected: boolean }; codex: { detected: boolean } }
-}> {
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/runtime`)
-      if (response.ok) return await response.json()
-    } catch {
-      // Give the child process time to bind the port.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100))
+/** Each case owns its server, home, data and fixtures; no cross-test state chain. */
+describe('local API integration through the versioned workspace', () => {
+  let root: string, port: number, child: ChildProcess | undefined, csrfToken: string
+  const rawSession = 'PRIVATE_NATIVE_SESSION_CANARY'
+  const prompt = 'PRIVATE_PROMPT_CANARY'
+  const defaults = (): LocalConfiguration => ({ charges: { claude: 0, codex: 0 }, monthlyCharges: [], contracts: { claude: {}, codex: {} }, chargePeriods: [], unobservedRatio: 0 })
+  const origin = () => `http://127.0.0.1:${port}`
+  const connection = () => ({ port, csrfToken })
+  async function json<T>(path: string): Promise<T> {
+    const response = await fetch(origin() + path)
+    if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<T>
   }
-  throw new Error('The local API did not become ready')
-}
-
-afterEach(async () => {
-  for (const child of children.splice(0)) {
-    if (child.exitCode !== null) continue
-    child.kill()
-    await new Promise<void>((resolveExit) => {
-      const timeout = setTimeout(resolveExit, 2_000)
-      child.once('exit', () => {
-        clearTimeout(timeout)
-        resolveExit()
-      })
-    })
+  function post(path: string, body: unknown, token = csrfToken, requestOrigin = origin()) {
+    return fetch(origin() + path, { method: 'POST', headers: {
+      'Content-Type': 'application/json', origin: requestOrigin,
+      ...(token ? { 'X-DevTax-CSRF': token } : {}),
+    }, body: JSON.stringify(body) })
   }
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  async function setCosts(configuration: LocalConfiguration) {
+    expect((await saveConfigurationFixture(configuration, connection())).status).toBe(200)
   }
-})
-
-describe('local API integration', () => {
-  it('scans synthetic logs, saves local configuration, and exposes calculated dashboard data', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'devtax-server-integration-'))
-    temporaryDirectories.push(root)
-    const claudeRoot = join(root, 'claude')
-    const codexRoot = join(root, 'codex')
-    const dataDirectory = join(root, 'data')
-    mkdirSync(claudeRoot, { recursive: true })
-    mkdirSync(codexRoot, { recursive: true })
-    const settingsPath = join(root, 'claude-settings.json')
-    writeFileSync(settingsPath, JSON.stringify({ cleanupPeriodDays: 30 }), 'utf8')
-
-    writeFileSync(
-      join(claudeRoot, 'synthetic-claude.jsonl'),
-      [
-        {
-          type: 'user',
-          sessionId: 'synthetic-claude-session-1',
-          timestamp: '2025-04-15T10:00:00.000Z',
-          cwd: 'C:\\Synthetic\\Product-A',
-          message: { role: 'user', content: 'SYNTHETIC_PRIVATE_PROMPT_MUST_NOT_ESCAPE' },
-        },
-        {
-          type: 'assistant',
-          sessionId: 'synthetic-claude-session-1',
-          timestamp: '2025-04-15T10:01:00.000Z',
-          cwd: 'C:\\Synthetic\\Product-A',
-          message: {
-            id: 'synthetic-message-1',
-            model: 'claude-synthetic',
-            usage: {
-              input_tokens: 1000,
-              output_tokens: 100,
-              cache_read_input_tokens: 0,
-              cache_creation_input_tokens: 0,
-            },
-          },
-        },
-      ]
-        .map((line) => JSON.stringify(line))
-        .join('\n'),
-      'utf8',
-    )
-    writeFileSync(
-      join(codexRoot, 'synthetic-codex.jsonl'),
-      [
-        {
-          type: 'session_meta',
-          timestamp: '2026-04-15T10:00:00.000Z',
-          payload: {
-            id: 'synthetic-codex-session-1',
-            cwd: 'C:\\Synthetic\\Product-B',
-          },
-        },
-        {
-          type: 'turn_context',
-          timestamp: '2026-04-15T10:01:00.000Z',
-          payload: { model: 'codex-synthetic' },
-        },
-        {
-          type: 'event_msg',
-          timestamp: '2026-04-15T10:02:00.000Z',
-          payload: {
-            type: 'token_count',
-            info: {
-              total_token_usage: {
-                input_tokens: 2000,
-                cached_input_tokens: 500,
-                output_tokens: 200,
-                reasoning_output_tokens: 100,
-                total_tokens: 2200,
-              },
-            },
-          },
-        },
-      ]
-        .map((line) => JSON.stringify(line))
-        .join('\n'),
-      'utf8',
-    )
-
-    const port = await reservePort()
-    const child = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
-      cwd: resolve('.'),
-      stdio: 'ignore',
-      env: {
-        ...process.env,
-        PORT: String(port),
-        HOME: root,
-        USERPROFILE: root,
-        DEVTAX_RADAR_DATA_DIR: dataDirectory,
-        DEVTAX_RADAR_CLAUDE_ROOT: claudeRoot,
-        DEVTAX_RADAR_CODEX_ROOT: codexRoot,
-        DEVTAX_RADAR_CLAUDE_SETTINGS: settingsPath,
-      },
-    })
-    children.push(child)
-    const runtime = await waitForRuntime(port)
-    expect(runtime.providers).toEqual({ claude: { detected: true }, codex: { detected: true } })
-
-    const health = await fetch(`http://127.0.0.1:${port}/api/health`).then((response) =>
-      response.json(),
-    )
-    expect(health).toMatchObject({ ok: true, service: 'devtax-radar' })
-
-    const missingCsrf = await fetch(`http://127.0.0.1:${port}/api/scan`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ providers: ['claude', 'codex'] }),
-    })
-    expect(missingCsrf.status).toBe(403)
-
-    const badOrigin = await fetch(`http://127.0.0.1:${port}/api/scan`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: 'https://example.com',
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ providers: ['claude'] }),
-    })
-    expect(badOrigin.status).toBe(403)
-
-    const scanResponse = await fetch(`http://127.0.0.1:${port}/api/scan`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ providers: ['claude', 'codex'] }),
-    })
-    expect(scanResponse.status).toBe(200)
-    const scan = (await scanResponse.json()) as {
-      providers: { claude: { events: number }; codex: { events: number } }
-    }
-    expect(scan.providers.claude.events).toBe(1)
-    expect(scan.providers.codex.events).toBe(1)
-
-    const sources = (await fetch(`http://127.0.0.1:${port}/api/sources`).then((response) =>
-      response.json(),
-    )) as { sources: Array<{ id: string; lastScan: { status: string } }> }
-    expect(sources.sources).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'local-claude', lastScan: expect.objectContaining({ status: 'complete' }) }),
-        expect.objectContaining({ id: 'local-codex', lastScan: expect.objectContaining({ status: 'complete' }) }),
-      ]),
-    )
-
-    const retentionResponse = await fetch(`http://127.0.0.1:${port}/api/retention`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ days: 365 }),
-    })
-    expect(retentionResponse.status).toBe(200)
-    const retention = (await retentionResponse.json()) as {
-      saved: boolean
-      days: number
-      previousDays: number
-      backupFileName?: string
-    }
-    expect(retention).toMatchObject({ saved: true, days: 365, previousDays: 30 })
-    expect(retention.backupFileName).toBeTruthy()
-    expect(JSON.parse(readFileSync(settingsPath, 'utf8')).cleanupPeriodDays).toBe(365)
-
-    const invalidRetention = await fetch(`http://127.0.0.1:${port}/api/retention`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify({ days: 0 }),
-    })
-    expect(invalidRetention.status).toBe(400)
-
-    const initialDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
-      (response) => response.json(),
-    )) as DashboardData
-    const projectKey = initialDashboard.products.find((product) => product.folder === 'Product-A')?.projectKey
-    const productB = initialDashboard.products.find((product) => product.folder === 'Product-B')
-    expect(projectKey).toBeTruthy()
-    expect(productB).toBeTruthy()
-
-    const configuration = {
-      charges: { claude: 30_000, codex: 20_000 },
-      monthlyCharges: [
-        { provider: 'claude' as const, month: '2025-04', amountJpy: 120_000 },
-        { provider: 'claude' as const, month: '2026-04', amountJpy: 30_001 },
-      ],
-      contracts: {
-        // Task 2 note: chosen to predate both configured months (2025-04 and
-        // 2026-04) so contract enforcement (added in Task 2) does not exclude
-        // either from the dashboard assertions below -- this block exercises
-        // config round-tripping, not contract-period filtering. That behavior
-        // is covered separately further down with a contract set after both
-        // sessions' dates.
-        claude: { startedOn: '2025-01-01' },
-        codex: {},
-      },
-      chargePeriods: [],
-      unobservedRatio: 0.1,
-    }
-    const saveResponse = await saveConfigurationFixture(configuration, {
-      port,
-      csrfToken: runtime.csrfToken,
-    })
-    expect(saveResponse.status).toBe(200)
-    expect(await saveResponse.json()).toMatchObject({ configuration })
-
-    const storedConfiguration = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
-      async (response) => await response.json(),
-    )) as typeof configuration
-    expect(storedConfiguration).toEqual({
-      charges: configuration.charges,
-      monthlyCharges: configuration.monthlyCharges,
-      contracts: configuration.contracts,
-      chargePeriods: [],
-      unobservedRatio: configuration.unobservedRatio,
-    })
-
-    const unknownSaveResponse = await saveConfigurationFixture(
-      { ...configuration, unobservedRatio: null },
-      { port, csrfToken: runtime.csrfToken },
-    )
-    expect(unknownSaveResponse.status).toBe(200)
-    const unknownConfiguration = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
-      (response) => response.json(),
-    )) as LocalConfiguration
-    expect(unknownConfiguration.unobservedRatio).toBeNull()
-    const pendingDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
-      (response) => response.json(),
-    )) as DashboardData
-    expect(pendingDashboard.allocations.length).toBeGreaterThan(0)
-    for (const row of pendingDashboard.allocations) {
-      expect(row).toMatchObject({ product: '配分未算定', group: 'review', usageRate: null })
-    }
-    expect(
-      pendingDashboard.guidance.some(
-        (item: { title: string }) => item.title === '履歴にない利用の割合が不明です',
-      ),
-    ).toBe(true)
-
-    const unknownMonthConfiguration = {
-      ...configuration,
-      monthlyCharges: [
-        {
-          provider: 'claude',
-          month: '2026-04',
-          amountJpy: null,
-          unknownAmountReason: '当月請求書の確認待ち',
-        },
-      ],
-    }
-    const postMonthly = (body: unknown) =>
-      saveConfigurationFixture(body, { port, csrfToken: runtime.csrfToken })
-    expect((await postMonthly(unknownMonthConfiguration)).status).toBe(200)
-    const savedUnknownMonth = (await fetch(`http://127.0.0.1:${port}/api/config`).then((response) =>
-      response.json(),
-    )) as LocalConfiguration
-    expect(savedUnknownMonth.monthlyCharges).toEqual(unknownMonthConfiguration.monthlyCharges)
-    const monthDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard?year=2026`).then(
-      (response) => response.json(),
-    )) as DashboardData
-    expect(
-      monthDashboard.costProjection!.sources.find((row) => row.id === 'ai:monthly:claude:2026-04'),
-    ).toMatchObject({
-      originalAmountJpy: null,
-      unknownOriginalAmountReasons: ['当月請求書の確認待ち'],
-    })
-    expect(monthDashboard.costProjection!.totals.unknownBasisIds.length).toBeGreaterThan(0)
-    expect(
-      monthDashboard.allocations.filter(
-        (row) => row.provider === 'Claude Code' && row.monthKey === '2026-04',
-      ),
-    ).toEqual([])
-    expect(
-      (
-        await postMonthly({
-          ...unknownMonthConfiguration,
-          monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: null }],
-        })
-      ).status,
-    ).toBe(400)
-    expect(
-      (
-        (await fetch(`http://127.0.0.1:${port}/api/config`).then((response) =>
-          response.json(),
-        )) as LocalConfiguration
-      ).monthlyCharges,
-    ).toEqual(unknownMonthConfiguration.monthlyCharges)
-
-    const unknownDefaultConfiguration = {
-      ...configuration,
-      charges: { claude: null, codex: 0 },
-      unknownChargeReasons: { claude: '既定の請求額を確認中' },
-      monthlyCharges: [],
-    }
-    expect((await postMonthly(unknownDefaultConfiguration)).status).toBe(200)
-    const defaultDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard?year=2026`).then(
-      (response) => response.json(),
-    )) as DashboardData
-    expect(
-      defaultDashboard.costProjection!.sources.find(
-        (row) => row.id === 'ai:monthly:claude:2026-04',
-      ),
-    ).toMatchObject({
-      originalAmountJpy: null,
-      unknownOriginalAmountReasons: ['既定の請求額を確認中'],
-    })
-    expect(
-      defaultDashboard.allocations.filter(
-        (row) => row.provider === 'Claude Code' && row.monthKey === '2026-04',
-      ),
-    ).toEqual([])
-    expect(
-      (await postMonthly({ ...unknownDefaultConfiguration, unknownChargeReasons: {} })).status,
-    ).toBe(400)
-    expect(
-      (await postMonthly({ ...unknownDefaultConfiguration, charges: { claude: 0, codex: 0 } }))
-        .status,
-    ).toBe(400)
-    expect(
-      (
-        await postMonthly({
-          ...unknownDefaultConfiguration,
-          monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: 1234 }],
-        })
-      ).status,
-    ).toBe(200)
-    const overriddenDashboard = (await fetch(
-      `http://127.0.0.1:${port}/api/dashboard?year=2026`,
-    ).then((response) => response.json())) as DashboardData
-    expect(
-      overriddenDashboard.costProjection!.sources.find(
-        (row) => row.id === 'ai:monthly:claude:2026-04',
-      ),
-    ).toMatchObject({ originalAmountJpy: 1234 })
-    expect(
-      overriddenDashboard.costProjection!.sources.find(
-        (row) => row.id === 'ai:monthly:claude:2026-04',
-      )?.unknownOriginalAmountReasons,
-    ).toBeUndefined()
-
-    const datedConfiguration = {
-      ...configuration,
-      chargePeriods: [
-        {
-          id: 'compatibility-charge',
-          provider: 'claude' as const,
-          planName: 'Compatibility plan',
-          evidenceIds: ['receipt-ai'],
-          contractConfirmation: {
-            reference: '合成契約', reason: '契約の明細と照合', confirmedAt: '2026-09-09T00:00:00Z',
-            basis: { id: 'compatibility-charge', provider: 'claude' as const, planName: 'Compatibility plan', evidenceIds: ['receipt-ai'], serviceStartedOn: '2026-04-01', serviceEndedOn: '2026-04-30', amountJpy: 30_001 },
-          },
-          serviceStartedOn: '2026-04-01',
-          serviceEndedOn: '2026-04-30',
-          amountJpy: 30_001,
-        },
-      ],
-    }
-    const datedSaveResponse = await saveConfigurationFixture(datedConfiguration, {
-      port,
-      csrfToken: runtime.csrfToken,
-    })
-    expect(datedSaveResponse.status).toBe(200)
-
-    const { chargePeriods: _omittedForLegacyClient, ...legacyConfiguration } = configuration
-    const legacySaveResponse = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: `http://127.0.0.1:${port}`,
-        'x-devtax-csrf': runtime.csrfToken,
-      },
-      body: JSON.stringify(legacyConfiguration),
-    })
-    expect(legacySaveResponse.status).toBe(404)
-    const afterLegacySave = (await fetch(`http://127.0.0.1:${port}/api/config`).then(
-      async (response) => await response.json(),
-    )) as typeof datedConfiguration
-    expect(afterLegacySave.chargePeriods).toEqual(datedConfiguration.chargePeriods)
-    const evidenceDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard?year=2026`).then(
-      (response) => response.json(),
-    )) as DashboardData
-    expect(
-      evidenceDashboard.costProjection!.sources.find(
-        (row) => row.id === 'ai:charge:compatibility-charge',
-      )?.evidenceIds,
-    ).toEqual(['receipt-ai'])
-    expect(
-      evidenceDashboard.costProjection!.bases.find(
-        (row) => row.sourceId === 'ai:charge:compatibility-charge',
-      )?.warnings,
-    ).toContain('請求の証拠参照が現在の記録にありません：receipt-ai')
-
-    const restoreEmptyPeriodsResponse = await saveConfigurationFixture(configuration, {
-      port,
-      csrfToken: runtime.csrfToken,
-    })
-    expect(restoreEmptyPeriodsResponse.status).toBe(200)
-
-    // Task 8 removed configuration.mappings entirely: classification and
-    // product naming come only from planning project rules now. Register
-    // rules covering the same two synthetic sessions so the dashboard groups
-    // them the way this test expects.
-    const planningSnapshot: PlanningSnapshot = {
-      version: 1,
-      profile: {
-        taxYear: 2026,
-        journeyMode: 'retrospective',
-        incomeCategory: 'undecided',
-        filingType: 'undecided',
-        monetizationStatus: 'planned',
-        hasBookkeeping: false,
-      },
-      taxUnits: [
-        {
-          id: 'tax-unit-product-a',
-          name: 'Product A',
-          unitType: 'new-software',
-          usageMode: 'external',
-          revenueModel: 'sales',
-          lifecycleStatus: 'developing',
-        },
-      ],
-      projectRules: [
-        {
-          id: 'rule-product-a',
-          projectKey: projectKey!,
-          effectiveFrom: '2025-01-01',
-          taxUnitId: 'tax-unit-product-a',
-          classification: 'new-development',
-        },
-        {
-          id: 'rule-product-b',
-          projectKey: productB!.projectKey,
-          effectiveFrom: '2025-01-01',
-          taxUnitId: 'tax-unit-product-a',
-          classification: 'feature-addition',
-        },
-      ],
-      lifecycleEvents: [],
-      equipment: [],
-      homeCosts: [],
-      directCosts: [],
-      evidence: [],
-      decisions: [],
-    }
-    const planningResponse = await savePlanningFixture(planningSnapshot, {
-      port,
-      csrfToken: runtime.csrfToken,
-    })
-    expect(planningResponse.status).toBe(200)
-
-    const dashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
-      async (response) => await response.json(),
-    )) as {
-      meta: {
-        source: string
-        sessionCount: number
-        mappedRate: number
-        classifiedRate: number
-      }
-      months: Array<{
-        label: string
-        current: number
-        future: number
-        review: number
-      }>
-      allocations: Array<{
-        provider: string
-        amount: number
-        session: { folder: string }
-      }>
-      assets: Array<{ product: string; name: string; total: number }>
-      boundaries: Array<{
-        amount: number
-        threshold: number
-        thresholdLabel: string
-        status: string
-        tone: string
-      }>
-      guidance: unknown[]
-      products: Array<{
-        name: string
-        folder: string
-        sessions: number
-        projectKey: string
-      }>
-    }
-
-    expect(dashboard.meta).toMatchObject({
-      source: 'local',
-      sessionCount: 2,
-      mappedRate: 100,
-      classifiedRate: 100,
-    })
-    expect(dashboard.months).toHaveLength(2)
-    expect(dashboard.months.map((month) => month.label)).toEqual(['2025年4月', '2026年4月'])
-    expect(dashboard.allocations.length).toBeGreaterThanOrEqual(2)
-    expect(dashboard.assets).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ product: 'Product A', name: 'Product A' }),
-        expect.objectContaining({
-          product: 'Product A',
-          name: 'Product A（改良計画）',
-        }),
-      ]),
-    )
-    expect(dashboard.boundaries).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          amount: 108_000,
-          threshold: 100_000,
-          thresholdLabel: '10万円境界',
-          status: expect.stringContaining('通常償却または3年一括の候補'),
-          tone: 'review',
-        }),
-        expect.objectContaining({
-          asset: 'Product A（改良計画）',
-          threshold: 200_000,
-          thresholdLabel: expect.stringContaining('修繕・改良'),
-          tone: 'review',
-        }),
-      ]),
-    )
-    expect(Array.isArray(dashboard.guidance)).toBe(true)
-    expect(dashboard.products[0]).toEqual(
-      expect.objectContaining({
-        name: 'Product A',
-        folder: 'Product-A',
-        sessions: 1,
-        projectKey,
-      }),
-    )
-
-    const claudeTotal = dashboard.allocations
-      .filter((allocation) => allocation.provider === 'Claude Code')
-      .reduce((sum, allocation) => sum + allocation.amount, 0)
-    expect(claudeTotal).toBe(
-      configuration.monthlyCharges.reduce((sum, charge) => sum + charge.amountJpy, 0),
-    )
-    expect(
-      dashboard.months[0]!.current + dashboard.months[0]!.future + dashboard.months[0]!.review,
-    ).toBe(configuration.monthlyCharges[0].amountJpy)
-    expect(
-      dashboard.months[1]!.current + dashboard.months[1]!.future + dashboard.months[1]!.review,
-    ).toBe(configuration.monthlyCharges[1].amountJpy + configuration.charges.codex)
-
-    const serializedDashboard = JSON.stringify(dashboard)
-    expect(serializedDashboard).not.toContain('C:\\Synthetic')
-    expect(serializedDashboard).not.toContain('C:/Synthetic')
-    expect(serializedDashboard).not.toContain('SYNTHETIC_PRIVATE_PROMPT_MUST_NOT_ESCAPE')
-    expect(serializedDashboard).not.toContain('synthetic-claude-session-1')
-
-    const laterContractResponse = await saveConfigurationFixture(
-      {
-        ...configuration,
-        contracts: { claude: { startedOn: '2030-01-01' }, codex: { startedOn: '2030-01-01' } },
-      },
-      { port, csrfToken: runtime.csrfToken },
-    )
-    expect(laterContractResponse.status).toBe(200)
-
-    const contractDashboard = (await fetch(`http://127.0.0.1:${port}/api/dashboard`).then(
-      async (response) => await response.json(),
-    )) as { allocations: Array<{ amount: number; taxCandidate: string }> }
-    // Every synthetic session predates the contract, so no money is allocated
-    // and every session still shows up as an explained zero-yen line.
-    expect(contractDashboard.allocations.every((row) => row.amount === 0)).toBe(true)
-    expect(contractDashboard.allocations.some((row) => row.taxCandidate === '契約期間外')).toBe(
-      true,
-    )
-
-    const restoreConfigurationResponse = await saveConfigurationFixture(configuration, {
-      port,
-      csrfToken: runtime.csrfToken,
-    })
-    expect(restoreConfigurationResponse.status).toBe(200)
-
-    const duplicateChargeResponse = await saveConfigurationFixture(
-      {
-        ...configuration,
-        monthlyCharges: [configuration.monthlyCharges[0], configuration.monthlyCharges[0]],
-      },
-      { port, csrfToken: runtime.csrfToken },
-    )
-    expect(duplicateChargeResponse.status).toBe(400)
-
-    const invalidContractResponse = await saveConfigurationFixture(
-      {
-        ...configuration,
-        contracts: { claude: { startedOn: '2026-07-01', endedOn: '2026-06-30' }, codex: {} },
-      },
-      { port, csrfToken: runtime.csrfToken },
-    )
-    expect(invalidContractResponse.status).toBe(400)
-
-    if (existsSync(resolve('dist/index.html'))) {
-      const staticResponse = await fetch(`http://127.0.0.1:${port}/`)
-      expect(staticResponse.status).toBe(200)
-      expect(await staticResponse.text()).toContain('<div id="root">')
-    }
-
-    const clearedConfiguration = {
-      ...configuration,
-      monthlyCharges: [],
-      chargePeriods: [],
-    }
-    const clearResponse = await saveConfigurationFixture(clearedConfiguration, {
-      port,
-      csrfToken: runtime.csrfToken,
-    })
-    expect(clearResponse.status).toBe(200)
-    const configurationAfterClear = await fetch(`http://127.0.0.1:${port}/api/config`).then(
-      async (response) => await response.json(),
-    )
-    expect(configurationAfterClear).toEqual(clearedConfiguration)
-  }, 20_000)
-})
-
-describe('セッション単位のダッシュボード集計', () => {
-  // This describe block's server and database directory are shared across
-  // both `it` blocks below (the second test relies on a session the first
-  // test wrote), so they are set up once in `beforeAll` and torn down once
-  // in `afterAll` here -- deliberately not registered with the module-level
-  // `children`/`temporaryDirectories` arrays, since the top-level `afterEach`
-  // would tear them down after the first test and break the second.
-  let testPort: number
-  let dataDirectory: string
-  let dashboardChild: ChildProcess | undefined
-  let databaseModule: typeof import('../../src/server/database.ts')
-  let replaceProviderSessions: (typeof import('../../src/server/database.ts'))['replaceProviderSessions']
-  let savePlanningSnapshot: (typeof import('../../src/server/planningRepository.ts'))['savePlanningSnapshot']
-
-  beforeAll(async () => {
-    testPort = await reservePort()
-    dataDirectory = mkdtempSync(join(tmpdir(), 'devtax-dashboard-agg-'))
-
-    // The two tests below seed the database directly, in this process, so
-    // they don't need real Claude/Codex history fixtures.
-    process.env.DEVTAX_RADAR_DATA_DIR = dataDirectory
-    vi.resetModules()
-    databaseModule = await import('../../src/server/database.ts')
-    ;({ replaceProviderSessions } = databaseModule)
-    ;({ savePlanningSnapshot } = await import('../../src/server/planningRepository.ts'))
-    // These cases verify assignment of known allocations, so establish the
-    // denominator explicitly instead of relying on the former 10% default.
-    databaseModule.saveConfiguration({
-      ...databaseModule.getConfiguration(),
-      charges: { claude: 1000, codex: 0 },
-      unknownChargeReasons: undefined,
-      unobservedRatio: 0,
-    })
-
-    dashboardChild = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
-      cwd: resolve('.'),
-      stdio: 'ignore',
-      env: {
-        ...process.env,
-        PORT: String(testPort),
-        // /api/runtime now walks the whole transcript tree to date the oldest
-        // file. Without an isolated home this test would walk the developer's
-        // real history -- gigabytes on some machines -- making its runtime
-        // depend on whose machine it runs on.
-        HOME: dataDirectory,
-        USERPROFILE: dataDirectory,
-        DEVTAX_RADAR_DATA_DIR: dataDirectory,
-        // This block doesn't assert on retention, but /api/runtime always
-        // reads it -- without this override it would fall through to the
-        // real ~/.claude/settings.json. A missing file is handled as the
-        // default cleanup period, so it does not need to be created here.
-        DEVTAX_RADAR_CLAUDE_SETTINGS: join(dataDirectory, 'claude-settings.json'),
-      },
-    })
-    await waitForRuntime(testPort)
-  })
-
-  afterAll(async () => {
-    if (dashboardChild && dashboardChild.exitCode === null) {
-      dashboardChild.kill()
-      await new Promise<void>((resolveExit) => {
-        const timeout = setTimeout(resolveExit, 2_000)
-        dashboardChild!.once('exit', () => {
-          clearTimeout(timeout)
-          resolveExit()
-        })
-      })
-    }
-    databaseModule?.getDatabase().close()
-    delete process.env.DEVTAX_RADAR_DATA_DIR
-    rmSync(dataDirectory, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    })
-  })
-
-  async function getJson(path: string): Promise<any> {
-    const response = await fetch(`http://127.0.0.1:${testPort}${path}`)
-    return await response.json()
+  async function assign() {
+    const dashboard = await json<DashboardData>('/api/dashboard')
+    const planning = emptyPlanningSnapshot(2026)
+    planning.taxUnits = [{ id: 'app', name: '合成アプリ', unitType: 'new-software', usageMode: 'external', revenueModel: 'sales', lifecycleStatus: 'developing' }]
+    planning.projectRules = dashboard.products.map((product, index) => ({ id: `rule-${index}`, projectKey: product.projectKey!, effectiveFrom: '2025-01-01', taxUnitId: 'app', classification: 'new-development' as const }))
+    expect((await savePlanningFixture(planning, connection())).status).toBe(200)
+    return planning
   }
-
-  it('ルールがなければ分類済みは0%、対応付け済みも0%になる', async () => {
-    replaceProviderSessions(
-      'claude',
-      [
-        {
-          provider: 'claude',
-          sessionKey: 'session_integration_a',
-          projectKey: 'project_integration_a',
-          month: '2026-07',
-          startedAt: '2026-07-15T10:00:00.000Z',
-          endedAt: '2026-07-15T11:00:00.000Z',
-          messageCount: 3,
-          inputTokens: 1000,
-          outputTokens: 100,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          schemaVersion: 'test-v1',
-          confidence: 'medium',
-        },
-      ],
-      { filesSeen: 1, malformedLines: 0 },
-    )
-
-    const dashboard = await getJson('/api/dashboard')
-    expect(dashboard.meta.classifiedRate).toBe(0)
-    expect(dashboard.meta.mappedRate).toBe(0)
-  })
-
-  it('ルールを登録すると分類済みが上がる', async () => {
-    savePlanningSnapshot({
-      ...emptyPlanningSnapshot(2026),
-      taxUnits: [
-        {
-          id: 'tax-unit-integration',
-          name: '統合テスト用アプリ',
-          unitType: 'new-software',
-          usageMode: 'external',
-          revenueModel: 'sales',
-          lifecycleStatus: 'developing',
-        },
-      ],
-      projectRules: [
-        {
-          id: 'rule-integration',
-          projectKey: 'project_integration_a',
-          effectiveFrom: '2026-07-01',
-          taxUnitId: 'tax-unit-integration',
-          classification: 'new-development',
-        },
-      ],
-    })
-
-    const dashboard = await getJson('/api/dashboard')
-    expect(dashboard.meta.classifiedRate).toBe(100)
-    expect(
-      dashboard.allocations.some(
-        (row: { product: string }) => row.product === '統合テスト用アプリ',
-      ),
-    ).toBe(true)
-  })
-
-  it('配賦明細の行が元のフォルダと月を持つ', async () => {
-    const dashboard = await getJson('/api/dashboard')
-    const row = dashboard.allocations.find(
-      (item: { stage: string }) => item.stage !== '未取得' && item.stage !== '1円未満調整',
-    )
-    expect(row.projectKey).toBeTruthy()
-    expect(row.monthKey).toMatch(/^\d{4}-\d{2}$/)
-  })
-
-  it('配賦明細の行は割り当てられた制作物のtaxUnitIdを持つ', async () => {
-    // Guards the server half of the reclassify-from-evidence contract: the
-    // client only knows which product currently governs an allocation row
-    // because dashboard.ts puts taxUnitId on the row. If a future change to
-    // dashboard.ts drops this field, reclassifying a folder from the
-    // allocation table would silently fall back to detaching its product
-    // (see App.tsx's reclassifyAllocation).
-    const dashboard = await getJson('/api/dashboard')
-    const row = dashboard.allocations.find(
-      (item: { product: string }) => item.product === '統合テスト用アプリ',
-    )
-    expect(row).toBeTruthy()
-    expect(row.taxUnitId).toBe('tax-unit-integration')
-  })
-
-  it('月の途中でルールが切り替わるフォルダは、その月に分類の異なる2行を生む', async () => {
-    // One folder, two sessions in the same month: one comfortably in the
-    // first half, one comfortably in the second half. Times are chosen far
-    // from both the day boundary and the rule-effective-date boundary so the
-    // assertion holds regardless of the host's local time zone (resolveSessionAssignment
-    // judges rules by the session's *local* date).
-    replaceProviderSessions(
-      'claude',
-      [
-        {
-          provider: 'claude',
-          sessionKey: 'session_midmonth_first_half',
-          projectKey: 'project_integration_midmonth',
-          month: '2026-08',
-          startedAt: '2026-08-03T10:00:00.000Z',
-          endedAt: '2026-08-03T11:00:00.000Z',
-          messageCount: 2,
-          inputTokens: 1000,
-          outputTokens: 100,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          schemaVersion: 'test-v1',
-          confidence: 'medium',
-        },
-        {
-          provider: 'claude',
-          sessionKey: 'session_midmonth_second_half',
-          projectKey: 'project_integration_midmonth',
-          month: '2026-08',
-          startedAt: '2026-08-25T10:00:00.000Z',
-          endedAt: '2026-08-25T11:00:00.000Z',
-          messageCount: 2,
-          inputTokens: 1000,
-          outputTokens: 100,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          schemaVersion: 'test-v1',
-          confidence: 'medium',
-        },
-      ],
-      { filesSeen: 1, malformedLines: 0 },
-    )
-
-    databaseModule.saveConfiguration({
-      charges: { claude: 0, codex: 0 },
-      monthlyCharges: [{ provider: 'claude', month: '2026-08', amountJpy: 100_000 }],
-      contracts: { claude: {}, codex: {} },
-      unobservedRatio: 0.1,
-    })
-
-    savePlanningSnapshot({
-      ...emptyPlanningSnapshot(2026),
-      taxUnits: [
-        {
-          id: 'tax-unit-midmonth',
-          name: '月またぎ検証用アプリ',
-          unitType: 'new-software',
-          usageMode: 'external',
-          revenueModel: 'sales',
-          lifecycleStatus: 'developing',
-        },
-      ],
-      projectRules: [
-        {
-          id: 'rule-midmonth-first-half',
-          projectKey: 'project_integration_midmonth',
-          effectiveFrom: '2026-08-01',
-          effectiveTo: '2026-08-14',
-          taxUnitId: 'tax-unit-midmonth',
-          classification: 'new-development',
-        },
-        {
-          id: 'rule-midmonth-second-half',
-          projectKey: 'project_integration_midmonth',
-          effectiveFrom: '2026-08-15',
-          taxUnitId: 'tax-unit-midmonth',
-          classification: 'maintenance',
-        },
-      ],
-    })
-
-    const dashboard = (await getJson('/api/dashboard')) as {
-      allocations: Array<{
-        provider: string
-        month: string
-        product: string
-        stage: string
-        taxCandidate: string
-        amount: number
-      }>
-    }
-    const augustClaudeRows = dashboard.allocations.filter(
-      (row) => row.provider === 'Claude Code' && row.month === '2026年8月',
-    )
-    const midMonthRows = augustClaudeRows.filter((row) => row.product === '月またぎ検証用アプリ')
-
-    // The same folder, split across the rule boundary, must appear as two
-    // distinct rows for the month -- not collapse into one (un)classified row.
-    const stages = midMonthRows.map((row) => row.stage)
-    const taxCandidates = midMonthRows.map((row) => row.taxCandidate)
-    expect(midMonthRows).toHaveLength(2)
-    expect(stages).toContain('新規開発')
-    expect(stages).toContain('保守')
-    expect(taxCandidates).toContain('取得価額')
-    expect(taxCandidates).toContain('通常経費')
-
-    // The allocation invariant must hold across the split: everything billed
-    // for claude in 2026-08 (the two classified rows plus any unobserved/
-    // rounding rows) sums to exactly the configured monthly fee.
-    const augustClaudeTotal = augustClaudeRows.reduce((sum, row) => sum + row.amount, 0)
-    expect(augustClaudeTotal).toBe(100_000)
-
-    databaseModule.saveConfiguration({
-      charges: { claude: 0, codex: 0 },
-      monthlyCharges: [{ provider: 'claude', month: '2026-08', amountJpy: 100_000 }],
-      contracts: { claude: {}, codex: {} },
-      chargePeriods: [
-        {
-          id: 'charge-midmonth-upgrade',
-          provider: 'claude',
-          planName: 'Upgraded plan',
-          serviceStartedOn: '2026-08-15',
-          serviceEndedOn: '2026-09-14',
-          billedOn: '2026-08-15',
-          amountJpy: 31_000,
-        },
-      ],
-      unobservedRatio: 0.1,
-    })
-
-    expect(databaseModule.getConfiguration().chargePeriods).toEqual([
-      expect.objectContaining({
-        id: 'charge-midmonth-upgrade',
-        serviceStartedOn: '2026-08-15',
-        serviceEndedOn: '2026-09-14',
-        amountJpy: 31_000,
-      }),
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'devtax-api-'))
+    const claude = join(root, 'claude'), codex = join(root, 'codex')
+    mkdirSync(claude); mkdirSync(codex)
+    const rows = ['2025-04-15T10:00:00Z', '2026-04-03T10:00:00Z', '2026-04-25T10:00:00Z'].flatMap((timestamp, index) => [
+      { type: 'user', sessionId: index === 0 ? rawSession + '-old' : rawSession, timestamp, cwd: join(root, 'Product-A'), message: { role: 'user', content: prompt } },
+      { type: 'assistant', sessionId: index === 0 ? rawSession + '-old' : rawSession, timestamp, cwd: join(root, 'Product-A'), message: { id: `message-${index}`, model: 'synthetic', usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } },
     ])
-
-    const datedDashboard = (await getJson('/api/dashboard')) as {
-      allocations: Array<{
-        provider: string
-        month: string
-        product: string
-        stage: string
-        amount: number
-      }>
-    }
-    const datedAugust = datedDashboard.allocations.filter(
-      (row) => row.provider === 'Claude Code' && row.month === '2026年8月',
-    )
-    const datedSeptember = datedDashboard.allocations.filter(
-      (row) => row.provider === 'Claude Code' && row.month === '2026年9月',
-    )
-    expect(datedAugust.reduce((sum, row) => sum + row.amount, 0)).toBe(17_000)
-    expect(datedSeptember.reduce((sum, row) => sum + row.amount, 0)).toBe(14_000)
-    expect(
-      datedAugust.some(
-        (row) => row.product === '月またぎ検証用アプリ' && row.stage === '契約期間外',
-      ),
-    ).toBe(true)
-
-    databaseModule.saveConfiguration({
-      charges: { claude: 0, codex: 0 },
-      monthlyCharges: [],
-      contracts: { claude: {}, codex: {} },
-      chargePeriods: [
-        {
-          id: 'charge-before-upgrade',
-          provider: 'claude',
-          planName: 'Before upgrade',
-          serviceStartedOn: '2026-08-01',
-          serviceEndedOn: '2026-08-14',
-          amountJpy: 1_400,
-        },
-        {
-          id: 'charge-after-upgrade',
-          provider: 'claude',
-          planName: 'After upgrade',
-          serviceStartedOn: '2026-08-15',
-          serviceEndedOn: '2026-08-31',
-          amountJpy: 3_100,
-        },
-      ],
-      unobservedRatio: 0,
+    writeFileSync(join(claude, 'synthetic.jsonl'), rows.map((row) => JSON.stringify(row)).join('\n') + '\n')
+    writeFileSync(join(codex, 'synthetic.jsonl'), [
+      { type: 'session_meta', timestamp: '2026-04-15T10:00:00Z', payload: { id: rawSession + '-codex', cwd: join(root, 'Product-B') } },
+      { type: 'turn_context', timestamp: '2026-04-15T10:00:01Z', payload: { model: 'synthetic' } },
+      { type: 'event_msg', timestamp: '2026-04-15T10:00:02Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 2000, cached_input_tokens: 500, output_tokens: 200, reasoning_output_tokens: 100, total_tokens: 2200 } } } },
+    ].map((row) => JSON.stringify(row)).join('\n') + '\n')
+    writeFileSync(join(root, 'settings.json'), JSON.stringify({ cleanupPeriodDays: 30, unrelated: true }))
+    port = await portNumber()
+    let output = ''
+    child = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
+      cwd: resolve('.'), stdio: ['ignore', 'pipe', 'pipe'], env: {
+        ...process.env, PORT: String(port), TZ: 'UTC', HOME: root, USERPROFILE: root,
+        DEVTAX_RADAR_DATA_DIR: join(root, 'data'), DEVTAX_RADAR_CLAUDE_ROOT: claude,
+        DEVTAX_RADAR_CODEX_ROOT: codex, DEVTAX_RADAR_CLAUDE_SETTINGS: join(root, 'settings.json'), DEVTAX_RADAR_AUTO_SCAN: '0',
+      },
     })
-
-    const planChangeDashboard = (await getJson('/api/dashboard')) as {
-      allocations: Array<{
-        provider: string
-        month: string
-        product: string
-        stage: string
-        amount: number
-      }>
+    const collect = (buffer: Buffer) => { output = (output + buffer.toString()).slice(-8000) }
+    child.stdout?.on('data', collect); child.stderr?.on('data', collect)
+    csrfToken = ''
+    const deadline = Date.now() + 12_000
+    while (Date.now() < deadline && !csrfToken) {
+      if (child.exitCode !== null) throw new Error(output)
+      try { csrfToken = (await json<{ csrfToken: string }>('/api/runtime')).csrfToken }
+      catch { await new Promise((done) => setTimeout(done, 75)) }
     }
-    const planChangeRows = planChangeDashboard.allocations.filter(
-      (row) => row.provider === 'Claude Code' && row.product === '月またぎ検証用アプリ',
-    )
-    expect(planChangeRows.find((row) => row.stage === '新規開発')?.amount).toBe(1_400)
-    expect(planChangeRows.find((row) => row.stage === '保守')?.amount).toBe(3_100)
-    expect(planChangeRows.reduce((sum, row) => sum + row.amount, 0)).toBe(4_500)
+    if (!csrfToken) throw new Error('API startup failed: ' + output)
+    expect((await post('/api/scan', { providers: ['claude', 'codex'] })).status).toBe(200)
+    await setCosts(defaults())
+    expect((await savePlanningFixture(emptyPlanningSnapshot(2026), connection())).status).toBe(200)
+  }, 20_000)
+  afterEach(async () => {
+    if (child && child.exitCode === null) {
+      const exited = once(child, 'exit'), timeout = setTimeout(() => child?.kill('SIGKILL'), 3000)
+      child.kill()
+      try { await exited } finally { clearTimeout(timeout) }
+    }
+    if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   })
 
-  it('生のセッションID・絶対パス・作業ディレクトリ・コンテンツハッシュはどのAPIレスポンスにも現れない', async () => {
-    const rawNativeSessionId = 'RAW-SESSION-ID-SHOULD-NOT-LEAK'
-    const rawSourcePath = 'C:/RAW-PATH-SHOULD-NOT-LEAK/transcript.jsonl'
-    const rawWorkingDirectory = 'C:/RAW-CWD-SHOULD-NOT-LEAK'
-    const rawContentHash = 'raw0hash0should0not0leak0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-
-    replaceProviderSessions(
-      'claude',
-      [
-        {
-          provider: 'claude',
-          sessionKey: 'session_privacy_guard',
-          projectKey: 'project_privacy_guard',
-          month: '2026-09',
-          startedAt: '2026-09-05T10:00:00.000Z',
-          endedAt: '2026-09-05T11:00:00.000Z',
-          messageCount: 1,
-          inputTokens: 500,
-          outputTokens: 50,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          schemaVersion: 'test-v1',
-          confidence: 'medium',
-          localReference: {
-            nativeSessionId: rawNativeSessionId,
-            sourcePath: rawSourcePath,
-            workingDirectory: rawWorkingDirectory,
-            contentHash: rawContentHash,
-            byteSize: 12_345,
-            fileMtime: '2026-09-05T09:00:00.000Z',
-          },
-        },
-      ],
-      { filesSeen: 1, malformedLines: 0 },
-    )
-
-    // Prove the seeded reference actually reached session_references --
-    // otherwise the "does not leak" assertions below would pass vacuously.
-    const stored = databaseModule.getSessionReference('claude', 'session_privacy_guard')
-    expect(stored).toMatchObject({
-      nativeSessionId: rawNativeSessionId,
-      sourcePath: rawSourcePath,
-      workingDirectory: rawWorkingDirectory,
-    })
-
-    const dashboardBody = JSON.stringify(await getJson('/api/dashboard'))
-    const ledgerBody = JSON.stringify(await getJson('/api/ledger'))
-    const diagnosisBody = JSON.stringify(await getJson('/api/diagnosis'))
-    const foldersBody = JSON.stringify(await getJson('/api/folders'))
-    const exportBody = JSON.stringify(
-      await fetch(`http://127.0.0.1:${testPort}/api/export?format=markdown`).then((response) =>
-        response.text(),
-      ),
-    )
-
-    for (const raw of [rawNativeSessionId, rawSourcePath, rawWorkingDirectory, rawContentHash]) {
-      expect(dashboardBody).not.toContain(raw)
-      expect(ledgerBody).not.toContain(raw)
-      expect(diagnosisBody).not.toContain(raw)
-      expect(foldersBody).not.toContain(raw)
-      expect(exportBody).not.toContain(raw)
+  it('keeps CSRF/origin checks and rejects old writers without changing saved records', async () => {
+    expect(await json('/api/health')).toMatchObject({ ok: true, service: 'devtax-radar' })
+    expect((await post('/api/scan', {}, '')).status).toBe(403)
+    expect((await post('/api/scan', {}, csrfToken, 'https://example.invalid')).status).toBe(403)
+    const before = await json<WorkspaceView>('/api/workspace')
+    for (const [path, method, body] of [
+      ['/api/config', 'POST', defaults()], ['/api/planning', 'PUT', before.planning], ['/api/planning/rules', 'PUT', { rules: [] }],
+    ] as const) {
+      const response = await fetch(origin() + path, { method, headers: { 'Content-Type': 'application/json', origin: origin(), 'X-DevTax-CSRF': csrfToken }, body: JSON.stringify(body) })
+      expect(response.status).toBe(404)
+      expect(await json('/api/workspace')).toEqual(before)
     }
   })
-
-  it('セッション一覧に生の識別子が出ない', async () => {
-    // Query the project seeded by the privacy-guard test just above, which is
-    // the one with a live session_references row containing the raw markers
-    // (project_integration_a's session was already wiped by later
-    // replaceProviderSessions('claude', ...) calls, which replace every
-    // claude row on each call -- querying it here would pass vacuously on an
-    // empty list and prove nothing).
-    const response = await getJson(
-      `/api/sessions?projectKey=${encodeURIComponent('project_privacy_guard')}`,
-    )
-    expect(response.sessions).toHaveLength(1)
-    const serialized = JSON.stringify(response)
-    expect(serialized).not.toContain('RAW-SESSION-ID-SHOULD-NOT-LEAK')
-    expect(serialized).not.toContain('RAW-PATH-SHOULD-NOT-LEAK')
-    expect(serialized).not.toContain('RAW-CWD-SHOULD-NOT-LEAK')
+  it('round-trips monthly charges and conserves provider/year money without synthetic assets', async () => {
+    const config: LocalConfiguration = { ...defaults(), charges: { claude: 30000, codex: 20000 }, monthlyCharges: [
+      { provider: 'claude', month: '2025-04', amountJpy: 120000 }, { provider: 'claude', month: '2026-04', amountJpy: 30001 },
+    ], unobservedRatio: 0.1 }
+    await setCosts(config)
+    expect(await json('/api/config')).toEqual(config)
+    await assign()
+    const data = await json<DashboardData>('/api/dashboard')
+    expect(data.meta).toMatchObject({ mappedRate: 100, classifiedRate: 100 })
+    expect(data.allocations.filter((row) => row.provider === 'Claude Code').reduce((sum, row) => sum + row.amount, 0)).toBe(150001)
+    expect(data.allocations.filter((row) => row.provider === 'Codex').reduce((sum, row) => sum + row.amount, 0)).toBe(20000)
+    expect(data).not.toHaveProperty('assets')
+    expect(data).not.toHaveProperty('boundaries')
+    const costs = await json<AnnualCostProjection>('/api/projections?year=2026')
+    expect(costs.totals.knownBasisJpy).toBe(50001)
+    expect(costs.invariantSatisfied).toBe(true)
+    expect((await json<WorkspaceView>('/api/workspace')).diagnosis).not.toHaveProperty('readiness')
   })
-
-  it('GET /api/folders はフォルダ一覧の形で返す', async () => {
-    const response = await getJson('/api/folders')
-    expect(Array.isArray(response.folders)).toBe(true)
-    expect(response.folders[0]).toEqual(
-      expect.objectContaining({
-        projectKey: expect.any(String),
-        label: expect.any(String),
-        sessionCount: expect.any(Number),
-      }),
-    )
+  it('uses dated usage to split a single session across a mid-month purpose change', async () => {
+    const planning = await assign()
+    const key = (await json<DashboardData>('/api/dashboard')).products.find((row) => row.folder === 'Product-A')!.projectKey!
+    planning.projectRules = [
+      { id: 'before', projectKey: key, effectiveFrom: '2026-04-01', effectiveTo: '2026-04-14', taxUnitId: 'app', classification: 'new-development' },
+      { id: 'after', projectKey: key, effectiveFrom: '2026-04-15', taxUnitId: 'app', classification: 'maintenance' },
+    ]
+    expect((await savePlanningFixture(planning, connection())).status).toBe(200)
+    await setCosts({ ...defaults(), monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: 100000 }], unobservedRatio: 0.1 })
+    const data = await json<DashboardData>('/api/dashboard')
+    const rows = data.allocations.filter((row) => row.provider === 'Claude Code' && row.monthKey === '2026-04' && row.product === '合成アプリ')
+    expect(rows).toHaveLength(2)
+    expect(rows.find((row) => row.stage === '新規開発')?.amount).toBe(45000)
+    expect(rows.find((row) => row.stage === '保守')?.amount).toBe(45000)
+    for (const row of rows) expect(row.taxUnitId).toBe('app')
   })
-
-  it('GET /api/sessions はセッション一覧の形で返す', async () => {
-    // replaceProviderSessions replaces all claude rows on every call, so by
-    // this point only the session seeded by the privacy-guard test above
-    // (the most recent replaceProviderSessions('claude', ...) call) survives.
-    const response = await getJson(
-      `/api/sessions?projectKey=${encodeURIComponent('project_privacy_guard')}`,
-    )
-    expect(Array.isArray(response.sessions)).toBe(true)
-    expect(response.sessions[0]).toEqual(
-      expect.objectContaining({
-        provider: 'claude',
-        sessionKey: 'session_privacy_guard',
-      }),
-    )
+  it('selects the correct service-period denominator during a plan change', async () => {
+    await assign()
+    await setCosts({ ...defaults(), chargePeriods: [
+      { id: 'before', provider: 'claude', planName: 'Before', serviceStartedOn: '2026-04-01', serviceEndedOn: '2026-04-14', amountJpy: 1400 },
+      { id: 'after', provider: 'claude', planName: 'After', serviceStartedOn: '2026-04-15', serviceEndedOn: '2026-05-14', amountJpy: 3000 },
+    ] })
+    const data = await json<DashboardData>('/api/dashboard')
+    const total = (month: string) => data.allocations.filter((row) => row.provider === 'Claude Code' && row.monthKey === month).reduce((sum, row) => sum + row.amount, 0)
+    expect(total('2026-04')).toBe(3000)
+    expect(total('2026-05')).toBe(1400)
   })
-
-  it('GET /api/sessions/detail はセッション詳細の形で返す', async () => {
-    const response = await getJson(
-      `/api/sessions/detail?provider=claude&sessionKey=${encodeURIComponent('session_privacy_guard')}`,
-    )
-    expect(response).toEqual(
-      expect.objectContaining({
-        available: true,
-        transcriptExists: false,
-      }),
-    )
+  it('retains unknown capture and invoice amounts rather than substituting zero', async () => {
+    await setCosts({ ...defaults(), charges: { claude: 1000, codex: 0 }, unobservedRatio: null })
+    const data = await json<DashboardData>('/api/dashboard')
+    const positive = data.allocations.filter((row) => row.amount > 0)
+    expect(positive.length).toBeGreaterThan(0)
+    for (const row of positive) expect(row).toMatchObject({ product: '配分未算定', usageRate: null })
+    const config: LocalConfiguration = { ...defaults(), monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: null, unknownAmountReason: '請求待ち' }] }
+    await setCosts(config)
+    const costs = await json<AnnualCostProjection>('/api/projections?year=2026')
+    expect(costs.sources.find((row) => row.id === 'ai:monthly:claude:2026-04')).toMatchObject({ originalAmountJpy: null, unknownOriginalAmountReasons: ['請求待ち'] })
+    expect(costs.totals.unknownBasisIds.length).toBeGreaterThan(0)
+    const before = await json<WorkspaceView>('/api/workspace')
+    expect((await saveConfigurationFixture({ ...config, monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: null }] }, connection())).status).toBe(400)
+    expect(await json('/api/workspace')).toEqual(before)
+  })
+  it('keeps unknown defaults separate from an explicit month and rejects duplicate or reversed inputs atomically', async () => {
+    const config: LocalConfiguration = { ...defaults(), charges: { claude: null, codex: 0 }, unknownChargeReasons: { claude: '確認中' } }
+    await setCosts(config)
+    expect((await saveConfigurationFixture({ ...config, unknownChargeReasons: {} }, connection())).status).toBe(400)
+    await setCosts({ ...config, monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: 1234 }] })
+    expect((await json<AnnualCostProjection>('/api/projections?year=2026')).sources.find((row) => row.id === 'ai:monthly:claude:2026-04')?.originalAmountJpy).toBe(1234)
+    const before = await json<WorkspaceView>('/api/workspace')
+    for (const invalid of [
+      { ...config, monthlyCharges: [{ provider: 'claude', month: '2026-04', amountJpy: 1 }, { provider: 'claude', month: '2026-04', amountJpy: 1 }] },
+      { ...config, contracts: { claude: { startedOn: '2026-07-01', endedOn: '2026-06-30' }, codex: {} } },
+    ]) {
+      expect((await saveConfigurationFixture(invalid, connection())).status).toBe(400)
+      expect(await json('/api/workspace')).toEqual(before)
+    }
+  })
+  it('retains evidence references and explains unavailable source documents', async () => {
+    await setCosts({ ...defaults(), chargePeriods: [{ id: 'invoice', provider: 'claude', planName: '合成契約', serviceStartedOn: '2026-04-01', serviceEndedOn: '2026-04-30', amountJpy: 30001, evidenceIds: ['missing-receipt'] }] })
+    const costs = await json<AnnualCostProjection>('/api/projections?year=2026')
+    expect(costs.sources.find((row) => row.id === 'ai:charge:invoice')?.evidenceIds).toEqual(['missing-receipt'])
+    expect(costs.bases.find((row) => row.sourceId === 'ai:charge:invoice')?.warnings).toContain('請求の証拠参照が現在の記録にありません：missing-receipt')
+  })
+  it('explains excluded sessions as zero allocation instead of charging a different contract', async () => {
+    await setCosts({ ...defaults(), charges: { claude: 1000, codex: 1000 }, contracts: { claude: { startedOn: '2030-01-01' }, codex: { startedOn: '2030-01-01' } } })
+    const rows = (await json<DashboardData>('/api/dashboard')).allocations
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((row) => row.amount === 0)).toBe(true)
+    expect(rows.some((row) => row.taxCandidate === '契約期間外')).toBe(true)
+  })
+  it('exports the same saved revision and excludes real paths, native IDs and prompt text', async () => {
+    await assign()
+    const view = await json<WorkspaceView>('/api/workspace')
+    const exported = await json<{ workspaceRevision: number; costs: AnnualCostProjection }>('/api/export?format=json')
+    expect(exported.workspaceRevision).toBe(view.revision)
+    expect(exported.costs).toEqual(view.dashboard.costProjection)
+    const bodies = [JSON.stringify(view.dashboard), JSON.stringify(exported), JSON.stringify(await json('/api/folders')), JSON.stringify(await json('/api/diagnosis'))]
+    const markdown = await fetch(origin() + '/api/export?format=markdown')
+    expect(markdown.status).toBe(200)
+    bodies.push(await markdown.text())
+    let found = 0
+    for (const product of view.dashboard.products) {
+      const result = await json<{ sessions: Array<{ sessionKey: string; provider: string }> }>('/api/sessions?projectKey=' + encodeURIComponent(product.projectKey!))
+      found += result.sessions.length
+      bodies.push(JSON.stringify(result))
+      for (const session of result.sessions) {
+        expect(await json(`/api/sessions/detail?provider=${session.provider}&sessionKey=${session.sessionKey}`)).toMatchObject({ available: true, transcriptExists: true })
+      }
+    }
+    expect(found).toBeGreaterThan(0)
+    for (const body of bodies) for (const marker of [root, root.replaceAll('\\', '/'), rawSession, prompt]) expect(body).not.toContain(marker)
+    expect(readFileSync(join(root, 'data', 'devtax-radar.db'), 'utf8')).not.toContain(prompt)
+  })
+  it('backs up retention settings only after an explicit request', async () => {
+    const response = await post('/api/retention', { days: 365 })
+    expect(response.status).toBe(200)
+    const result = await response.json() as { backupFileName: string; days: number; previousDays: number }
+    expect(result).toMatchObject({ days: 365, previousDays: 30 })
+    expect(result.backupFileName).not.toMatch(/[\\/]/)
+    expect(JSON.parse(readFileSync(join(root, result.backupFileName), 'utf8'))).toEqual({ cleanupPeriodDays: 30, unrelated: true })
+    expect(JSON.parse(readFileSync(join(root, 'settings.json'), 'utf8'))).toEqual({ cleanupPeriodDays: 365, unrelated: true })
+    expect((await post('/api/retention', { days: 0 })).status).toBe(400)
+  })
+  it('serves the built application when a build exists', async () => {
+    if (!existsSync(resolve('dist/index.html'))) return
+    const response = await fetch(origin() + '/')
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('<div id="root">')
   })
 })

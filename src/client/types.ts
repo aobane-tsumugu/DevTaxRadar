@@ -35,6 +35,7 @@ export type Allocation = {
   }
 }
 
+/** Cost bases and recorded balances have their own projections; no synthetic asset balance. */
 export type DashboardData = {
   unknownCharges?: Array<{
     id: string
@@ -60,26 +61,6 @@ export type DashboardData = {
     unknownChargeIds?: string[]
   }>
   allocations: Allocation[]
-  boundaries: Array<{
-    product: string
-    asset: string
-    kind: string
-    amount: number
-    threshold: number
-    thresholdLabel: string
-    status: string
-    tone: 'near' | 'review' | 'safe'
-  }>
-  assets: Array<{
-    product: string
-    name: string
-    total: number
-    aiCost: number
-    outsource: number
-    other: number
-    futureBalance: number
-    inService: boolean
-  }>
   guidance: Array<{ title: string; description: string; severity: 'ok' | 'warning' }>
   products: Array<{
     name: string
@@ -96,20 +77,18 @@ export type DashboardData = {
 
 export type ProviderKey = 'claude' | 'codex'
 export type ScanMode = 'incremental' | 'full'
-
 export type HistorySourceInput = {
   provider: ProviderKey
   name: string
   root: string
   enabled?: boolean
 }
-
 export type HistorySource = {
   id: string
   provider: ProviderKey
   kind: 'default' | 'configured'
   name: string
-  /** Only render this in the explicit local history-source settings surface. */
+  /** Only render in the explicit local history-source settings surface. */
   root: string
   enabled: boolean
   availability: 'available' | 'unavailable'
@@ -121,13 +100,11 @@ export type HistorySource = {
     reason?: 'not_found' | 'not_readable' | 'scan_failed'
   }
 }
-
 export type HistorySourceTestResult = {
   availability: 'available' | 'unavailable'
   filesDiscovered: number
   reason?: 'not_found' | 'not_readable'
 }
-
 export type ProviderRetention = {
   detected: boolean
   fileCount: number
@@ -140,7 +117,6 @@ export type ProviderRetention = {
   daysUntilNextLoss?: number
   alreadyLosing: boolean
 }
-
 export type RuntimeData = {
   datasetId?: string
   csrfToken: string
@@ -155,12 +131,7 @@ export type RuntimeData = {
     telemetry: boolean
   }
 }
-
-export type ProviderContract = {
-  startedOn?: string
-  endedOn?: string
-}
-
+export type ProviderContract = { startedOn?: string; endedOn?: string }
 export type LocalConfiguration = {
   charges: Record<ProviderKey, number | null>
   unknownChargeReasons?: Partial<Record<ProviderKey, string>>
@@ -172,10 +143,9 @@ export type LocalConfiguration = {
   }>
   contracts: Record<ProviderKey, ProviderContract>
   chargePeriods: ProviderChargePeriod[]
-  /** null is unknown; 0 explicitly confirms no unobserved use. */
+  /** null is unknown. Legacy values do not prove confirmation for every period. */
   unobservedRatio: number | null
 }
-
 export type ScanProgress = {
   running: boolean
   startupPending?: boolean
@@ -184,18 +154,9 @@ export type ScanProgress = {
   sourceId?: string
   sourceName?: string
 }
-
 export type ScanResult = {
   completedAt: string
-  providers: Partial<
-    Record<
-      ProviderKey,
-      {
-        events: number
-        diagnostics?: Record<string, unknown>
-      }
-    >
-  >
+  providers: Partial<Record<ProviderKey, { events: number; diagnostics?: Record<string, unknown> }>>
   sources?: Array<{
     sourceId: string
     sourceName: string
@@ -205,7 +166,6 @@ export type ScanResult = {
     diagnostics?: Record<string, number>
   }>
 }
-
 export type FolderAssignment = {
   ruleId: string
   taxUnitId?: string
@@ -216,7 +176,6 @@ export type FolderAssignment = {
   provider?: ProviderKey
   sessionCount: number
 }
-
 export type FolderSummary = {
   projectKey: string
   label: string
@@ -229,7 +188,6 @@ export type FolderSummary = {
   assignments: FolderAssignment[]
   unassignedSessionCount: number
 }
-
 export type SessionSummary = {
   sourceId: string
   sourceName: string
@@ -243,7 +201,6 @@ export type SessionSummary = {
   weightedTokens: number
   localDetailAvailable: boolean
 }
-
 export type SessionDetail = {
   available: boolean
   transcriptExists?: boolean

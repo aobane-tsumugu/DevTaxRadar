@@ -1,603 +1,112 @@
-import type { Allocation, DashboardData } from './types'
-import type { Diagnosis, PlanningLedger, PlanningSnapshot } from '../planning/types'
+import type { Allocation, DashboardData, TaxGroup } from './types'
+import { emptyPlanningSnapshot, type PlanningSnapshot } from '../planning/types'
+import { diagnosePlanning } from '../core/diagnosis'
+import { allocateMonthlySubscription } from '../core/allocation'
+import { calendarMonthPeriod, projectWorkspaceCosts, type SubscriptionCostScope } from '../core/workspaceCosts'
 
 export type { Allocation, DashboardData, TaxGroup } from './types'
 
+/** Synthetic facts only. Every monetary output below is calculated, not a second ledger. */
 export const demoPlanning: PlanningSnapshot = {
-  version: 1,
-  profile: {
-    taxYear: 2026,
-    journeyMode: 'early',
-    incomeCategory: 'undecided',
-    filingType: 'undecided',
-    activityStartedOn: '2026-04-01',
-    monetizationStatus: 'planned',
-    hasBookkeeping: true,
-  },
+  ...emptyPlanningSnapshot(2026),
+  profile: { ...emptyPlanningSnapshot(2026).profile, hasBookkeeping: true, activityStartedOn: '2026-04-01' },
   taxUnits: [
-    {
-      id: 'tax-unit-internal',
-      name: '執筆アシスタント',
-      unitType: 'new-software',
-      usageMode: 'internal',
-      revenueModel: 'efficiency',
-      lifecycleStatus: 'in-use',
-      completionCriteria: '正式原稿の制作工程で安定して一話を処理できる',
-      sameAsExternalVersion: 'no',
-    },
-    {
-      id: 'tax-unit-public',
-      name: 'DevTax',
-      unitType: 'new-software',
-      usageMode: 'external',
-      revenueModel: 'oss',
-      lifecycleStatus: 'developing',
-      completionCriteria: '公開デモ、README、ローカル履歴集計が動作する',
-      sameAsExternalVersion: 'yes',
-    },
-    {
-      id: 'tax-unit-mixed',
-      name: 'コンテンツ制作基盤 v2',
-      unitType: 'improvement-plan',
-      usageMode: 'mixed',
-      revenueModel: 'sales',
-      lifecycleStatus: 'improving',
-      completionCriteria: '自分の制作工程と外部提供版の双方で受入条件を満たす',
-      predecessorId: 'tax-unit-internal',
-      sameAsExternalVersion: 'undecided',
-    },
+    { id: 'tax-unit-internal', name: '執筆アシスタント', unitType: 'new-software', usageMode: 'internal', revenueModel: 'efficiency', lifecycleStatus: 'in-use', completionCriteria: '正式原稿の制作工程で使用', sameAsExternalVersion: 'no' },
+    { id: 'tax-unit-public', name: 'DevTax', unitType: 'new-software', usageMode: 'external', revenueModel: 'oss', lifecycleStatus: 'developing', completionCriteria: '利用者の受入条件を満たす', sameAsExternalVersion: 'yes' },
+    { id: 'tax-unit-mixed', name: 'コンテンツ制作基盤 v2', unitType: 'improvement-plan', usageMode: 'mixed', revenueModel: 'sales', lifecycleStatus: 'improving', predecessorId: 'tax-unit-internal', completionCriteria: '新しい制作工程の受入条件を満たす', sameAsExternalVersion: 'undecided' },
   ],
   projectRules: [
-    {
-      id: 'rule-devtax-developing',
-      projectKey: 'demo-product-a',
-      provider: 'codex',
-      effectiveFrom: '2026-07-18',
-      taxUnitId: 'tax-unit-public',
-      classification: 'new-development',
-      reason: '公開前の新規開発期間',
-    },
-    {
-      id: 'rule-writer-in-use',
-      projectKey: 'demo-product-b',
-      provider: 'claude',
-      effectiveFrom: '2026-06-06',
-      taxUnitId: 'tax-unit-internal',
-      classification: 'maintenance',
-      reason: '自己利用開始後の保守期間',
-    },
+    { id: 'demo-rule-public', projectKey: 'demo-public', effectiveFrom: '2026-07-01', taxUnitId: 'tax-unit-public', classification: 'new-development', reason: '合成例の開発期間' },
+    { id: 'demo-rule-internal', projectKey: 'demo-internal', effectiveFrom: '2026-06-06', taxUnitId: 'tax-unit-internal', classification: 'maintenance', reason: '合成例の保守期間' },
+    { id: 'demo-rule-improvement', projectKey: 'demo-improvement', effectiveFrom: '2026-07-01', taxUnitId: 'tax-unit-mixed', classification: 'feature-addition', reason: '合成例の改良計画' },
   ],
   lifecycleEvents: [
-    {
-      id: 'event-internal-use',
-      taxUnitId: 'tax-unit-internal',
-      eventType: 'internal-use-started',
-      occurredOn: '2026-06-06',
-      recordedAt: '2026-06-07T09:00:00+09:00',
-      evidenceIds: ['evidence-first-use'],
-      note: 'テストではなく正式な制作工程へ採用',
-    },
-    {
-      id: 'event-public-start',
-      taxUnitId: 'tax-unit-public',
-      eventType: 'development-started',
-      occurredOn: '2026-07-18',
-      recordedAt: '2026-07-18T12:00:00+09:00',
-      evidenceIds: [],
-    },
+    { id: 'event-internal-use', taxUnitId: 'tax-unit-internal', eventType: 'internal-use-started', occurredOn: '2026-06-06', recordedAt: '2026-06-07T00:00:00Z', evidenceIds: ['evidence-first-use'], note: '合成例の正式利用開始' },
+    { id: 'event-public-start', taxUnitId: 'tax-unit-public', eventType: 'development-started', occurredOn: '2026-07-01', recordedAt: '2026-07-01T00:00:00Z', evidenceIds: [] },
+    { id: 'event-improvement-start', taxUnitId: 'tax-unit-mixed', eventType: 'improvement-started', occurredOn: '2026-07-01', recordedAt: '2026-07-01T00:00:00Z', evidenceIds: [] },
   ],
   equipment: [
-    {
-      id: 'equipment-dgx',
-      name: 'GPU機器',
-      equipmentType: 'dgx',
-      acquisitionCostJpy: 650000,
-      acquiredOn: '2026-07-20',
-      deliveredOn: '2026-07-20',
-      businessUseStartedOn: '2026-07-21',
-      convertedFromPrivate: false,
-      businessUseRatio: 0.9,
-      usefulLifeYears: 4,
-      role: 'ローカルLLM検証と画像生成',
-      taxUnitId: 'tax-unit-mixed',
-      projectAllocationRatio: 0.6,
-      evidenceIds: ['evidence-dgx-receipt'],
-    },
-    {
-      id: 'equipment-laptop',
-      name: 'GPUノートPC',
-      equipmentType: 'pc',
-      acquisitionCostJpy: 280000,
-      acquiredOn: '2025-03-15',
-      businessUseStartedOn: '2026-04-01',
-      convertedFromPrivate: true,
-      openingUnamortizedBalanceJpy: 205000,
-      businessUseRatio: 0.7,
-      usefulLifeYears: 4,
-      role: '外出時の開発と動作確認',
-      taxUnitId: 'tax-unit-public',
-      projectAllocationRatio: 0.5,
-      evidenceIds: [],
-    },
+    { id: 'equipment-dgx', name: 'GPU機器（合成）', equipmentType: 'dgx', acquisitionCostJpy: 650000, acquiredOn: '2026-07-20', businessUseStartedOn: '2026-07-21', convertedFromPrivate: false, businessUseRatio: 0.9, usefulLifeYears: 4, role: '画像生成と検証', taxUnitId: 'tax-unit-mixed', projectAllocationRatio: 0.6, evidenceIds: ['evidence-receipt'] },
   ],
   homeCosts: [
-    {
-      id: 'home-rent-07',
-      month: '2026-07',
-      category: 'rent',
-      amountJpy: 120000,
-      method: 'area-time',
-      businessUseRatio: 0.12,
-      basis: '作業面積20% × 使用時間60%',
-      rationale: '共用部屋のため面積と利用時間を併用',
-      taxUnitId: 'tax-unit-public',
-      projectAllocationRatio: 0.5,
-      treatment: 'shared',
-      evidenceIds: [],
-    },
-    {
-      id: 'home-electricity-07',
-      month: '2026-07',
-      category: 'electricity',
-      amountJpy: 14500,
-      method: 'watt-hour',
-      businessUseRatio: 0.22,
-      basis: '機器消費電力 × 稼働時間 ÷ 月使用量',
-      rationale: '設備の仕様・稼働記録から算出',
-      taxUnitId: 'tax-unit-mixed',
-      projectAllocationRatio: 0.6,
-      treatment: 'shared',
-      evidenceIds: [],
-    },
-    {
-      id: 'home-internet-07',
-      month: '2026-07',
-      category: 'internet',
-      amountJpy: 6200,
-      method: 'usage-time',
-      businessUseRatio: 0.65,
-      basis: '業務利用時間の記録',
-      rationale: '共用回線のため利用時間で按分',
-      projectAllocationRatio: 0,
-      treatment: 'general',
-      evidenceIds: [],
-    },
+    { id: 'home-rent', month: '2026-07', category: 'rent', amountJpy: 120000, method: 'area-time', businessUseRatio: 0.12, basis: '作業面積と利用時間による合成値', rationale: '共用室の業務利用', taxUnitId: 'tax-unit-public', projectAllocationRatio: 0.5, treatment: 'shared', evidenceIds: ['evidence-receipt'] },
+    { id: 'home-internet', month: '2026-07', category: 'internet', amountJpy: 6200, method: 'usage-time', businessUseRatio: 0.65, basis: '利用時間による合成値', rationale: '共用回線の業務利用', projectAllocationRatio: 0, treatment: 'general', evidenceIds: ['evidence-receipt'] },
   ],
-  directCosts: [],
+  directCosts: [
+    { id: 'direct-outsource', incurredOn: '2026-07-15', costType: 'outsource', amountJpy: 18000, taxUnitId: 'tax-unit-public', directlyAttributable: true, treatment: 'direct', evidenceIds: ['evidence-receipt'], note: '実在しない外注費の合成例' },
+    { id: 'direct-unknown', incurredOn: '2026-07-25', costType: 'cloud', amountJpy: null, unknownAmountReason: '合成例：請求の確認待ち', taxUnitId: 'tax-unit-mixed', directlyAttributable: true, treatment: 'direct', evidenceIds: [] },
+  ],
   evidence: [
-    {
-      id: 'evidence-first-use',
-      evidenceType: 'first-use',
-      strength: 'self-recorded',
-      occurredOn: '2026-06-06',
-      recordedAt: '2026-06-07T09:00:00+09:00',
-      note: '正式原稿への初回採用メモ',
-      taxUnitId: 'tax-unit-internal',
-    },
-    {
-      id: 'evidence-dgx-receipt',
-      evidenceType: 'receipt',
-      strength: 'external',
-      occurredOn: '2026-07-20',
-      recordedAt: '2026-07-20T18:00:00+09:00',
-      note: '購入領収書（ローカル参照のみ）',
-      taxUnitId: 'tax-unit-mixed',
-    },
-  ],
-  decisions: [],
-}
-
-export const demoDiagnosis: Diagnosis = {
-  currentPosition: [
-    '自分の実作業で使う制作物と、外部公開を目指す制作物の両方があります。',
-    '執筆アシスタントは自己利用開始済み、DevTaxは公開前の開発中です。',
-    '設備と自宅費用の按分根拠を登録済みですが、未添付の証拠があります。',
-  ],
-  immediateActions: [
-    {
-      id: 'action-1',
-      priority: 'high',
-      title: 'GPUノートPCの転用時残高を確認',
-      reason: '私用から業務へ転用しているため、購入額全額ではなく転用時点の残高確認が必要です。',
-      trigger: 'now',
-    },
-    {
-      id: 'action-2',
-      priority: 'high',
-      title: 'DevTaxの完成条件を確認',
-      reason: '供用開始を後から説明できるよう、正式利用の条件を先に残します。',
-      trigger: 'now',
-      taxUnitId: 'tax-unit-public',
-    },
-    {
-      id: 'action-3',
-      priority: 'medium',
-      title: '7月の家賃按分根拠を添付',
-      reason: '面積と利用時間の計算メモが未登録です。',
-      trigger: 'now',
-    },
-  ],
-  eventTriggeredActions: [
-    {
-      id: 'action-4',
-      priority: 'medium',
-      title: '初回公開日を記録',
-      reason: '外部公開した日に、URLやデプロイ履歴を証拠として残します。',
-      trigger: 'event',
-      taxUnitId: 'tax-unit-public',
-    },
-    {
-      id: 'action-5',
-      priority: 'low',
-      title: '旧版の利用終了を記録',
-      reason: 'v2へ全面移行したときに、旧版の残価と二重計上を確認します。',
-      trigger: 'event',
-      taxUnitId: 'tax-unit-mixed',
-    },
-  ],
-  missingFacts: [
-    'GPUノートPCの転用時未償却残高',
-    '家賃按分の計測メモ',
-    '公開版と自己利用版が同一かの最終判断',
-  ],
-  readiness: { confirmed: 7, total: 10 },
-}
-
-export const demoLedger: PlanningLedger = {
-  year: 2026,
-  contributions: [
-    {
-      sourceType: 'equipment',
-      sourceId: 'equipment-dgx',
-      taxUnitId: 'tax-unit-mixed',
-      grossAmountJpy: 650000,
-      businessAmountJpy: 585000,
-      allocatedAmountJpy: 351000,
-      privateAmountJpy: 65000,
-      unallocatedAmountJpy: 234000,
-      treatment: 'direct',
-      warnings: ['当年償却額は供用日・耐用年数・償却方法の確認後に算定'],
-    },
-    {
-      sourceType: 'home',
-      sourceId: 'home-rent-07',
-      taxUnitId: 'tax-unit-public',
-      grossAmountJpy: 120000,
-      businessAmountJpy: 14400,
-      allocatedAmountJpy: 7200,
-      privateAmountJpy: 105600,
-      unallocatedAmountJpy: 7200,
-      treatment: 'shared',
-      warnings: [],
-    },
-    {
-      sourceType: 'home',
-      sourceId: 'home-electricity-07',
-      taxUnitId: 'tax-unit-mixed',
-      grossAmountJpy: 14500,
-      businessAmountJpy: 3190,
-      allocatedAmountJpy: 1914,
-      privateAmountJpy: 11310,
-      unallocatedAmountJpy: 1276,
-      treatment: 'shared',
-      warnings: [],
-    },
-  ],
-  totals: {
-    grossAmountJpy: 784500,
-    businessAmountJpy: 602590,
-    allocatedAmountJpy: 360114,
-    privateAmountJpy: 181910,
-    unallocatedAmountJpy: 242476,
-  },
-  byTaxUnit: [
-    {
-      taxUnitId: 'tax-unit-public',
-      name: 'DevTax',
-      amountJpy: 7200,
-      candidate: '取得価額候補',
-      missingFacts: ['供用開始日'],
-    },
-    {
-      taxUnitId: 'tax-unit-mixed',
-      name: 'コンテンツ制作基盤 v2',
-      amountJpy: 352914,
-      candidate: '資本的支出候補',
-      missingFacts: ['改良完了日'],
-    },
+    { id: 'evidence-first-use', evidenceType: 'first-use', strength: 'self-recorded', occurredOn: '2026-06-06', recordedAt: '2026-06-07T00:00:00Z', note: '合成の正式利用メモ', taxUnitId: 'tax-unit-internal' },
+    { id: 'evidence-receipt', evidenceType: 'receipt', strength: 'external', recordedAt: '2026-07-01T00:00:00Z', note: '実在しない請求書の例' },
   ],
 }
 
-const session = (
-  provider: 'Claude Code' | 'Codex',
-  month: string,
-  suffix: string,
-  tokens: number,
-  branch: string,
-): Allocation['session'] => ({
-  date: `2026-${month.replace('月', '').padStart(2, '0')}-18 21:42`,
-  id: `${provider === 'Codex' ? 'cdx' : 'cld'}-••••-${suffix}`,
-  folder: `C:\\work\\product-${suffix.slice(0, 1).toLowerCase()}`,
-  branch,
-  model: provider === 'Codex' ? 'gpt-5.4' : 'claude-opus-4',
-  tokens,
-  classification: `作業フォルダ完全一致 → Product ${suffix.slice(0, 1)}`,
-  manualEdit: 'なし',
-})
-
+const fixtures = [
+  { provider: 'claude' as const, fee: 10000, rows: [
+    { id: 'demo-internal', unit: 'tax-unit-internal', weight: 400, group: 'current' as TaxGroup, stage: '保守', classification: 'maintenance' as const },
+    { id: 'demo-improvement', unit: 'tax-unit-mixed', weight: 600, group: 'future' as TaxGroup, stage: '機能追加', classification: 'feature-addition' as const },
+  ] },
+  { provider: 'codex' as const, fee: 20000, rows: [
+    { id: 'demo-public', unit: 'tax-unit-public', weight: 1000, group: 'future' as TaxGroup, stage: '新規開発', classification: 'new-development' as const },
+  ] },
+]
+const scopes: SubscriptionCostScope[] = []
+const allocations: Allocation[] = []
+for (const fixture of fixtures) {
+  const month = '2026-07'
+  const result = allocateMonthlySubscription({
+    provider: fixture.provider, billingMonth: month, monthlyFeeJpy: fixture.fee,
+    unobservedUsage: { kind: 'estimated', ratio: 0.1 },
+    usageLines: fixture.rows.map((row) => ({ id: row.id, productId: row.id, taxUnitId: row.unit, bucket: 'product', usageWeight: row.weight })),
+  })
+  const sourceId = `demo:charge:${fixture.provider}`
+  scopes.push({
+    source: { id: sourceId, kind: 'subscription', label: `${fixture.provider} 合成請求`, originalAmountJpy: fixture.fee, currency: 'JPY', servicePeriod: calendarMonthPeriod(month), evidenceIds: ['evidence-receipt'], origin: 'entered' },
+    basisId: `${sourceId}:basis`, period: calendarMonthPeriod(month), result,
+    targets: Object.fromEntries(fixture.rows.map((row) => [row.id, { kind: 'tax-unit' as const, taxUnitId: row.unit }])),
+  })
+  for (const line of result.lines) {
+    if (line.allocatedAmountJpy === 0) continue
+    const fixtureRow = fixture.rows.find((row) => row.id === line.sourceId)
+    const unit = demoPlanning.taxUnits.find((row) => row.id === fixtureRow?.unit)
+    const group = fixtureRow?.group ?? 'review'
+    allocations.push({
+      id: `${sourceId}:${line.sourceId ?? line.kind}`, monthKey: month, month: '2026年7月',
+      provider: fixture.provider === 'claude' ? 'Claude Code' : 'Codex', product: unit?.name ?? '未取得利用', asset: unit?.name ?? '未判断',
+      stage: fixtureRow?.stage ?? '未取得', usageRate: Math.round(line.allocationRatio * 1000) / 10,
+      amount: line.allocatedAmountJpy, group, taxCandidate: fixtureRow?.group === 'current' ? '通常経費候補' : fixtureRow ? '原価への対応候補' : '未判断', confidence: 'B',
+      rule: '合成の利用量と期間分類', reason: '共通の配賦計算によるデモです。実在する利用や税務判断ではありません。', missing: '事実と扱いの確認は年度採用と別です。',
+      projectKey: fixtureRow?.id, taxUnitId: fixtureRow?.unit, classification: fixtureRow?.classification,
+      session: { date: month, id: fixtureRow?.id ?? 'synthetic-unobserved', folder: fixtureRow?.id ?? '履歴なし', branch: '取得対象外', model: 'synthetic', tokens: fixtureRow?.weight ?? null, classification: fixtureRow?.stage ?? '未判断', manualEdit: '合成データ' },
+    })
+  }
+}
+export const demoDiagnosis = diagnosePlanning(demoPlanning, { hasRelevantAiUsage: true })
 export const demoDashboard: DashboardData = {
-  meta: {
-    source: 'demo',
-    sessionCount: 1051,
-    lastSynced: 'たった今',
-    mappedRate: 92,
-    classifiedRate: 88,
-  },
-  months: [
-    { monthKey: '2026-04', label: '4月', current: 11400, future: 29400, review: 4200 },
-    { monthKey: '2026-05', label: '5月', current: 13800, future: 31200, review: 9000 },
-    { monthKey: '2026-06', label: '6月', current: 8400, future: 38400, review: 7200 },
-    { monthKey: '2026-07', label: '7月', current: 14600, future: 27800, review: 6200 },
-  ],
-  allocations: [
-    {
-      id: 'a1',
-      monthKey: '2026-04',
-      month: '4月',
-      provider: 'Codex',
-      product: 'Product A',
-      asset: 'A-v1',
-      stage: '新規開発',
-      usageRate: 42,
-      amount: 8400,
-      group: 'future',
-      taxCandidate: '取得価額',
-      confidence: 'A',
-      rule: '特定ソフトウェアの供用前・直接開発',
-      reason: '登録済みリポジトリと開発ブランチに一致し、A-v1は未供用です。',
-      missing: '供用開始時にリリース証跡を登録してください。',
-      session: session('Codex', '4月', 'A14', 184200, 'feature/core-engine'),
-    },
-    {
-      id: 'a2',
-      monthKey: '2026-04',
-      month: '4月',
-      provider: 'Claude Code',
-      product: 'Product B',
-      asset: 'B-v1',
-      stage: '保守',
-      usageRate: 18,
-      amount: 5400,
-      group: 'current',
-      taxCandidate: '通常経費',
-      confidence: 'B',
-      rule: '供用済みソフトウェアの効用維持',
-      reason: '障害修正ブランチと供用済み資産B-v1に対応しています。',
-      missing: '機能追加を含まないことをIssueで確認してください。',
-      session: session('Claude Code', '4月', 'B22', 97500, 'fix/auth-timeout'),
-    },
-    {
-      id: 'a3',
-      monthKey: '2026-05',
-      month: '5月',
-      provider: 'Claude Code',
-      product: 'Product B',
-      asset: 'B決済機能',
-      stage: '機能追加',
-      usageRate: 31,
-      amount: 9300,
-      group: 'future',
-      taxCandidate: '資本的支出',
-      confidence: 'B',
-      rule: '既存資産への新機能追加・価値増加',
-      reason: '新しい決済手段を追加する一連の改良計画に対応しています。',
-      missing: '改良計画の完了日と供用開始日が未登録です。',
-      session: session('Claude Code', '5月', 'B31', 164800, 'feature/payment-v2'),
-    },
-    {
-      id: 'a4',
-      monthKey: '2026-05',
-      month: '5月',
-      provider: 'Codex',
-      product: 'Product A',
-      asset: 'A-v1',
-      stage: '新規開発',
-      usageRate: 52,
-      amount: 15600,
-      group: 'future',
-      taxCandidate: '取得価額',
-      confidence: 'A',
-      rule: '特定ソフトウェアの供用前・直接開発',
-      reason: 'A-v1の開発ブランチに対応し、作業フォルダ分類も確定済みです。',
-      missing: 'なし。月次確定が可能です。',
-      session: session('Codex', '5月', 'A52', 268300, 'feature/allocation'),
-    },
-    {
-      id: 'a5',
-      monthKey: '2026-06',
-      month: '6月',
-      provider: 'Claude Code',
-      product: 'Product A',
-      asset: 'A-v1',
-      stage: '新規開発',
-      usageRate: 71,
-      amount: 21300,
-      group: 'future',
-      taxCandidate: '取得価額',
-      confidence: 'A',
-      rule: '特定ソフトウェアの供用前・直接開発',
-      reason: 'A-v1の開発環境で行われた未供用期間の直接開発です。',
-      missing: '供用開始の判断条件を設定してください。',
-      session: session('Claude Code', '6月', 'A71', 352900, 'feature/tax-rules'),
-    },
-    {
-      id: 'a6',
-      monthKey: '2026-06',
-      month: '6月',
-      provider: 'Codex',
-      product: 'Product C',
-      asset: '対象外',
-      stage: '趣味',
-      usageRate: 12,
-      amount: 2400,
-      group: 'review',
-      taxCandidate: '私用',
-      confidence: 'B',
-      rule: 'ユーザー登録済みの私用フォルダ',
-      reason: '私用として登録したフォルダに一致しています。',
-      missing: 'ユーザーの最終確認が必要です。',
-      session: session('Codex', '6月', 'C12', 44200, 'main'),
-    },
-    {
-      id: 'a7',
-      monthKey: '2026-07',
-      month: '7月',
-      provider: 'Claude Code',
-      product: 'Product A',
-      asset: 'A-v1',
-      stage: '新規開発',
-      usageRate: 64,
-      amount: 19200,
-      group: 'future',
-      taxCandidate: '取得価額',
-      confidence: 'A',
-      rule: '特定ソフトウェアの供用前・直接開発',
-      reason: 'A-v1の開発作業として継続的に分類されています。',
-      missing: '外注費18,000円の対応関係を確認してください。',
-      session: session('Claude Code', '7月', 'A64', 311600, 'feature/onboarding'),
-    },
-    {
-      id: 'a8',
-      monthKey: '2026-07',
-      month: '7月',
-      provider: 'Codex',
-      product: '未分類',
-      asset: '要確認',
-      stage: '調査',
-      usageRate: 8,
-      amount: 2400,
-      group: 'review',
-      taxCandidate: '未分類',
-      confidence: 'C',
-      rule: '分類ルールに一致しない作業フォルダ',
-      reason: '登録済みプロダクトへ自動で対応付けられませんでした。',
-      missing: 'プロダクトまたは私用を選択してください。',
-      session: session('Codex', '7月', 'X08', 39800, 'main'),
-    },
-  ],
-  boundaries: [
-    {
-      product: 'Product A',
-      asset: 'A-v1',
-      kind: '新規ソフトウェア',
-      amount: 96500,
-      threshold: 100000,
-      thresholdLabel: '10万円境界',
-      status: '3,500円手前',
-      tone: 'near',
-    },
-    {
-      product: 'Product B',
-      asset: 'B決済機能',
-      kind: '一つの改良計画',
-      amount: 182000,
-      threshold: 200000,
-      thresholdLabel: '明らかでない改良の20万円基準',
-      status: '要事実確認',
-      tone: 'review',
-    },
-    {
-      product: 'Product D',
-      asset: 'D-v1',
-      kind: '新規ソフトウェア',
-      amount: 365000,
-      threshold: 400000,
-      thresholdLabel: '青色40万円特例',
-      status: '適用要件確認',
-      tone: 'review',
-    },
-    {
-      product: 'Claude',
-      asset: '年払Claude',
-      kind: '契約期間12か月',
-      amount: 330000,
-      threshold: 360000,
-      thresholdLabel: '11か月分受益済み',
-      status: '前払確認',
-      tone: 'safe',
-    },
-  ],
-  assets: [
-    {
-      product: 'Product A',
-      name: 'A-v1',
-      total: 96500,
-      aiCost: 72000,
-      outsource: 18000,
-      other: 6500,
-      futureBalance: 96500,
-      inService: false,
-    },
-    {
-      product: 'Product B',
-      name: 'B決済機能',
-      total: 182000,
-      aiCost: 52700,
-      outsource: 120000,
-      other: 9300,
-      futureBalance: 182000,
-      inService: false,
-    },
-  ],
-  guidance: [
-    {
-      title: '7月の未分類利用 8%',
-      description: '1件の作業フォルダを確認してください',
-      severity: 'warning',
-    },
-    {
-      title: 'A-v1の供用条件',
-      description: '初回ユーザー利用を証跡候補に設定済み',
-      severity: 'ok',
-    },
-    {
-      title: 'Claude未取得利用',
-      description: '10%として対象外・要確認に残しています',
-      severity: 'ok',
-    },
-  ],
-  products: [
-    { name: 'Product A', folder: 'C:\\work\\product-a', sessions: 418 },
-    { name: 'Product B', folder: 'C:\\work\\product-b', sessions: 227 },
-    { name: 'Product C', folder: 'C:\\work\\private-lab', sessions: 84 },
-  ],
-}
-
-function isDashboardData(value: unknown): value is DashboardData {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<DashboardData>
-  return Boolean(
-    candidate.meta && Array.isArray(candidate.months) && Array.isArray(candidate.allocations),
-  )
+  meta: { source: 'demo', sessionCount: 3, lastSynced: '合成の固定データ', mappedRate: 100, classifiedRate: 100 },
+  months: [{ monthKey: '2026-07', label: '2026年7月',
+    current: allocations.filter((row) => row.group === 'current').reduce((sum, row) => sum + row.amount, 0),
+    future: allocations.filter((row) => row.group === 'future').reduce((sum, row) => sum + row.amount, 0),
+    review: allocations.filter((row) => row.group === 'review').reduce((sum, row) => sum + row.amount, 0),
+  }],
+  allocations, costProjection: projectWorkspaceCosts(demoPlanning, scopes),
+  guidance: [{ title: '実在しない合成例です', description: '設備の方法未選択と請求額不明は、共通計算でも未算定として保持しています。', severity: 'warning' }],
+  products: fixtures.flatMap((fixture) => fixture.rows.map((row) => ({ name: demoPlanning.taxUnits.find((unit) => unit.id === row.unit)!.name, folder: row.id, projectKey: row.id, sessions: 1, firstObservedMonth: '2026-07', lastObservedMonth: '2026-07', providers: [fixture.provider === 'claude' ? 'Claude Code' as const : 'Codex' as const] }))),
 }
 
 export function isLocalRuntime(): boolean {
   if (typeof window === 'undefined') return false
-  const loopback =
-    window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
-  // A local static preview can explicitly choose synthetic data. A failed API
-  // request must never make that choice on behalf of a real-data session.
+  const loopback = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
   return loopback && new URLSearchParams(window.location.search).get('mode') !== 'demo'
 }
-
 export async function getDashboardData(): Promise<DashboardData> {
-  // A hosted demo must never probe for local history APIs. Only loopback builds
-  // may request the read-only collector; every other origin uses synthetic data.
+  // Public demos never probe local history APIs, and failures never switch real data to demo.
   if (!isLocalRuntime()) return demoDashboard
-
   const response = await fetch('/api/dashboard', { headers: { Accept: 'application/json' } })
   if (!response.ok) throw new Error(`利用履歴の読込に失敗しました（HTTP ${response.status}）。`)
   const value: unknown = await response.json()
-  if (!isDashboardData(value)) throw new Error('利用履歴の応答形式を確認できませんでした。')
-  return { ...value, meta: { ...value.meta, source: 'local' } }
+  const candidate = value && typeof value === 'object' ? value as Partial<DashboardData> : null
+  if (!candidate?.meta || !Array.isArray(candidate.months) || !Array.isArray(candidate.allocations)) throw new Error('利用履歴の応答形式を確認できませんでした。')
+  return { ...candidate as DashboardData, meta: { ...candidate.meta, source: 'local' } }
 }

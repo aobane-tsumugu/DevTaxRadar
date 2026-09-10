@@ -1,0 +1,73 @@
+import type { Diagnosis, PlanningSnapshot } from '../planning/types.js'
+
+const text = (value: unknown) => String(value ?? '').replace(/[\r\n\t]/g, ' ').replace(/([\\`*_[\]<>#|])/g, '\\$1')
+const amount = (value: number | null) => value === null ? '不明' : value.toLocaleString('ja-JP') + '円'
+
+/** Shared by the server and synthetic demo; no old ledger calculations or local paths. */
+export function planningMarkdown(snapshot: PlanningSnapshot, diagnosis?: Diagnosis): string {
+  const lines = [
+    '# DevTax 計画・原価資料', '', `対象年: ${snapshot.profile.taxYear}年`,
+    `所得区分候補: ${text(snapshot.profile.incomeCategory)}`, `申告方式: ${text(snapshot.profile.filingType)}`,
+    '', '入力した事実・本人の判断記録です。年度採用版や、税務適用の確認完了を意味しません。',
+    '名称・相談内容・自由記述はそのまま含まれます。第三者へ渡す前に確認してください。証拠のローカル保存場所は含めません。',
+  ]
+  if (snapshot.profile.notes) lines.push('', `計画のメモ: ${text(snapshot.profile.notes)}`)
+  lines.push('', '## 制作物・改良計画', '')
+  for (const unit of snapshot.taxUnits) {
+    lines.push(`- ${text(unit.name)} / ID: ${text(unit.id)} / ${text(unit.unitType)} / ${text(unit.usageMode)} / ${text(unit.lifecycleStatus)}`,
+      `  - 収益形態: ${text(unit.revenueModel)} / 売上状況: ${text(unit.monetizationStatus ?? snapshot.profile.monetizationStatus)}`,
+      `  - 整理方法: ${text(unit.journeyMode ?? snapshot.profile.journeyMode)} / 完成条件: ${text(unit.completionCriteria) || '未記入'}`)
+    if (unit.predecessorId) lines.push(`  - 前身の制作物: ${text(unit.predecessorId)}（利用終了・原価振替を意味しません）`)
+    if (unit.notes) lines.push(`  - メモ: ${text(unit.notes)}`)
+  }
+  lines.push('', '## 期間付き分類ルール', '')
+  for (const rule of snapshot.projectRules) lines.push(`- ${text(rule.id)} / ${text(rule.projectKey)} / ${text(rule.provider) || '両サービス'} / ${text(rule.effectiveFrom)} ～ ${text(rule.effectiveTo) || '終了未指定'} / ${text(rule.classification)} / 制作物 ${text(rule.taxUnitId) || '未指定'} / 理由 ${text(rule.reason) || '未記入'}`)
+  lines.push('', '## 年度別の費用項目の確認', '', '本人の記録です。未登録は「該当なし」を意味しません。')
+  for (const item of snapshot.costPresence ?? []) lines.push(`- ${item.taxYear}年 ${{ equipment: '設備', home: '自宅費用', direct: '直接費' }[item.category]}: ${item.status === 'not-applicable' ? '該当なし' : '保留'} / 理由: ${text(item.reason)} / 記録日時: ${text(item.recordedAt)} / ID: ${text(item.id)}`)
+  if (!snapshot.costPresence?.length) lines.push('確認記録なし。')
+  lines.push('', '## 設備', '')
+  for (const item of snapshot.equipment) {
+    lines.push(`- ${text(item.name)} / ID ${text(item.id)} / 購入原額 ${amount(item.acquisitionCostJpy)} / 取得日 ${text(item.acquiredOn)}`,
+      `  - 業務利用開始日 ${text(item.businessUseStartedOn) || '未確認'} / 私用転用 ${item.convertedFromPrivate ? 'あり' : 'なし'}`,
+      `  - 業務割合 ${item.businessUseRatio * 100}% / 役割 ${text(item.role)} / 証拠 ${item.evidenceIds.map(text).join('、') || '未登録'}`)
+    if (item.unknownAmountReason) lines.push(`  - 原額不明の理由: ${text(item.unknownAmountReason)}`)
+    if (item.openingUnamortizedBalanceJpy !== undefined) lines.push(`  - 入力した転用時残高 ${amount(item.openingUnamortizedBalanceJpy)}（適用条件の自動検証ではありません）`)
+  }
+  lines.push('', '### 設備の年度別計算条件', '', '実計算と前年照合の結果は共通費用資料・年度資料を参照してください。')
+  for (const method of snapshot.equipmentMethods ?? []) {
+    lines.push(`- ${method.taxYear}年 / 設備 ${text(method.equipmentId)} / 方法 ${text(method.method)} / 耐用年数 ${text(method.usefulLifeYears) || '未確認'}`,
+      `  - 理由 ${text(method.methodReason)} / 記録日時 ${text(method.recordedAt)}`)
+    if (method.priorClosing) lines.push(`  - 前年残高 ${method.priorClosing.taxYear}年 ${amount(method.priorClosing.amountJpy)} / ${text(method.priorClosing.reference)}`)
+    if (method.priorReviewId) lines.push(`  - 前年資料ID ${text(method.priorReviewId)}`)
+    if (method.allocation) lines.push(`  - 年度別の配分条件: ${text(JSON.stringify(method.allocation))}`)
+  }
+  lines.push('', '## 家賃・電気・通信費', '')
+  for (const item of snapshot.homeCosts) {
+    lines.push(`- ${text(item.month)} ${text(item.category)} / ID ${text(item.id)} / 原額 ${amount(item.amountJpy)} / 業務割合 ${item.businessUseRatio * 100}%`,
+      `  - 方法 ${text(item.method)} / 計測 ${text(item.basis)} / 理由 ${text(item.rationale)}`,
+      `  - 処理区分 ${text(item.treatment)} / 制作物 ${text(item.taxUnitId) || '未指定'} / 配分条件 ${text(item.targets === undefined ? item.projectAllocationRatio : JSON.stringify(item.targets))}`,
+      `  - 証拠 ${item.evidenceIds.map(text).join('、') || '未登録'}`)
+    if (item.unknownAmountReason) lines.push(`  - 原額不明の理由: ${text(item.unknownAmountReason)}`)
+  }
+  lines.push('', '## 直接費', '')
+  for (const item of snapshot.directCosts) {
+    lines.push(`- ${text(item.incurredOn)} ${text(item.costType)} / ID ${text(item.id)} / 原額 ${amount(item.amountJpy)}`,
+      `  - 直接対応 ${item.directlyAttributable ? 'あり' : '未確認・直接対応なし'} / ${text(item.treatment)} / 制作物 ${text(item.taxUnitId) || '未指定'}`,
+      `  - 証拠 ${item.evidenceIds.map(text).join('、') || '未登録'}`)
+    if (item.targets !== undefined) lines.push(`  - 配分条件 ${text(JSON.stringify(item.targets))}`)
+    if (item.unknownAmountReason) lines.push(`  - 原額不明の理由: ${text(item.unknownAmountReason)}`)
+    if (item.note) lines.push(`  - メモ: ${text(item.note)}`)
+  }
+  lines.push('', '## ライフサイクルと証拠', '')
+  for (const event of snapshot.lifecycleEvents) lines.push(`- ${text(event.occurredOn)} / ${text(event.eventType)} / 制作物 ${text(event.taxUnitId)} / ID ${text(event.id)} / 証拠 ${event.evidenceIds.map(text).join('、') || '未登録'} / ${text(event.note)}`)
+  for (const evidence of snapshot.evidence) lines.push(`- ${text(evidence.occurredOn ?? evidence.recordedAt)} / ${text(evidence.evidenceType)} (${text(evidence.strength)}) / ID ${text(evidence.id)} / ${text(evidence.note)}`)
+  lines.push('', '## 扱いを判断した記録', '')
+  for (const decision of snapshot.decisions) lines.push(`- ${decision.taxYear}年 / 制作物 ${text(decision.taxUnitId)} / ID ${text(decision.id)} / ${text(decision.status)} / 検討 ${text(decision.candidate)} / 選択 ${text(decision.selectedCandidate) || '未選択'} / 理由 ${text(decision.reason) || '未記入'} / 確認日時 ${text(decision.confirmedAt) || '未確認'}`)
+  if (diagnosis) {
+    lines.push('', '## 次に確認すること', '')
+    for (const action of diagnosis.immediateActions) lines.push(`- [${action.priority}] ${text(action.title)}: ${text(action.reason)}`)
+    if (diagnosis.missingFacts.length) lines.push(`不足情報: ${diagnosis.missingFacts.map(text).join('、')}`)
+  }
+  lines.push('', '> 採用・申告に使う際は、事実・根拠・対象年・適用条件を確認してください。', '')
+  return lines.join('\n')
+}

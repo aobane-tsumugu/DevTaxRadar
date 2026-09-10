@@ -1,355 +1,104 @@
-import type {
-  ActionItem,
-  Diagnosis,
-  LifecycleEventType,
-  PlanningSnapshot,
-  TaxUnitRecord,
-} from '../planning/types.js'
+import type { ActionItem, Diagnosis, LifecycleEventType, PlanningSnapshot, TaxUnitRecord } from '../planning/types.js'
 import { assessCostPresence, costPresenceRecordsSchema } from '../planning/costPresence.js'
 
-function unique(values: string[]): string[] {
-  return [...new Set(values)]
+type DiagnosisContext = { hasRelevantAiUsage?: boolean }
+const unique = (values: string[]) => [...new Set(values)]
+const lifecycleLabels: Record<TaxUnitRecord['lifecycleStatus'], string> = {
+  idea: '構想中', prototype: '試作中', developing: '開発中', evaluating: '評価中',
+  'in-use': '正式利用中', maintaining: '保守中', improving: '改良中', retired: '廃止済み', abandoned: '開発中止',
 }
 
-function hasEvent(
-  snapshot: PlanningSnapshot,
-  taxUnitId: string,
-  eventType: LifecycleEventType,
-): boolean {
-  return snapshot.lifecycleEvents.some(
-    (event) => event.taxUnitId === taxUnitId && event.eventType === eventType,
+/** Findings describe recorded facts and applicable omissions, never a readiness score. */
+export function diagnosePlanning(snapshot: PlanningSnapshot, context: DiagnosisContext = {}): Diagnosis {
+  const year = snapshot.profile.taxYear
+  const retrospective = snapshot.taxUnits.filter((unit) => (unit.journeyMode ?? snapshot.profile.journeyMode) === 'retrospective').length
+  const currentPosition = snapshot.taxUnits.length
+    ? [`制作物ごとに診断します。早期準備${snapshot.taxUnits.length - retrospective}件、過去整理${retrospective}件です。`]
+    : ['制作物を登録すると、それぞれの現在地に合わせて診断します。通常業務の費用だけなら架空の制作物は必要ありません。']
+  const immediateActions: ActionItem[] = [], eventTriggeredActions: ActionItem[] = [], missingFacts: string[] = []
+  const hasEvent = (id: string, type: LifecycleEventType) => snapshot.lifecycleEvents.some((event) =>
+    event.taxUnitId === id && event.eventType === type && event.occurredOn <= `${year}-12-31`,
   )
-}
-
-function lifecyclePosition(unit: TaxUnitRecord): string {
-  const labels: Record<TaxUnitRecord['lifecycleStatus'], string> = {
-    idea: '構想中',
-    prototype: '試作中',
-    developing: '開発中',
-    evaluating: '評価中',
-    'in-use': '正式利用中',
-    maintaining: '保守中',
-    improving: '改良中',
-    retired: '廃止済み',
-    abandoned: '開発中止',
+  const add = (id: string, title: string, reason: string, priority: ActionItem['priority'] = 'medium', taxUnitId?: string, trigger: ActionItem['trigger'] = 'now') => {
+    const target = trigger === 'now' ? immediateActions : eventTriggeredActions
+    if (!target.some((item) => item.id === id)) target.push({ id, title, reason, priority, trigger, ...(taxUnitId ? { taxUnitId } : {}) })
   }
-  return `${unit.name}は${labels[unit.lifecycleStatus]}です。`
-}
-
-function addAction(target: ActionItem[], action: ActionItem): void {
-  if (!target.some((existing) => existing.id === action.id)) target.push(action)
-}
-
-/**
- * Turns facts already recorded by the user into a neutral preparation checklist.
- * It deliberately avoids recommending artificial timing, splitting or spending.
- */
-export function diagnosePlanning(snapshot: PlanningSnapshot): Diagnosis {
-  const retrospectiveUnits = snapshot.taxUnits.filter(
-    (unit) => (unit.journeyMode ?? snapshot.profile.journeyMode) === 'retrospective',
-  )
-  const earlyUnits = snapshot.taxUnits.length - retrospectiveUnits.length
-  const currentPosition: string[] =
-    snapshot.taxUnits.length === 0
-      ? ['制作物を登録すると、それぞれの現在地に合わせて診断します。']
-      : [
-          `制作物ごとに診断します。早期準備${earlyUnits}件、過去整理${retrospectiveUnits.length}件です。`,
-        ]
-  const immediateActions: ActionItem[] = []
-  const eventTriggeredActions: ActionItem[] = []
-  const missingFacts: string[] = []
-  const declarationInput = costPresenceRecordsSchema.safeParse(snapshot.costPresence ?? [])
-  const presence =
-    declarationInput.success &&
-    Number.isInteger(snapshot.profile.taxYear) &&
-    snapshot.profile.taxYear >= 2000 &&
-    snapshot.profile.taxYear <= 2100
-      ? assessCostPresence(snapshot, declarationInput.data)
-      : []
-  if (!declarationInput.success) missingFacts.push('年度別の費用項目確認の理由・日時・重複')
-  for (const row of presence) {
-    if (row.status === 'deferred' || row.status === 'conflict') {
+  const declarations = costPresenceRecordsSchema.safeParse(snapshot.costPresence ?? [])
+  if (!declarations.success) missingFacts.push('年度別の費用項目確認の理由・日時・重複')
+  else if (Number.isInteger(year) && year >= 2000 && year <= 2100) {
+    for (const row of assessCostPresence(snapshot, declarations.data)) {
+      if (row.status !== 'deferred' && row.status !== 'conflict') continue
       const title = `${row.taxYear}年の${row.label}: ${row.status === 'conflict' ? '該当なしと登録内容の不一致を確認する' : '保留した確認を続ける'}`
       missingFacts.push(title)
-      addAction(immediateActions, {
-        id: `cost-presence-${row.category}`,
-        priority: row.status === 'conflict' ? 'high' : 'medium',
-        title,
-        reason: `${row.explanation} 理由: ${row.declaration!.reason}`,
-        trigger: 'now',
-      })
+      add(`cost-presence-${row.category}`, title, `${row.explanation} 理由: ${row.declaration?.reason ?? ''}`, row.status === 'conflict' ? 'high' : 'medium')
     }
   }
-
-  if (snapshot.taxUnits.length === 0) {
-    addAction(immediateActions, {
-      id: 'register-tax-unit',
-      priority: 'high',
-      title: '制作物・改良計画を登録する',
-      reason: 'AI利用や直接費を集計する単位がまだありません。',
-      trigger: 'now',
-    })
-    missingFacts.push('制作物・改良計画')
-  } else {
-    currentPosition.push(`${snapshot.taxUnits.length}件の制作物・改良計画が登録されています。`)
-  }
-
-  if (snapshot.taxUnits.length > 0 && snapshot.projectRules.length === 0) {
-    addAction(immediateActions, {
-      id: 'register-project-period-rules',
-      priority: 'high',
-      title: 'AI履歴と制作物の期間対応を登録する',
-      reason: '同じ作業フォルダでも、開発・保守・改良は時期によって変わります。',
-      trigger: 'now',
-    })
+  if (context.hasRelevantAiUsage && snapshot.projectRules.length === 0) {
+    add('register-project-period-rules', 'AI履歴と制作物の期間対応を登録する', '対象年に取得した利用があります。実際の作業目的と期間を対応付けます。', 'high')
     missingFacts.push('AI履歴と税務単位を結ぶ期間付き分類ルール')
   }
-
   for (const unit of snapshot.taxUnits) {
-    currentPosition.push(lifecyclePosition(unit))
-    const journeyMode = unit.journeyMode ?? snapshot.profile.journeyMode
-    const monetizationStatus = unit.monetizationStatus ?? snapshot.profile.monetizationStatus
-
-    if (journeyMode === 'retrospective' && !hasEvent(snapshot, unit.id, 'development-started')) {
-      addAction(immediateActions, {
-        id: `reconstruct-history:${unit.id}`,
-        priority: 'high',
-        title: `${unit.name}の過去の節目を復元する`,
-        reason:
-          'デプロイ、販売、ファイル、AIセッション等から、履歴上の日時と実際の開始日を分けて残します。',
-        trigger: 'now',
-        taxUnitId: unit.id,
-      })
+    currentPosition.push(`${unit.name}は${lifecycleLabels[unit.lifecycleStatus]}です。`)
+    const journey = unit.journeyMode ?? snapshot.profile.journeyMode
+    const monetization = unit.monetizationStatus ?? snapshot.profile.monetizationStatus
+    if (journey === 'retrospective' && !hasEvent(unit.id, 'development-started')) {
+      add(`reconstruct-history:${unit.id}`, `${unit.name}の過去の節目を復元する`, 'ファイル・販売・デプロイ等の記録から、記録日時と実際の出来事の日を分けて残します。', 'high', unit.id)
       missingFacts.push(`${unit.name}の開発開始日`)
     }
-
-    if (monetizationStatus === 'earning') {
+    if (monetization === 'earning') {
       currentPosition.push(`${unit.name}は売上発生済みです。`)
-      if (!hasEvent(snapshot, unit.id, 'first-sale')) {
-        addAction(immediateActions, {
-          id: `first-sale:${unit.id}`,
-          priority: 'high',
-          title: `${unit.name}の初回売上日を記録する`,
-          reason: '制作・公開段階と実際に売上が生じた段階を区別するためです。',
-          trigger: 'now',
-          taxUnitId: unit.id,
-        })
+      if (!hasEvent(unit.id, 'first-sale')) {
+        add(`first-sale:${unit.id}`, `${unit.name}の初回売上日を記録する`, '公開予定と実際の売上発生を区別します。', 'high', unit.id)
         missingFacts.push(`${unit.name}の初回売上日`)
       }
-    } else if (monetizationStatus === 'planned') {
-      currentPosition.push(`${unit.name}はこれから収益化する予定です。`)
-    } else {
-      currentPosition.push(`${unit.name}の収益化方針は未定です。`)
-    }
-
+    } else if (monetization === 'planned') currentPosition.push(`${unit.name}はこれから収益化する予定です。`)
     if (unit.usageMode === 'undecided') {
-      addAction(immediateActions, {
-        id: `usage-mode:${unit.id}`,
-        priority: 'high',
-        title: `${unit.name}を誰が使うか整理する`,
-        reason: '自己利用、外部提供、両方のいずれかが未確認です。',
-        trigger: 'now',
-        taxUnitId: unit.id,
-      })
+      add(`usage-mode:${unit.id}`, `${unit.name}を誰が使うか整理する`, '自己利用・外部提供・両方のいずれかを確認します。', 'high', unit.id)
       missingFacts.push(`${unit.name}の利用形態`)
-    } else if (unit.usageMode === 'internal') {
-      currentPosition.push(`${unit.name}は自己利用を目的としています。`)
-    } else if (unit.usageMode === 'external') {
-      currentPosition.push(`${unit.name}は外部公開・提供を目的としています。`)
     } else {
-      currentPosition.push(`${unit.name}は自己利用と外部提供の両方を目的としています。`)
-      if (unit.sameAsExternalVersion === 'undecided' || !unit.sameAsExternalVersion) {
-        missingFacts.push(`${unit.name}の自己利用版と外部提供版の資産境界`)
-      }
+      currentPosition.push(`${unit.name}は${unit.usageMode === 'internal' ? '自己利用' : unit.usageMode === 'external' ? '外部公開・提供' : '自己利用と外部提供の両方'}を目的としています。`)
+      if (unit.usageMode === 'mixed' && (!unit.sameAsExternalVersion || unit.sameAsExternalVersion === 'undecided')) missingFacts.push(`${unit.name}の自己利用版と外部提供版の資産境界`)
     }
-
-    if (
-      ['prototype', 'developing', 'evaluating', 'improving'].includes(unit.lifecycleStatus) &&
-      !unit.completionCriteria?.trim()
-    ) {
-      addAction(immediateActions, {
-        id: `completion:${unit.id}`,
-        priority: 'high',
-        title: `${unit.name}の完成・正式採用条件を記録する`,
-        reason: 'テストと正式利用を区別できるよう、実際の開発判断を言語化します。',
-        trigger: 'now',
-        taxUnitId: unit.id,
-      })
+    if (['prototype', 'developing', 'evaluating', 'improving'].includes(unit.lifecycleStatus) && !unit.completionCriteria?.trim()) {
+      add(`completion:${unit.id}`, `${unit.name}の完成・正式採用条件を記録する`, '試験と正式利用を区別できるよう、実際の開発判断を残します。', 'high', unit.id)
       missingFacts.push(`${unit.name}の完成・正式採用条件`)
     }
-
-    const needsInternalEvent = unit.usageMode === 'internal' || unit.usageMode === 'mixed'
-    if (needsInternalEvent && !hasEvent(snapshot, unit.id, 'internal-use-started')) {
-      addAction(eventTriggeredActions, {
-        id: `internal-use:${unit.id}`,
-        priority: 'high',
-        title: `${unit.name}を実作業へ正式採用した日を記録する`,
-        reason: '評価利用と自己業務での正式利用を区別するためです。',
-        trigger: 'event',
-        taxUnitId: unit.id,
-      })
-      if (['in-use', 'maintaining', 'improving', 'retired'].includes(unit.lifecycleStatus)) {
-        missingFacts.push(`${unit.name}の自己利用開始日と証拠`)
-      }
+    for (const [mode, event, id, title, missing] of [
+      ['internal', 'internal-use-started', 'internal-use', '実作業へ正式採用した日', '自己利用開始日と証拠'],
+      ['external', 'external-released', 'external-release', '外部公開・提供した日', '外部提供開始日と証拠'],
+    ] as const) {
+      if ((unit.usageMode !== mode && unit.usageMode !== 'mixed') || hasEvent(unit.id, event)) continue
+      if (unit.lifecycleStatus !== 'abandoned' && unit.lifecycleStatus !== 'retired') add(`${id}:${unit.id}`, `${unit.name}の${title}を記録する`, '予定・試験と実際の利用開始を区別します。', 'high', unit.id, 'event')
+      if (['in-use', 'maintaining', 'improving', 'retired'].includes(unit.lifecycleStatus)) missingFacts.push(`${unit.name}の${missing}`)
     }
-
-    const needsExternalEvent = unit.usageMode === 'external' || unit.usageMode === 'mixed'
-    if (needsExternalEvent && !hasEvent(snapshot, unit.id, 'external-released')) {
-      addAction(eventTriggeredActions, {
-        id: `external-release:${unit.id}`,
-        priority: 'high',
-        title: `${unit.name}を外部公開・提供した日を記録する`,
-        reason: '公開予定と実際の提供開始を区別するためです。',
-        trigger: 'event',
-        taxUnitId: unit.id,
-      })
-      if (['in-use', 'maintaining', 'improving', 'retired'].includes(unit.lifecycleStatus)) {
-        missingFacts.push(`${unit.name}の外部提供開始日と証拠`)
-      }
-    }
-
-    if (
-      unit.unitType === 'improvement-plan' &&
-      !hasEvent(snapshot, unit.id, 'improvement-started')
-    ) {
-      addAction(immediateActions, {
-        id: `improvement-start:${unit.id}`,
-        priority: 'medium',
-        title: `${unit.name}の改良開始を記録する`,
-        reason: '一つの改良計画として集計する期間を明確にします。',
-        trigger: 'now',
-        taxUnitId: unit.id,
-      })
+    if (unit.unitType === 'improvement-plan' && !hasEvent(unit.id, 'improvement-started')) {
+      add(`improvement-start:${unit.id}`, `${unit.name}の改良開始を記録する`, '稼働版とは別に、一つの改良計画の対象期間を記録します。', 'medium', unit.id)
       missingFacts.push(`${unit.name}の改良開始日`)
     }
-
-    if (unit.predecessorId && !hasEvent(snapshot, unit.predecessorId, 'retired')) {
-      addAction(eventTriggeredActions, {
-        id: `predecessor-retirement:${unit.id}`,
-        priority: 'medium',
-        title: `${unit.name}への移行時に旧版の利用終了を記録する`,
-        reason: '旧版を実際に使い続けるかどうかと、二重処理がないことを確認するためです。',
-        trigger: 'event',
-        taxUnitId: unit.id,
-      })
+    if (unit.predecessorId) {
+      currentPosition.push(`${unit.name}には前身の制作物があります。旧版の継続利用・終了と原価承継は別の事実であり、自動で終了・振替しません。`)
     }
   }
-
-  if (!snapshot.profile.hasBookkeeping) {
-    addAction(immediateActions, {
-      id: 'start-bookkeeping',
-      priority: 'high',
-      title: '月次の帳簿と証拠保存を始める',
-      reason: '支払額、配賦、直接費、供用等を同じ基準で継続記録するためです。',
-      trigger: 'now',
-    })
+  const equipment = snapshot.equipment.filter((item) => item.acquiredOn <= `${year}-12-31`)
+  const home = snapshot.homeCosts.filter((item) => item.month.startsWith(`${year}-`))
+  const direct = snapshot.directCosts.filter((item) => item.incurredOn.startsWith(`${year}-`))
+  for (const item of equipment) {
+    if (!item.evidenceIds.length) missingFacts.push(`${item.name}の購入・転用証拠`)
+    if (item.convertedFromPrivate && item.openingUnamortizedBalanceJpy === undefined) missingFacts.push(`${item.name}の業務転用時未償却残高`)
+    if (!snapshot.equipmentMethods?.some((method) => method.equipmentId === item.id && method.taxYear === year)) missingFacts.push(`${item.name}の${year}年の計算方法・条件`)
+  }
+  for (const item of home) {
+    if (!item.basis.trim() || !item.rationale.trim()) missingFacts.push(`${item.month} ${item.category}の按分根拠`)
+    if (!item.evidenceIds.length) missingFacts.push(`${item.month} ${item.category}の証拠`)
+  }
+  const hasRelevantRecords = equipment.length > 0 || home.length > 0 || direct.length > 0 || Boolean(context.hasRelevantAiUsage) || snapshot.lifecycleEvents.some((event) => event.occurredOn.startsWith(`${year}-`))
+  if (hasRelevantRecords && !snapshot.profile.hasBookkeeping) {
+    add('start-bookkeeping', '月次の帳簿と証拠保存を始める', '記録した支払・配分・出来事と、対応する根拠を継続して残します。', 'high')
     missingFacts.push('月次帳簿')
   }
-
-  if (
-    (presence.find((row) => row.category === 'equipment')?.status ??
-      (snapshot.equipment.length ? 'has-records' : 'unreviewed')) === 'unreviewed'
-  ) {
-    addAction(immediateActions, {
-      id: 'review-equipment',
-      priority: 'medium',
-      title: 'パソコン・GPU機器等の利用状況を確認する',
-      reason: '該当する設備があれば、購入、転用、利用割合と役割を記録します。',
-      trigger: 'now',
-    })
-    missingFacts.push('開発に使用する設備の有無')
-  } else {
-    for (const item of snapshot.equipment) {
-      if (!item.usefulLifeYears) missingFacts.push(`${item.name}の耐用年数候補`)
-      if (!item.evidenceIds.length) missingFacts.push(`${item.name}の購入・転用証拠`)
-      if (item.convertedFromPrivate && item.openingUnamortizedBalanceJpy === undefined) {
-        missingFacts.push(`${item.name}の業務転用時未償却残高`)
-      }
-    }
-  }
-
-  if (
-    (presence.find((row) => row.category === 'home')?.status ??
-      (snapshot.homeCosts.length ? 'has-records' : 'unreviewed')) === 'unreviewed'
-  ) {
-    addAction(immediateActions, {
-      id: 'review-home-costs',
-      priority: 'medium',
-      title: '家賃・電気・通信の業務利用を確認する',
-      reason: '該当する費用があれば、面積・時間・消費電力等の一貫した根拠を記録します。',
-      trigger: 'now',
-    })
-    missingFacts.push('自宅関連費の有無と按分根拠')
-  } else {
-    for (const cost of snapshot.homeCosts) {
-      if (!cost.basis.trim() || !cost.rationale.trim())
-        missingFacts.push(`${cost.month} ${cost.category}の按分根拠`)
-      if (!cost.evidenceIds.length) missingFacts.push(`${cost.month} ${cost.category}の証拠`)
-    }
-  }
-
-  if (snapshot.evidence.length === 0) {
-    // Evidence remains required independently of annual presence declarations.
-    addAction(immediateActions, {
-      id: 'register-evidence',
-      priority: 'high',
-      title: 'Git以外も含めて証拠を登録する',
-      reason:
-        '請求書、カード明細、デプロイ、ファイル、スクリーンショット、作業メモ等を利用できます。',
-      trigger: 'now',
-    })
+  if (hasRelevantRecords && snapshot.evidence.length === 0) {
+    add('register-evidence', 'Git以外も含めて証拠を登録する', '請求書、カード明細、デプロイ、スクリーンショット、作業メモ等を利用できます。', 'high')
     missingFacts.push('根拠資料')
   }
-
-  const readinessChecks = [
-    snapshot.taxUnits.length > 0,
-    snapshot.taxUnits.length === 0 || snapshot.projectRules.length > 0,
-    snapshot.taxUnits.length > 0 &&
-      snapshot.taxUnits.every((unit) => unit.usageMode !== 'undecided'),
-    snapshot.taxUnits.length > 0 &&
-      snapshot.taxUnits.every(
-        (unit) =>
-          !['prototype', 'developing', 'evaluating', 'improving'].includes(unit.lifecycleStatus) ||
-          Boolean(unit.completionCriteria?.trim()),
-      ),
-    snapshot.taxUnits.length > 0 &&
-      snapshot.taxUnits.every((unit) => {
-        if (!['in-use', 'maintaining', 'improving', 'retired'].includes(unit.lifecycleStatus))
-          return true
-        const internalReady =
-          !['internal', 'mixed'].includes(unit.usageMode) ||
-          hasEvent(snapshot, unit.id, 'internal-use-started')
-        const externalReady =
-          !['external', 'mixed'].includes(unit.usageMode) ||
-          hasEvent(snapshot, unit.id, 'external-released')
-        return internalReady && externalReady
-      }),
-    snapshot.profile.hasBookkeeping,
-    snapshot.equipment.length > 0 &&
-      snapshot.equipment.every(
-        (item) =>
-          Boolean(item.usefulLifeYears) &&
-          item.evidenceIds.length > 0 &&
-          (!item.convertedFromPrivate || item.openingUnamortizedBalanceJpy !== undefined),
-      ),
-    snapshot.homeCosts.length > 0 &&
-      snapshot.homeCosts.every(
-        (cost) =>
-          Boolean(cost.basis.trim()) &&
-          Boolean(cost.rationale.trim()) &&
-          cost.evidenceIds.length > 0,
-      ),
-    snapshot.evidence.length > 0,
-  ]
-
-  return {
-    currentPosition: unique(currentPosition),
-    immediateActions,
-    eventTriggeredActions,
-    missingFacts: unique(missingFacts),
-    readiness: {
-      confirmed: readinessChecks.filter(Boolean).length,
-      total: readinessChecks.length,
-    },
-  }
+  return { currentPosition: unique(currentPosition), immediateActions, eventTriggeredActions, missingFacts: unique(missingFacts) }
 }

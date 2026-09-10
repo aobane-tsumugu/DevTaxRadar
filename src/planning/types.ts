@@ -5,7 +5,6 @@ export type JourneyMode = 'early' | 'retrospective'
 export type IncomeCategory = 'undecided' | 'miscellaneous' | 'business'
 export type FilingType = 'undecided' | 'white' | 'blue'
 export type MonetizationStatus = 'none' | 'planned' | 'earning'
-
 export type PlanningProfile = {
   taxYear: number
   journeyMode: JourneyMode
@@ -16,29 +15,10 @@ export type PlanningProfile = {
   hasBookkeeping: boolean
   notes?: string
 }
-
 export type UsageMode = 'internal' | 'external' | 'mixed' | 'undecided'
-export type RevenueModel =
-  | 'sales'
-  | 'subscription'
-  | 'advertising'
-  | 'affiliate'
-  | 'efficiency'
-  | 'oss'
-  | 'other'
-  | 'undecided'
+export type RevenueModel = 'sales' | 'subscription' | 'advertising' | 'affiliate' | 'efficiency' | 'oss' | 'other' | 'undecided'
 export type TaxUnitType = 'new-software' | 'improvement-plan' | 'sales-production'
-export type LifecycleStatus =
-  | 'idea'
-  | 'prototype'
-  | 'developing'
-  | 'evaluating'
-  | 'in-use'
-  | 'maintaining'
-  | 'improving'
-  | 'retired'
-  | 'abandoned'
-
+export type LifecycleStatus = 'idea' | 'prototype' | 'developing' | 'evaluating' | 'in-use' | 'maintaining' | 'improving' | 'retired' | 'abandoned'
 export type TaxUnitRecord = {
   id: string
   name: string
@@ -53,15 +33,7 @@ export type TaxUnitRecord = {
   sameAsExternalVersion?: 'yes' | 'no' | 'undecided'
   notes?: string
 }
-
-export type ProjectClassification =
-  | 'new-development'
-  | 'maintenance'
-  | 'feature-addition'
-  | 'general-learning'
-  | 'private'
-  | 'unclassified'
-
+export type ProjectClassification = 'new-development' | 'maintenance' | 'feature-addition' | 'general-learning' | 'private' | 'unclassified'
 export type ProjectRuleRecord = {
   id: string
   projectKey: string
@@ -72,17 +44,7 @@ export type ProjectRuleRecord = {
   classification: ProjectClassification
   reason?: string
 }
-
-export type LifecycleEventType =
-  | 'development-started'
-  | 'evaluation-started'
-  | 'internal-use-started'
-  | 'external-released'
-  | 'first-sale'
-  | 'improvement-started'
-  | 'retired'
-  | 'abandoned'
-
+export type LifecycleEventType = 'development-started' | 'evaluation-started' | 'internal-use-started' | 'external-released' | 'first-sale' | 'improvement-started' | 'retired' | 'abandoned'
 export type LifecycleEventRecord = {
   id: string
   taxUnitId: string
@@ -92,7 +54,6 @@ export type LifecycleEventRecord = {
   evidenceIds: string[]
   note?: string
 }
-
 export type EquipmentType = 'pc' | 'gpu' | 'dgx' | 'server' | 'desk' | 'peripheral' | 'other'
 export type EquipmentRecord = {
   id: string
@@ -113,12 +74,9 @@ export type EquipmentRecord = {
   projectAllocationRatio: number
   evidenceIds: string[]
 }
-
 export type HomeCostCategory = 'rent' | 'electricity' | 'internet'
-export type HomeCostMethod =
-  'area' | 'area-time' | 'meter' | 'watt-hour' | 'usage-time' | 'fixed-ratio'
+export type HomeCostMethod = 'area' | 'area-time' | 'meter' | 'watt-hour' | 'usage-time' | 'fixed-ratio'
 export type CostTreatment = 'direct' | 'shared' | 'general'
-
 export type HomeCostRecord = {
   id: string
   month: string
@@ -135,9 +93,7 @@ export type HomeCostRecord = {
   treatment: CostTreatment
   evidenceIds: string[]
 }
-
-export type DirectCostType =
-  'outsource' | 'material' | 'cloud' | 'domain' | 'license' | 'old-version-balance' | 'other'
+export type DirectCostType = 'outsource' | 'material' | 'cloud' | 'domain' | 'license' | 'old-version-balance' | 'other'
 export type DirectCostRecord = {
   id: string
   targets?: AllocationTarget[]
@@ -151,20 +107,8 @@ export type DirectCostRecord = {
   note?: string
   evidenceIds: string[]
 }
-
 export type EvidenceStrength = 'automatic' | 'external' | 'self-recorded'
-export type EvidenceType =
-  | 'deployment'
-  | 'sale-page'
-  | 'store-release'
-  | 'first-use'
-  | 'file'
-  | 'screenshot'
-  | 'receipt'
-  | 'card-statement'
-  | 'memo'
-  | 'ai-session'
-  | 'other'
+export type EvidenceType = 'deployment' | 'sale-page' | 'store-release' | 'first-use' | 'file' | 'screenshot' | 'receipt' | 'card-statement' | 'memo' | 'ai-session' | 'other'
 export type EvidenceRecord = {
   id: string
   evidenceType: EvidenceType
@@ -175,7 +119,6 @@ export type EvidenceRecord = {
   note: string
   taxUnitId?: string
 }
-
 export type DecisionRecord = {
   id: string
   taxUnitId: string
@@ -188,7 +131,6 @@ export type DecisionRecord = {
   createdAt: string
   confirmedAt?: string
 }
-
 export type PlanningSnapshot = {
   costPresence?: CostPresenceRecord[]
   equipmentMethods?: EquipmentAnnualMethod[]
@@ -203,7 +145,6 @@ export type PlanningSnapshot = {
   evidence: EvidenceRecord[]
   decisions: DecisionRecord[]
 }
-
 export type ActionItem = {
   id: string
   priority: 'high' | 'medium' | 'low'
@@ -212,65 +153,16 @@ export type ActionItem = {
   trigger: 'now' | 'event'
   taxUnitId?: string
 }
-
 export type Diagnosis = {
   currentPosition: string[]
   immediateActions: ActionItem[]
   eventTriggeredActions: ActionItem[]
   missingFacts: string[]
-  readiness: { confirmed: number; total: number }
 }
-
-export type CostContribution = {
-  sourceType: 'equipment' | 'home' | 'direct'
-  sourceId: string
-  taxUnitId?: string
-  grossAmountJpy: number
-  businessAmountJpy: number
-  allocatedAmountJpy: number
-  privateAmountJpy: number
-  unallocatedAmountJpy: number
-  treatment: CostTreatment
-  warnings: string[]
-}
-
-export type PlanningLedger = {
-  year: number
-  contributions: CostContribution[]
-  totals: {
-    grossAmountJpy: number
-    businessAmountJpy: number
-    allocatedAmountJpy: number
-    privateAmountJpy: number
-    unallocatedAmountJpy: number
-  }
-  byTaxUnit: Array<{
-    taxUnitId: string
-    name: string
-    amountJpy: number
-    candidate: string
-    missingFacts: string[]
-  }>
-}
-
 export function emptyPlanningSnapshot(taxYear = new Date().getFullYear()): PlanningSnapshot {
   return {
     version: 1,
-    profile: {
-      taxYear,
-      journeyMode: 'early',
-      incomeCategory: 'undecided',
-      filingType: 'undecided',
-      monetizationStatus: 'planned',
-      hasBookkeeping: false,
-    },
-    taxUnits: [],
-    projectRules: [],
-    lifecycleEvents: [],
-    equipment: [],
-    homeCosts: [],
-    directCosts: [],
-    evidence: [],
-    decisions: [],
+    profile: { taxYear, journeyMode: 'early', incomeCategory: 'undecided', filingType: 'undecided', monetizationStatus: 'planned', hasBookkeeping: false },
+    taxUnits: [], projectRules: [], lifecycleEvents: [], equipment: [], homeCosts: [], directCosts: [], evidence: [], decisions: [],
   }
 }
