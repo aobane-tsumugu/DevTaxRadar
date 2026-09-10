@@ -1,3 +1,5 @@
+import { readUsageObservations } from './usageObservations.js'
+import { observationGroupKey, type UsageObservation } from '../core/usageGranularity.js'
 import { readSourceCaptureContext } from './observationRecords.js'
 import type { SourceCaptureContext } from '../accounting/observationRecord.js'
 import { captureWarnings } from '../core/captureProvenance.js'
@@ -21,7 +23,7 @@ import { selectContractUsage } from '../core/contractUsage.js'
 import { localDateFromTimestamp, resolvedTimeZone } from '../adapters/localTime.js'
 import {
   getConfiguration, getDatabase, getLastScanTimeZones, getUsageOverview,
-  getUsageSessions, type UsageSessionRow,
+  getUsageSessions,
 } from './database.js'
 import { contractCoversMonth, hasAnyContractPeriod } from './contractPeriod.js'
 import { getPlanningSnapshot } from './planningRepository.js'
@@ -81,7 +83,7 @@ function displayProject(projectKey: string, projectLabel: string | null,
     safeLocalLabel(projectLabel, `Project ${projectKey.slice(-6)}`)
 }
 
-type AssignedSession = UsageSessionRow & { assignment: SessionAssignment }
+type AssignedSession = UsageObservation & { assignment: SessionAssignment }
 type ProjectMonthGroup = {
   provider: UsageProvider; month: string; projectKey: string; taxUnitId: string | null
   classification: ProjectClassification; projectLabel: string | null; model: string | null
@@ -95,9 +97,13 @@ function groupKey(group: Pick<ProjectMonthGroup, 'provider' | 'month' | 'project
 
 function groupAssignedSessions(sessions: AssignedSession[]): ProjectMonthGroup[] {
   const groups = new Map<string, ProjectMonthGroup>()
+  const seenSessions = new Set<string>()
   for (const session of sessions) {
     const key = groupKey({ ...session, ...session.assignment })
     const current = groups.get(key)
+    const sessionIdentity = JSON.stringify([key, observationGroupKey(session)])
+    const isNewSession = !seenSessions.has(sessionIdentity)
+    seenSessions.add(sessionIdentity)
     if (!current) {
       groups.set(key, {
         provider: session.provider, month: session.month, projectKey: session.projectKey,
@@ -110,7 +116,7 @@ function groupAssignedSessions(sessions: AssignedSession[]): ProjectMonthGroup[]
       })
       continue
     }
-    current.sessions++
+    if (isNewSession) current.sessions++
     current.messageCount += session.messageCount
     current.inputTokens += session.inputTokens
     current.outputTokens += session.outputTokens
@@ -206,12 +212,12 @@ export function buildDashboard(year?: number): DashboardData {
 }
 
 export function readDashboardObservation(db: DatabaseSync = getDatabase()): {
-  sessions: UsageSessionRow[]
+  sessions: UsageObservation[]
   overview: ReturnType<typeof getUsageOverview>
   lastScanTimeZones: Record<string, string>
   sourceCaptures?: SourceCaptureContext[]
 } {
-  const sessions = getUsageSessions(db)
+  const sessions = readUsageObservations(db, getUsageSessions(db))
   return {
     sessions,
     sourceCaptures: readSourceCaptureContext(db, sessions),
@@ -284,8 +290,11 @@ function buildDashboardFromSnapshot(year?: number,
   }
   const coveredSessions = assigned.filter(withinContract)
   const outOfContractSessions = assigned.filter((session) => !withinContract(session))
-  const classifiedSessions = assigned.filter((session) => session.assignment.classification !== 'unclassified').length
-  const mappedSessions = assigned.filter((session) => session.assignment.ruleId !== null).length
+  const sessionIds = new Set(assigned.map(observationGroupKey))
+  const unclassifiedIds = new Set(assigned.filter((row) => row.assignment.classification === 'unclassified').map(observationGroupKey))
+  const unmappedIds = new Set(assigned.filter((row) => row.assignment.ruleId === null).map(observationGroupKey))
+  const classifiedSessions = sessionIds.size - unclassifiedIds.size
+  const mappedSessions = sessionIds.size - unmappedIds.size
   const byProviderMonth = new Map<string, ProjectMonthGroup[]>()
   for (const group of groupAssignedSessions(coveredSessions)) {
     const key = `${group.provider}:${group.month}`
@@ -457,12 +466,16 @@ function buildDashboardFromSnapshot(year?: number,
     firstObservedAt?: string; lastObservedAt?: string; firstObservedMonth: string; lastObservedMonth: string
     providers: Array<'Claude Code' | 'Codex'>
   }>()
+  const projectSessionIds = new Map<string, Set<string>>()
   for (const session of assigned) {
+    const identities = projectSessionIds.get(session.projectKey) ?? new Set<string>()
+    identities.add(observationGroupKey(session))
+    projectSessionIds.set(session.projectKey, identities)
     const current = projectSummaries.get(session.projectKey)
     projectSummaries.set(session.projectKey, {
       name: displayProject(session.projectKey, session.projectLabel, session.assignment.taxUnitId, taxUnitById),
       folder: safeLocalLabel(session.projectLabel, `Project ${session.projectKey.slice(-6)}`),
-      sessions: (current?.sessions ?? 0) + 1, projectKey: session.projectKey,
+      sessions: identities.size, projectKey: session.projectKey,
       firstObservedAt: [current?.firstObservedAt, session.startedAt].filter((value): value is string => Boolean(value)).sort()[0],
       lastObservedAt: [current?.lastObservedAt, session.endedAt].filter((value): value is string => Boolean(value)).sort().at(-1),
       firstObservedMonth: [current?.firstObservedMonth, session.month].filter(Boolean).sort()[0]!,
@@ -503,7 +516,7 @@ function buildDashboardFromSnapshot(year?: number,
   const lastScan = overview.recentScans.find((scan) => scan.status === 'complete')
   const relevantSessions = assigned.filter((row) => row.month.startsWith(`${planning.profile.taxYear}-`))
   const relevantInputs = inputs.filter((row) => row.billingMonth.startsWith(`${planning.profile.taxYear}-`))
-  const unclassified = relevantSessions.filter((row) => row.assignment.classification === 'unclassified').length
+  const unclassified = new Set(relevantSessions.filter((row) => row.assignment.classification === 'unclassified').map(observationGroupKey)).size
   const hasLegacyRatio = relevantInputs.some((row) => row.usesLegacyRatio && (row.monthlyFeeJpy === null || row.monthlyFeeJpy > 0))
   const staleTimeZones = [...new Set(Object.entries(lastScanTimeZones)
     .filter(([key]) => relevantSessions.some((row) => key === (row.sourceId === `local-${row.provider}` ? row.provider : `${row.sourceId}:${row.provider}`)))
@@ -518,8 +531,8 @@ function buildDashboardFromSnapshot(year?: number,
     meta: {
       source: 'local', sessionCount: overview.providers.reduce((sum, row) => sum + row.sessions, 0),
       lastSynced: typeof lastScan?.completedAt === 'string' ? new Date(lastScan.completedAt).toLocaleString('ja-JP') : '未走査',
-      mappedRate: sessions.length === 0 ? 0 : Math.round(mappedSessions / sessions.length * 100),
-      classifiedRate: sessions.length === 0 ? 0 : Math.round(classifiedSessions / sessions.length * 100),
+      mappedRate: sessionIds.size === 0 ? 0 : Math.round(mappedSessions / sessionIds.size * 100),
+      classifiedRate: sessionIds.size === 0 ? 0 : Math.round(classifiedSessions / sessionIds.size * 100),
     },
     months, allocations,
     boundaries: configuredChargePeriods.some((period) => period.amountJpy === null) ? [] : boundaries,
