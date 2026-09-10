@@ -19,70 +19,43 @@ export type UsageSession = {
   confidence: 'high' | 'medium' | 'low'
 }
 
-export type AggregationDiagnostics = {
-  nonUtcTimestamps: number
-}
-
+export type AggregationDiagnostics = { nonUtcTimestamps: number }
 const confidenceByGrade = { A: 'high', B: 'medium', C: 'low' } as const
+const confidenceRank = { high: 0, medium: 1, low: 2 }
 
-/**
- * Folds message-level events into one row per session, project and month.
- * A session that crosses a month boundary stays split, because the monthly
- * fee is allocated per calendar month.
- */
-export function aggregateSessions(
-  events: NormalizedUsage[],
-  diagnostics?: AggregationDiagnostics,
-): UsageSession[] {
+/** Month summaries are for storage/listing; cost attribution can use the matching event cache. */
+export function aggregateSessions(events: NormalizedUsage[], diagnostics?: AggregationDiagnostics): UsageSession[] {
   const byKey = new Map<string, UsageSession>()
-
   for (const event of events) {
-    // Zサフィックスでない時刻が来ると文字列比較の順序が狂うため、検出できるようにしている
-    if (diagnostics && !event.observedAt.endsWith('Z')) {
-      diagnostics.nonUtcTimestamps += 1
-    }
-
-    const key = `${event.provider}:${event.sessionKey}:${event.projectKey}:${event.month}`
-    const current = byKey.get(key)
+    if (diagnostics && !event.observedAt.endsWith('Z')) diagnostics.nonUtcTimestamps++
+    const timestamp = new Date(event.observedAt)
+    if (!Number.isFinite(timestamp.getTime())) throw new Error('利用記録の時刻を確認してください。')
+    const observedAt = timestamp.toISOString()
+    const key = JSON.stringify([event.provider, event.sessionKey, event.projectKey, event.month])
     const outputTokens = event.outputTokens + event.reasoningTokens
-
+    const current = byKey.get(key)
     if (!current) {
       byKey.set(key, {
-        provider: event.provider,
-        sessionKey: event.sessionKey,
-        projectKey: event.projectKey,
-        month: event.month,
-        startedAt: event.observedAt,
-        endedAt: event.observedAt,
-        messageCount: 1,
-        projectLabel: event.projectLabel,
-        model: event.model,
-        localReference: event.localReference,
-        inputTokens: event.inputTokens,
-        outputTokens,
-        cacheReadTokens: event.cacheReadTokens,
-        cacheWriteTokens: event.cacheWriteTokens,
-        schemaVersion: event.schemaVersion,
+        provider: event.provider, sessionKey: event.sessionKey, projectKey: event.projectKey,
+        month: event.month, startedAt: observedAt, endedAt: observedAt, messageCount: 1,
+        projectLabel: event.projectLabel, model: event.model, localReference: event.localReference,
+        inputTokens: event.inputTokens, outputTokens, cacheReadTokens: event.cacheReadTokens,
+        cacheWriteTokens: event.cacheWriteTokens, schemaVersion: event.schemaVersion,
         confidence: confidenceByGrade[event.confidence],
       })
       continue
     }
-
-    current.messageCount += 1
+    current.messageCount++
     current.inputTokens += event.inputTokens
     current.outputTokens += outputTokens
     current.cacheReadTokens += event.cacheReadTokens
     current.cacheWriteTokens += event.cacheWriteTokens
-    if (event.observedAt < current.startedAt) current.startedAt = event.observedAt
-    if (event.observedAt > current.endedAt) current.endedAt = event.observedAt
+    if (observedAt < current.startedAt) current.startedAt = observedAt
+    if (observedAt > current.endedAt) current.endedAt = observedAt
     current.projectLabel ??= event.projectLabel
-    // First file wins. A session's rows normally live in one transcript file,
-    // so this records that file's hash. If a session were ever split across two
-    // files, only the first one discovered would be covered by change
-    // detection -- the walk order is not chronological, so which one that is
-    // is not defined.
     current.localReference ??= event.localReference
+    if (confidenceRank[confidenceByGrade[event.confidence]] > confidenceRank[current.confidence])
+      current.confidence = confidenceByGrade[event.confidence]
   }
-
   return [...byKey.values()]
 }

@@ -15,6 +15,8 @@ export type RecordedObservation = {
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  timePrecision?: 'instant' | 'interval' | 'unknown'
+  eventRef?: string
 }
 
 export type FileCapture = {
