@@ -1,3 +1,4 @@
+import { collapseObservations } from '../core/usageGranularity.js'
 import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
@@ -40,13 +41,15 @@ export function numericalObservations(rows: readonly RecordedObservation[]): Rec
     outputTokens: row.outputTokens,
     cacheReadTokens: row.cacheReadTokens,
     cacheWriteTokens: row.cacheWriteTokens,
+    ...(row.timePrecision ? { timePrecision: row.timePrecision } : {}),
+    ...(row.eventRef ? { eventRef: row.eventRef } : {}),
   })).map((row) => ({ row, order: canonical(row) }))
     .sort((a, b) => a.order.localeCompare(b.order))
     .map(({ row }) => row)
 }
 
 export function observationHash(rows: readonly RecordedObservation[]): string {
-  return digest(numericalObservations(rows))
+  return digest(collapseObservations(rows))
 }
 
 function captureKey(sourceId: string, provider: string): string {
