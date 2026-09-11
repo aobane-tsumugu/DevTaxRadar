@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
     paths: [.github/workflows/devtax-verification-workspace.yml]
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
 
 permissions:
   contents: read
@@ -17,20 +14,18 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.event_name == 'push' || github.event.workflow_run.id == 33948842127
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24.14.0
-      - name: Install the repository's locked dependencies
+      - name: Install locked dependencies
         run: npm ci
-      - name: Package isolated source and runtime, without credentials or personal data
+      - name: Package source and runtime without Git credentials or personal data
         shell: bash
         run: |
           set -euo pipefail
