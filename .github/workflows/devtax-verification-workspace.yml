@@ -1,0 +1,46 @@
+name: DevTax temporary verification workspace
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/devtax-verification-workspace.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devtax-verification-workspace
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - name: Install the repository's locked dependencies
+        run: npm ci
+      - name: Package isolated source and runtime, without credentials or personal data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p node-runtime/bin
+          cp "$(command -v node)" node-runtime/bin/node
+          printf '%s\n' "$GITHUB_SHA" > node-runtime/source-commit.txt
+          node --version > node-runtime/node-version.txt
+          npm --version > node-runtime/npm-version.txt
+          sha256sum package-lock.json > node-runtime/lockfile.sha256
+          git archive --format=tar HEAD > "$RUNNER_TEMP/devtax-workspace.tar"
+          tar -rf "$RUNNER_TEMP/devtax-workspace.tar" node_modules node-runtime
+          gzip "$RUNNER_TEMP/devtax-workspace.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devtax-workspace-${{ github.sha }}
+          path: ${{ runner.temp }}/devtax-workspace.tar.gz
+          retention-days: 1
+          if-no-files-found: error
