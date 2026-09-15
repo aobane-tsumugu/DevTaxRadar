@@ -25,7 +25,7 @@ jobs:
           node-version: 24.14.0
       - name: Install locked dependencies
         run: npm ci
-      - name: Package source and runtime without Git credentials or personal data
+      - name: Package current source and runtime for local verification
         shell: bash
         run: |
           set -euo pipefail
