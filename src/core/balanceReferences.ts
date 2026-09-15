@@ -115,7 +115,24 @@ export function checkBalanceReferences(
       movement.kind === 'transfer'
         ? [movement.fromAccountId, movement.toAccountId]
         : [movement.accountId]
-    if (ids.some((id) => accounts.has(id) && accounts.get(id)!.taxUnitId !== decision.taxUnitId))
+    // A registered predecessor/successor transfer uses the receiving unit's
+    // confirmed decision. Requiring both units to equal one decision made
+    // every cross-version transfer impossible. This does not approve its tax
+    // treatment or relax the existing source, year, amount or lot checks.
+    const from = movement.kind === 'transfer' ? accounts.get(movement.fromAccountId) : undefined
+    const to = movement.kind === 'transfer' ? accounts.get(movement.toAccountId) : undefined
+    const successorTransfer = Boolean(
+      from &&
+        to &&
+        from.taxUnitId !== to.taxUnitId &&
+        decision.taxUnitId === to.taxUnitId &&
+        planning.taxUnits.find((item) => item.id === to.taxUnitId)?.predecessorId ===
+          from.taxUnitId,
+    )
+    if (
+      !successorTransfer &&
+      ids.some((id) => accounts.has(id) && accounts.get(id)!.taxUnitId !== decision.taxUnitId)
+    )
       add(
         'movement',
         movement.id,
