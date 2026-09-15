@@ -932,16 +932,18 @@ export default function BalancesPage({
                 {movement.kind === 'addition' && (
                   <BalanceCostLinksEditor
                     movement={movement}
+                    snapshot={draft.snapshot}
                     taxUnitId={
                       draft.snapshot.accounts.find((row) => row.id === movement.accountId)
                         ?.taxUnitId
                     }
-                    onChange={(links, sourceIds) =>
+                    onChange={(links, sourceIds, amountJpy) =>
                       edit((s) => {
                         const row = s.movements[index]!
                         if (row.kind === 'addition') {
                           row.costAllocations = links
                           row.sourceIds = sourceIds
+                          if (amountJpy !== undefined) row.amountJpy = amountJpy
                         }
                       })
                     }
