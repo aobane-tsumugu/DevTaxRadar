@@ -1,3 +1,4 @@
+import { externalOpeningIssues } from './externalOpening.js'
 import type { BalanceSnapshot } from '../accounting/types.js'
 import type { PlanningSnapshot } from '../planning/types.js'
 import { decisionIsConfirmed } from './decisionConfirmation.js'
@@ -202,6 +203,8 @@ export function checkBalanceReferences(
         '未判断の制作物と対応する残高の制作物が一致しません。',
       )
   }
+  for (const issue of externalOpeningIssues(snapshot, planning))
+    add('pending', issue.recordId, issue.accountId, 'changed-answer', issue.message)
   return {
     engineVersion: 'balance-references/1',
     status: issues.length ? 'needs-review' : 'consistent',
