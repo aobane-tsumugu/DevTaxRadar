@@ -1,5 +1,7 @@
 name: DevTax temporary verification workspace
 
+# One verification workspace for the approved W06-W08 completion, 2026-09-16.
+# Source and dependencies stay in this private repository's short-lived artifact.
 on:
   push:
     branches: [main]
