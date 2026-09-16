@@ -40,13 +40,16 @@ jobs:
         run: |
           set +e
           failed=0
+          printf 'task\texit_status\telapsed_seconds\n' > verification/status.tsv
           for task in typecheck test lint format:check build privacy:check; do
             filename="${task//:/-}"
+            started=$SECONDS
             npm run "$task" > "verification/$filename.log" 2>&1
             status=$?
-            printf '%s\t%s\n' "$task" "$status" >> verification/status.tsv
+            printf '%s\t%s\t%s\n' "$task" "$status" "$((SECONDS-started))" >> verification/status.tsv
             if [ "$status" -ne 0 ]; then failed=1; fi
           done
+          cat verification/status.tsv >> "$GITHUB_STEP_SUMMARY"
           exit "$failed"
       - name: Package source and available runtime for local verification
         if: always()
