@@ -1,3 +1,4 @@
+import type { SourceAdjustmentRecord } from '../core/sourceAdjustments.js'
 import type { AllocationTarget } from './allocationTargets.js'
 import type { CostPresenceRecord } from './costPresence.js'
 import type { EquipmentAnnualMethod } from './equipmentMethods.js'
@@ -132,6 +133,7 @@ export type DecisionRecord = {
   confirmedAt?: string
 }
 export type PlanningSnapshot = {
+  sourceAdjustments?: SourceAdjustmentRecord[]
   costPresence?: CostPresenceRecord[]
   equipmentMethods?: EquipmentAnnualMethod[]
   version: 1

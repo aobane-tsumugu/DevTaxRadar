@@ -1,4 +1,4 @@
-import type { ExpenseSource } from '../accounting/costs.js'
+import type { ExpenseSource, ExpenseSourceKind } from '../accounting/costs.js'
 
 export type CurrencyConversion = {
   currency: string
@@ -16,10 +16,11 @@ export type SourceAdjustmentRecord = {
   /** Read pointer for the source, not an inferred tax-treatment year. */
   sourceYear: number
   sourceBasis: {
-    kind: ExpenseSource['kind']
+    kind: ExpenseSourceKind
     originalAmountJpy: number | null
     servicePeriod?: { startedOn: string; endedOn: string }
     acquiredOn?: string
+    incurredOn?: string
     contractId?: string
   }
   kind: 'refund' | 'correction'
@@ -115,7 +116,7 @@ export function validateSourceAdjustments(value: unknown): asserts value is Sour
       throw new Error('元費用を確認する年を指定してください。')
     years.add(item.sourceYear)
     if (years.size > 200) throw new Error('返金・訂正から参照する年度は200年分までです。')
-    if (!['refund', 'correction'].includes(String(item.kind))) throw new Error('返金と訂正を区別してください。')
+    if (typeof item.kind !== 'string' || !['refund', 'correction'].includes(item.kind)) throw new Error('返金と訂正を区別してください。')
     if (typeof item.amountJpy !== 'number' || !Number.isSafeInteger(item.amountJpy) || item.amountJpy === 0 ||
         (item.kind === 'refund' && item.amountJpy > 0)) throw new Error('返金は負の整数円、訂正は0以外の整数円で指定してください。')
     day(item.occurredOn)
@@ -123,7 +124,7 @@ export function validateSourceAdjustments(value: unknown): asserts value is Sour
         !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(item.recordedAt) ||
         !Number.isFinite(Date.parse(item.recordedAt))) throw new Error('記録日時と時間帯を指定してください。')
     day(item.recordedAt.slice(0, 10))
-    if (!['restate-original-cost', 'balance-reduction', 'undetermined'].includes(String(item.effect)))
+    if (typeof item.effect !== 'string' || !['restate-original-cost', 'balance-reduction', 'undetermined'].includes(item.effect))
       throw new Error('元費用の訂正・残高減少・保留を区別してください。')
     if (item.effect === 'balance-reduction') {
       if (item.amountJpy > 0) throw new Error('増額訂正を残高減少として扱うことはできません。')
@@ -133,9 +134,9 @@ export function validateSourceAdjustments(value: unknown): asserts value is Sour
     if (!Array.isArray(item.evidenceIds) || item.evidenceIds.length === 0 || item.evidenceIds.length > 100 ||
         new Set(item.evidenceIds).size !== item.evidenceIds.length) throw new Error('重複しない証拠参照を1件以上100件以内で指定してください。')
     item.evidenceIds.forEach((id) => text(id, 120, '証拠ID'))
-    keys(item.sourceBasis, ['kind', 'originalAmountJpy', 'servicePeriod', 'acquiredOn', 'contractId'], '元費用の確認内容')
+    keys(item.sourceBasis, ['kind', 'originalAmountJpy', 'servicePeriod', 'acquiredOn', 'incurredOn', 'contractId'], '元費用の確認内容')
     const basis = item.sourceBasis
-    if (!['subscription', 'equipment', 'home', 'direct', 'opening-balance'].includes(String(basis.kind)))
+    if (typeof basis.kind !== 'string' || !['subscription', 'equipment', 'home', 'direct', 'opening-balance'].includes(basis.kind))
       throw new Error('元費用の種類を確認してください。')
     if (basis.originalAmountJpy !== null &&
         (typeof basis.originalAmountJpy !== 'number' || !Number.isSafeInteger(basis.originalAmountJpy) || basis.originalAmountJpy < 0))
@@ -146,18 +147,20 @@ export function validateSourceAdjustments(value: unknown): asserts value is Sour
       if (basis.servicePeriod.startedOn > basis.servicePeriod.endedOn) throw new Error('対象期間が逆転しています。')
     }
     if (basis.acquiredOn !== undefined) day(basis.acquiredOn)
+    if (basis.incurredOn !== undefined) day(basis.incurredOn)
     if (basis.contractId !== undefined) text(basis.contractId, 500, '契約ID')
     if (item.conversion !== undefined && convertedYen(item.conversion as CurrencyConversion) !== Math.abs(item.amountJpy))
       throw new Error('記録した換算根拠と円額が一致しません。決済手数料等は別の費用として記録してください。')
   }
 }
 
-export function sourceAdjustmentBasis(source: Pick<ExpenseSource, 'kind' | 'originalAmountJpy' | 'servicePeriod' | 'acquiredOn' | 'contractId'>): SourceAdjustmentRecord['sourceBasis'] {
+export function sourceAdjustmentBasis(source: Pick<ExpenseSource, 'kind' | 'originalAmountJpy' | 'servicePeriod' | 'acquiredOn' | 'incurredOn' | 'contractId'>): SourceAdjustmentRecord['sourceBasis'] {
   return {
     kind: source.kind,
     originalAmountJpy: source.originalAmountJpy,
     ...(source.servicePeriod ? { servicePeriod: { startedOn: source.servicePeriod.startedOn, endedOn: source.servicePeriod.endedOn } } : {}),
     ...(source.acquiredOn ? { acquiredOn: source.acquiredOn } : {}),
+    ...(source.incurredOn ? { incurredOn: source.incurredOn } : {}),
     ...(source.contractId ? { contractId: source.contractId } : {}),
   }
 }
@@ -178,7 +181,7 @@ export function evaluateSourceAdjustments(
   for (const record of selected) {
     const messages: string[] = []
     if (JSON.stringify(sourceAdjustmentBasis(record.sourceBasis)) !== basis)
-      messages.push('記録時の原額・対象期間・契約と現在の元費用が異なります。確認内容を黙って更新しません。')
+      messages.push('記録時の原額・対象期間・発生日・契約と現在の元費用が異なります。確認内容を黙って更新しません。')
     if (evidenceIds && record.evidenceIds.some((id) => !evidenceIds.has(id)))
       messages.push('返金・訂正の証拠参照が現在の記録にありません。')
     if (record.kind === 'refund') refunds += -BigInt(record.amountJpy)

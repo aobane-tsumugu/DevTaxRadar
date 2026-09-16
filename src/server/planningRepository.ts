@@ -1,3 +1,4 @@
+import { readSourceAdjustments, writeSourceAdjustments } from './sourceAdjustmentsRepository.js'
 import { planningSnapshotSchema, planningSaveSchema, PlanningValidationError } from '../planning/schema.js'
 export { planningSnapshotSchema, planningSaveSchema, projectRulesSchema, PlanningValidationError } from '../planning/schema.js'
 export { planningMarkdown } from '../core/planningExport.js'
@@ -20,7 +21,8 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     income_category AS incomeCategory, filing_type AS filingType,
     activity_started_on AS activityStartedOn, monetization_status AS monetizationStatus,
     has_bookkeeping AS hasBookkeeping, notes FROM planning_profiles WHERE singleton_id = 1`).get() as Record<string, unknown> | undefined
-  if (!profile) return emptyPlanningSnapshot()
+  const sourceAdjustments = readSourceAdjustments(db)
+  if (!profile) return { ...emptyPlanningSnapshot(), ...(sourceAdjustments.length ? { sourceAdjustments } : {}) }
   const snapshot = {
     version: 1 as const,
     profile: { ...profile, activityStartedOn: optional(profile.activityStartedOn as string | null), notes: optional(profile.notes as string | null), hasBookkeeping: Boolean(profile.hasBookkeeping) },
@@ -72,6 +74,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
   }
   const costPresence = readCostPresence(db), equipmentMethods = readEquipmentMethods(db)
   return planningSnapshotSchema.parse({ ...snapshot,
+    ...(sourceAdjustments.length ? { sourceAdjustments } : {}),
     ...(costPresence.length ? { costPresence } : {}), ...(equipmentMethods.length ? { equipmentMethods } : {}),
   })
 }
@@ -80,6 +83,7 @@ export function savePlanningSnapshot(snapshot: PlanningSnapshot, db: DatabaseSyn
   const parsed = planningSaveSchema.parse(snapshot)
   db.exec('SAVEPOINT devtax_planning_write')
   try {
+    writeSourceAdjustments(db, parsed.sourceAdjustments)
     writeCostPresence(db, parsed.costPresence ?? [])
     db.exec('DELETE FROM planning_equipment_methods')
     for (const table of ['planning_decisions', 'planning_lifecycle_events', 'planning_project_rules', 'planning_equipment', 'planning_home_costs', 'planning_direct_costs', 'planning_evidence', 'planning_tax_units', 'planning_profiles']) db.exec(`DELETE FROM ${table}`)

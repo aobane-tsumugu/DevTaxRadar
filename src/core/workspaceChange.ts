@@ -37,7 +37,7 @@ export function isNewWorkspace(input: Contents, observedSessionCount: number): b
     planning.directCosts.length === 0 && planning.evidence.length === 0 &&
     planning.lifecycleEvents.length === 0 && planning.decisions.length === 0 &&
     planning.projectRules.length === 0 && !(planning.costPresence?.length) &&
-    !(planning.equipmentMethods?.length) && configuration.monthlyCharges.length === 0 &&
+    !(planning.sourceAdjustments?.length) && !(planning.equipmentMethods?.length) && configuration.monthlyCharges.length === 0 &&
     !(configuration.chargePeriods?.length) &&
     !Object.values(configuration.charges).some((amount) => amount !== null && amount > 0)
 }

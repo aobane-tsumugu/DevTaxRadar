@@ -1,3 +1,4 @@
+import { readSourceAdjustments } from './sourceAdjustmentsRepository.js'
 import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
@@ -29,10 +30,8 @@ export const workspaceSaveSchema = z
 
 export class WorkspaceConflict extends Error {
   readonly currentRevision: number
-  constructor(currentRevision: number) {
-    super(
-      '別の保存で内容が変わっています。入力は残しています。最新の内容を確認してから変更を反映してください。',
-    )
+  constructor(currentRevision: number, message = '別の保存で内容が変わっています。入力は残しています。最新の内容を確認してから変更を反映してください。') {
+    super(message)
     this.currentRevision = currentRevision
   }
 }
@@ -95,6 +94,8 @@ export function saveWorkspace<T>(
       return result
     }
     if (parsed.expectedRevision !== revision) throw new WorkspaceConflict(revision)
+    if (parsed.planning.sourceAdjustments === undefined && readSourceAdjustments(db).length > 0)
+      throw new WorkspaceConflict(revision, '保存済みの返金・訂正記録を含む最新の計画を読み直してください。記録を削除する場合は明示的に空の一覧を指定します。')
     beforeWrite?.(parsed)
     saveConfiguration(parsed.configuration, db)
     savePlanningSnapshot(parsed.planning, db)

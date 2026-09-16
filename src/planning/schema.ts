@@ -1,3 +1,4 @@
+import { sourceAdjustmentsSchema } from './sourceAdjustmentSchema.js'
 import { allocationTargetsSchema } from './allocationTargets.js'
 import { planningDateIssues } from './calendarDates.js'
 import { z } from 'zod'
@@ -239,8 +240,10 @@ const decisionSchema = z
       })
   })
 
+// Manual and imported adjustments use the same validator as persistence.
 export const planningSnapshotSchema = z
   .object({
+    sourceAdjustments: sourceAdjustmentsSchema.optional(),
     costPresence: costPresenceRecordsSchema.optional(),
     equipmentMethods: equipmentMethodsSchema.optional(),
     version: z.literal(1),

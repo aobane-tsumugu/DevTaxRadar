@@ -1,4 +1,7 @@
 import { z } from 'zod'
+import { sourceAdjustmentsSchema } from '../planning/sourceAdjustmentSchema.js'
+
+export type ExpenseSourceKind = 'subscription' | 'equipment' | 'home' | 'direct' | 'opening-balance'
 import { validIsoCalendarDate } from '../core/chargePeriods.js'
 
 const id = z.string().trim().min(1).max(500)
@@ -28,6 +31,8 @@ export const expenseSourceSchema = z
     servicePeriod: costPeriodSchema.optional(),
     billedOn: date.optional(),
     acquiredOn: date.optional(),
+    incurredOn: date.optional(),
+    adjustments: sourceAdjustmentsSchema.optional(),
     paidOn: date.optional(),
     contractId: id.optional(),
     evidenceIds: z.array(id),
@@ -35,6 +40,9 @@ export const expenseSourceSchema = z
   })
   .strict()
   .superRefine((source, context) => {
+    for (const [index, record] of (source.adjustments ?? []).entries())
+      if (record.sourceId !== source.id)
+        context.addIssue({ code: 'custom', path: ['adjustments', index, 'sourceId'], message: '返金・訂正の元費用が一致しません。' })
     if ((source.originalAmountJpy === null) !== Boolean(source.unknownOriginalAmountReasons))
       context.addIssue({
         code: 'custom',

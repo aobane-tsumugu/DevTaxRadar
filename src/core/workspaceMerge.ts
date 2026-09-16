@@ -214,5 +214,15 @@ export function mergeWorkspaceDrafts(
       (value) => `${value.taxYear}:${value.category}`,
     )
   }
+  if (base.planning.sourceAdjustments || local.planning.sourceAdjustments || latest.planning.sourceAdjustments) {
+    result.planning.sourceAdjustments = records(
+      'sourceAdjustments',
+      '返金・訂正',
+      base.planning.sourceAdjustments ?? [],
+      local.planning.sourceAdjustments ?? [],
+      latest.planning.sourceAdjustments ?? [],
+      (value) => value.id,
+    )
+  }
   return { changes, contents: unresolved ? null : structuredClone(result) }
 }
