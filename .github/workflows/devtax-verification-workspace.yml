@@ -1,11 +1,11 @@
 name: DevTax temporary verification workspace
 
-# Bounded verification for the approved W06-W08 completion, 2026-09-16.
-# Only changes to this file trigger it. No secrets, deployment, or automatic push.
+# One bounded verification of the reviewed main checkpoint, 2026-09-17.
+# A single explicit retry triggers this. No secrets, deployment, or automatic push.
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/devtax-verification-workspace.yml]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 permissions:
   contents: read
@@ -16,18 +16,20 @@ concurrency:
 
 jobs:
   prepare:
+    if: github.event.workflow_run.id == 33136825548 && github.event.workflow_run.run_attempt == 2
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: 20970c9569850d031dbd38bda75c573d5bfc5b3e
           persist-credentials: false
       - name: Preserve exact source revision
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p node-runtime verification
-          printf '%s\n' "$GITHUB_SHA" > node-runtime/source-commit.txt
+          git rev-parse HEAD > node-runtime/source-commit.txt
           sha256sum package-lock.json > node-runtime/lockfile.sha256
           git archive --format=tar HEAD > "$RUNNER_TEMP/devtax-workspace.tar"
       - uses: actions/setup-node@v4
@@ -44,8 +46,6 @@ jobs:
           for task in typecheck test lint format:check build privacy:check; do
             filename="${task//:/-}"
             started=$SECONDS
-            # A hanging test must not consume the artifact-packaging window.
-            # Exit 124 is recorded as a failure, never as a passed check.
             timeout --signal=TERM --kill-after=5s 60s npm run "$task" > "verification/$filename.log" 2>&1
             status=$?
             printf '%s\t%s\t%s\n' "$task" "$status" "$((SECONDS-started))" >> verification/status.tsv
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: devtax-workspace-${{ github.sha }}
+          name: devtax-workspace-20970c9
           path: ${{ runner.temp }}/devtax-workspace.tar.gz
           retention-days: 1
           if-no-files-found: error
