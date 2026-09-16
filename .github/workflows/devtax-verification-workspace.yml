@@ -44,7 +44,9 @@ jobs:
           for task in typecheck test lint format:check build privacy:check; do
             filename="${task//:/-}"
             started=$SECONDS
-            npm run "$task" > "verification/$filename.log" 2>&1
+            # A hanging test must not consume the artifact-packaging window.
+            # Exit 124 is recorded as a failure, never as a passed check.
+            timeout --signal=TERM --kill-after=5s 60s npm run "$task" > "verification/$filename.log" 2>&1
             status=$?
             printf '%s\t%s\t%s\n' "$task" "$status" "$((SECONDS-started))" >> verification/status.tsv
             if [ "$status" -ne 0 ]; then failed=1; fi
