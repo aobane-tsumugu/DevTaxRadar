@@ -58,6 +58,45 @@ export function planningMarkdown(snapshot: PlanningSnapshot, diagnosis?: Diagnos
     if (item.unknownAmountReason) lines.push(`  - 原額不明の理由: ${text(item.unknownAmountReason)}`)
     if (item.note) lines.push(`  - メモ: ${text(item.note)}`)
   }
+  if (snapshot.sourceAdjustments?.length) {
+    lines.push(
+      '', '## 返金・訂正の登録記録', '',
+      '登録された事実と選択した扱いを出力します。元費用の原額を上書きせず、返金額をこの資料の費用・残高から再度差し引きません。',
+      '元費用を確認する年、受領・訂正日、税務処理の対象年は同じとは限りません。この記録の存在だけでは、費用基礎への反映や残高減少との照合の完了を示しません。',
+    )
+    const effects = {
+      'restate-original-cost': '元費用の訂正を指定',
+      'balance-reduction': '残高減少との対応を指定',
+      undetermined: '扱いを保留',
+    } as const
+    for (const item of snapshot.sourceAdjustments) {
+      const basis = item.sourceBasis
+      lines.push(
+        `- ${item.kind === 'refund' ? '返金' : '訂正'} / ID ${text(item.id)} / 記録額 ${amount(item.amountJpy)}`,
+        `  - 元費用ID ${text(item.sourceId)} / 元費用を確認する年 ${item.sourceYear}年`,
+        `  - 受領・訂正日 ${text(item.occurredOn)} / 記録日時 ${text(item.recordedAt)}`,
+        `  - 選択した扱い: ${effects[item.effect]} / 理由: ${text(item.reason)}`,
+        `  - 記録時の元費用: ${text(basis.kind)} / 原額 ${amount(basis.originalAmountJpy)}`,
+        `  - 証拠参照ID: ${item.evidenceIds.map(text).join('、') || '未登録'}`,
+      )
+      if (basis.servicePeriod) lines.push(`  - 記録時の対象期間: ${text(basis.servicePeriod.startedOn)} ～ ${text(basis.servicePeriod.endedOn)}`)
+      if (basis.acquiredOn) lines.push(`  - 記録時の取得日: ${text(basis.acquiredOn)}`)
+      if (basis.contractId) lines.push(`  - 記録時の契約ID: ${text(basis.contractId)}`)
+      if (item.balanceMovementId) lines.push(`  - 対応させた残高減少ID: ${text(item.balanceMovementId)}（この一覧だけでは金額・原価の一致は未検証）`)
+      if (item.conversion) {
+        const conversion = item.conversion
+        const rounding = {
+          'nearest-yen': '円未満四捨五入',
+          'floor-yen': '円未満切捨て',
+          'ceiling-yen': '円未満切上げ',
+        } as const
+        lines.push(
+          `  - 換算根拠: ${text(conversion.foreignAmount)} ${text(conversion.currency)} × ${text(conversion.jpyPerUnit)} 円/通貨単位 / ${rounding[conversion.rounding]}`,
+          `  - 換算日 ${text(conversion.convertedOn)} / 確認先 ${text(conversion.reference)}`,
+        )
+      }
+    }
+  }
   lines.push('', '## ライフサイクルと証拠', '')
   for (const event of snapshot.lifecycleEvents) lines.push(`- ${text(event.occurredOn)} / ${text(event.eventType)} / 制作物 ${text(event.taxUnitId)} / ID ${text(event.id)} / 証拠 ${event.evidenceIds.map(text).join('、') || '未登録'} / ${text(event.note)}`)
   for (const evidence of snapshot.evidence) lines.push(`- ${text(evidence.occurredOn ?? evidence.recordedAt)} / ${text(evidence.evidenceType)} (${text(evidence.strength)}) / ID ${text(evidence.id)} / ${text(evidence.note)}`)
