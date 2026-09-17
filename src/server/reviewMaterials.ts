@@ -109,10 +109,11 @@ export function buildReviewMaterials(
     })),
     referenceCheck: checkBalanceReferences(
       balances,
-      { ...planning, sourceAdjustments: (planning.sourceAdjustments ?? []).filter((row) => row.effect === 'restate-original-cost' || Number(row.occurredOn.slice(0, 4)) <= year) },
+      planning,
       configuration.chargePeriods ?? [],
       linkedCosts.flatMap((row) => row.sources),
       { costs: linkedCosts, trace: balanceLotTrace },
+      year,
     ),
     balanceFlowCheck: checkBalanceFlowLinks(balances, year),
     balanceLotTrace,

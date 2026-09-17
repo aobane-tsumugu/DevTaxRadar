@@ -45,9 +45,18 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
         ...(resolution && resolution.taxYear <= year ? { resolution } : {}),
       }
     })
+  // Linked prior-year inputs are part of this fixed material too. Comparing
+  // only their IDs/amounts misses edits to the receipt or allocation evidence.
+  const costInputs = [
+    material.costs,
+    ...(material.costLinks?.costs.filter((row) => row.year !== year) ?? []),
+  ]
   const evidenceIds = new Set([
-    ...material.costs.sources.flatMap((source) => source.evidenceIds),
-    ...material.costs.contributions.flatMap((item) => item.evidenceIds),
+    ...costInputs.flatMap((costs) => costs.sources.flatMap((source) => source.evidenceIds)),
+    ...costInputs.flatMap((costs) => costs.contributions.flatMap((item) => item.evidenceIds)),
+    ...costInputs.flatMap((costs) => costs.sources.flatMap((source) =>
+      (source.adjustments ?? []).flatMap((row) => row.evidenceIds),
+    )),
     ...balances.movements
       .filter((movement) => inYear(movement.occurredOn))
       .flatMap((movement) => movement.sourceIds),

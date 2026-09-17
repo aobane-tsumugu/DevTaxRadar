@@ -35,7 +35,39 @@ export function checkBalanceReferences(
   chargePeriods: readonly { id: string }[],
   calculatedSources: readonly { id: string }[] = [],
   adjustmentCosts?: AdjustmentCostContext,
+  reviewYear?: number,
 ): BalanceReferenceCheck {
+  // Ordinary draft checks cover the whole snapshot. Annual adoption explicitly
+  // checks references through its year without approving future draft decisions.
+  // Structural and amount validation of the complete snapshot is unchanged.
+  if (reviewYear !== undefined) {
+    if (!Number.isInteger(reviewYear) || reviewYear < 1900 || reviewYear > 9999)
+      throw new Error('参照確認の対象年度を確認してください。')
+    if (adjustmentCosts && adjustmentCosts.trace.year !== reviewYear)
+      throw new Error('参照確認と原価追跡の対象年度が一致しません。')
+    snapshot = {
+      ...snapshot,
+      movements: snapshot.movements.filter(
+        (row) => Number(row.occurredOn.slice(0, 4)) <= reviewYear,
+      ),
+      pendingDecisions: snapshot.pendingDecisions
+        .filter((row) => row.taxYear <= reviewYear)
+        .map(({ answers, resolution, ...row }) => ({
+          ...row,
+          ...(answers === undefined
+            ? {}
+            : { answers: answers.filter((answer) => answer.taxYear <= reviewYear) }),
+          ...(resolution && resolution.taxYear <= reviewYear ? { resolution } : {}),
+        })),
+    }
+    planning = {
+      ...planning,
+      sourceAdjustments: (planning.sourceAdjustments ?? []).filter(
+        (row) => row.effect === 'restate-original-cost' ||
+          Number(row.occurredOn.slice(0, 4)) <= reviewYear,
+      ),
+    }
+  }
   const issues: BalanceReferenceIssue[] = []
   const units = new Set(planning.taxUnits.map((row) => row.id))
   const accounts = new Map(snapshot.accounts.map((row) => [row.id, row]))
@@ -85,7 +117,9 @@ export function checkBalanceReferences(
         )
     }
   }
-  for (const account of snapshot.accounts) unit('account', account.id, account.taxUnitId)
+  for (const account of snapshot.accounts)
+    if (reviewYear === undefined || account.openingYear <= reviewYear)
+      unit('account', account.id, account.taxUnitId)
   for (const movement of snapshot.movements) {
     sources('movement', movement.id, movement.sourceIds)
     const decision = decisions.get(movement.decisionId)
