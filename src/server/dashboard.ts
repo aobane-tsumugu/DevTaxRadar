@@ -1,3 +1,4 @@
+import { createSourceAdjuster, adjustSubscriptionScope } from '../core/adjustedCostSources.js'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Allocation, DashboardData } from '../client/types.js'
 import type { UsageProvider } from '../adapters/types.js'
@@ -222,13 +223,15 @@ function buildDashboardFromSnapshot(
     }
   }
 
+  const adjusters = new Map<number, ReturnType<typeof createSourceAdjuster>>()
+  const adjustmentEvidence = new Set(planning.evidence.map((row) => row.id))
   const allocations: Allocation[] = [], costScopes: SubscriptionCostScope[] = []
   for (const input of inputs) {
     const sourceWarnings = [...new Set([
       ...(chargeWarningsForYear(Number(input.billingMonth.slice(0, 4))).get(input.source.id) ?? []), ...input.sourceWarnings,
     ])]
     // Every invoice is an independent denominator; no redundant one-item batch.
-    const result = input.monthlyFeeJpy === null ? null :
+    let result = input.monthlyFeeJpy === null ? null :
       allocateMonthlySubscription({ ...input, monthlyFeeJpy: input.monthlyFeeJpy })
     if (result) {
       if (result.status === 'pending') result.warnings = [...new Set([...result.warnings, ...input.sourceWarnings])]
@@ -241,8 +244,12 @@ function buildDashboardFromSnapshot(
         group.taxUnitId ? { kind: 'tax-unit', taxUnitId: group.taxUnitId } :
           group.classification === 'maintenance' ? { kind: 'general' } : { kind: 'unallocated' }
     }
-    costScopes.push({ source: input.source, sourceWarnings,
-      basisId: `ai:${input.scopeId}:basis`, period: input.period, result, targets })
+    const costYear = Number(input.billingMonth.slice(0, 4))
+    if (!adjusters.has(costYear)) adjusters.set(costYear, createSourceAdjuster(planning.sourceAdjustments, adjustmentEvidence, costYear))
+    const scope = adjustSubscriptionScope({ source: input.source, sourceWarnings,
+      basisId: `ai:${input.scopeId}:basis`, period: input.period, result, targets }, adjusters.get(costYear)!)
+    costScopes.push(scope)
+    result = scope.result
     if (!result) continue
     if (result.status === 'pending') {
       allocations.push({
@@ -257,6 +264,7 @@ function buildDashboardFromSnapshot(
       })
       continue
     }
+    const firstRow = allocations.length
     for (const line of result.lines) {
       if (line.kind === 'rounding-adjustment' && line.allocatedAmountJpy === 0) continue
       if (line.kind === 'unobserved' || line.kind === 'rounding-adjustment') {
@@ -264,6 +272,11 @@ function buildDashboardFromSnapshot(
       } else {
         const group = line.sourceId ? groupById.get(line.sourceId) : undefined
         if (group) allocations.push(allocationForGroup(group, line, units, line.sourceId))
+      }
+    }
+    if (scope.source.adjustments?.length) {
+      for (const row of allocations.slice(firstRow)) {
+        row.reason += ' 返金・訂正後の費用基礎から再配分しています。元の請求額と訂正理由は「支払と配分」に保持しています。'
       }
     }
   }
@@ -319,6 +332,11 @@ function buildDashboardFromSnapshot(
     },
     months, allocations, products: [...projects.values()],
     guidance: [
+      ...((planning.sourceAdjustments ?? []).length ? [{
+        title: '返金・訂正の記録を含みます',
+        description: '原額と訂正を分けて保持しています。元費用の訂正を選んだ範囲だけ作業中の配分を再計算し、採用済み年度資料は変更しません。原額不明・確認内容の変更等は未算定です。',
+        severity: 'warning' as const,
+      }] : []),
       ...(!contractsConfigured && hasLegacyRatio ? [{ title: '契約期間が未入力です',
         description: '対象年の履歴に既定月額を適用しています。実際の契約期間を入力すると契約外の月を除外できます。', severity: 'warning' as const }] : []),
       ...(contractsConfigured && excludedMonths > 0 ? [providerMonthKeys.size === 0 ? {

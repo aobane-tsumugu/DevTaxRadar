@@ -1,3 +1,4 @@
+import { createSourceAdjuster, adjustSubscriptionScope } from './adjustedCostSources.js'
 import { allocateBusinessTargets } from './businessAllocation.js'
 import type {
   CostBasis,
@@ -20,6 +21,7 @@ export type SubscriptionCostScope = {
   result: MonthlyAllocationResult | null
   targets: Record<string, CostTarget>
   sourceWarnings?: string[]
+  basisUnknownReasons?: string[]
 }
 
 export function calendarMonthPeriod(month: string): CostPeriod {
@@ -49,6 +51,7 @@ export function buildWorkspaceCostSnapshot(
   subscriptions: SubscriptionCostScope[],
 ): CostSnapshot {
   const year = planning.profile.taxYear
+  const adjustSource = createSourceAdjuster(planning.sourceAdjustments ?? [], new Set(planning.evidence.map((row) => row.id)), year)
   const snapshot: CostSnapshot = {
     version: 1,
     taxUnits: planning.taxUnits.map((unit) => ({ id: unit.id, name: unit.name })),
@@ -93,6 +96,14 @@ export function buildWorkspaceCostSnapshot(
     amountJpy: number | null,
     warnings: string[] = [],
   ): CostBasis {
+    const adjusted = adjustSource(source)
+    source = adjusted.source
+    if (source.adjustments?.length) {
+      if (source.kind === 'home' || source.kind === 'direct') amountJpy = adjusted.evaluation.costAmountJpy
+      else if (adjusted.evaluation.costAmountJpy === null) amountJpy = null
+      warnings = [...new Set([...warnings, ...adjusted.evaluation.reasons, ...adjusted.evaluation.rows.flatMap((row) => row.reasons)])]
+      method = { ...method, explanation: method.explanation + ` 原額 ${source.originalAmountJpy ?? '不明'}円を保持。返金・訂正後の元費用基礎 ${adjusted.evaluation.costAmountJpy ?? '未算定'}円。` }
+    }
     addSource(source)
     const basis: CostBasis = {
       id: `${source.id}:basis:${period.startedOn}:${period.endedOn}`,
@@ -105,7 +116,7 @@ export function buildWorkspaceCostSnapshot(
           ? {
               status: 'unknown',
               amountJpy: null,
-              reasons: source.unknownOriginalAmountReasons ?? ['原額が未確認です。'],
+              reasons: adjusted.evaluation.reasons.length ? adjusted.evaluation.reasons : source.unknownOriginalAmountReasons ?? ['原額が未確認です。'],
             }
           : { status: 'known', amountJpy },
       method,
@@ -114,7 +125,8 @@ export function buildWorkspaceCostSnapshot(
     snapshot.bases.push(basis)
     return basis
   }
-  for (const scope of subscriptions) {
+  for (const originalScope of subscriptions) {
+    const scope = adjustSubscriptionScope(originalScope, adjustSource)
     addSource(scope.source)
     const basis: CostBasis = {
       id: scope.basisId,
@@ -127,7 +139,7 @@ export function buildWorkspaceCostSnapshot(
         : {
             status: 'unknown',
             amountJpy: null,
-            reasons: scope.source.unknownOriginalAmountReasons ?? ['請求額が未確認です。'],
+            reasons: scope.basisUnknownReasons ?? scope.source.unknownOriginalAmountReasons ?? ['請求額が未確認です。'],
           },
       method: {
         id: 'subscription-period-allocation',
@@ -224,6 +236,10 @@ export function buildWorkspaceCostSnapshot(
       },
       0,
     )
+    if (basis.amount.status === 'unknown' && sourceMap.get(source.id)?.adjustments?.length) {
+      basis.affectedTaxUnitIds = equipmentTargetIds
+      continue
+    }
     const dateProblems = [
       ...(!validIsoCalendarDate(item.acquiredOn) ? ['取得日が実在する年月日ではありません。'] : []),
       ...(item.businessUseStartedOn !== undefined &&
@@ -253,6 +269,7 @@ export function buildWorkspaceCostSnapshot(
         explanation: calculation.calculation?.explanation ?? calculation.reasons.join(' / '),
       }
       basis.warnings = [
+        ...basis.warnings,
         ...calculation.reasons,
         ...(item.evidenceIds.length ? [] : ['設備の証拠参照が未登録です。']),
         ...(selectedMethod.priorClosing
@@ -399,7 +416,8 @@ export function buildWorkspaceCostSnapshot(
       item.amountJpy,
       item.evidenceIds.length ? [] : ['請求または按分の証拠が未登録です。'],
     )
-    if (item.amountJpy === null) {
+    const costAmountJpy = basis.amount.status === 'known' ? basis.amount.amountJpy : null
+    if (costAmountJpy === null) {
       basis.affectedTaxUnitIds =
         item.targets !== undefined
           ? item.targets.map((target) => target.taxUnitId)
@@ -412,20 +430,21 @@ export function buildWorkspaceCostSnapshot(
       addContribution(
         basis,
         { kind: 'unallocated' },
-        item.amountJpy,
+        costAmountJpy,
         '業務割合の計算根拠が不足しているため、私用額も推定せず配分を保留。',
         item.evidenceIds,
       )
       continue
     }
-    const business = Math.round(item.amountJpy * ratio(item.businessUseRatio))
-    const businessCalculation = `支払額 ${item.amountJpy}円 × 業務割合 ${item.businessUseRatio} を円単位で四捨五入して、業務額 ${business}円（割合1は100%）。`
+    const business = Math.round(costAmountJpy * ratio(item.businessUseRatio))
+    const amountLabel = sourceMap.get(source.id)?.adjustments?.length ? '訂正後の費用基礎' : '支払額'
+    const businessCalculation = `${amountLabel} ${costAmountJpy}円 × 業務割合 ${item.businessUseRatio} を円単位で四捨五入して、業務額 ${business}円（割合1は100%）。`
     basis.method.explanation += ` ${businessCalculation}`
     addContribution(
       basis,
       { kind: 'private' },
-      item.amountJpy - business,
-      `${businessCalculation} 私用分は支払額 ${item.amountJpy}円 − 業務額 ${business}円 = ${item.amountJpy - business}円。`,
+      costAmountJpy - business,
+      `${businessCalculation} 私用分は${amountLabel} ${costAmountJpy}円 − 業務額 ${business}円 = ${costAmountJpy - business}円。`,
       item.evidenceIds,
     )
     if (item.targets !== undefined && item.treatment !== 'general') {
@@ -505,7 +524,9 @@ export function buildWorkspaceCostSnapshot(
         other: 'その他の直接費',
       }[item.costType],
       originalAmountJpy: item.amountJpy,
+      ...(item.amountJpy === null ? { unknownOriginalAmountReasons: [item.unknownAmountReason ?? '原額が未確認です。'] } : {}),
       currency: 'JPY',
+      ...(validIsoCalendarDate(item.incurredOn) ? { incurredOn: item.incurredOn } : {}),
       evidenceIds: [...item.evidenceIds],
       origin: 'legacy-planning',
     }
@@ -522,22 +543,20 @@ export function buildWorkspaceCostSnapshot(
       item.amountJpy,
       item.evidenceIds.length ? [] : ['支払または対応関係の証拠が未登録です。'],
     )
+    const costAmountJpy = basis.amount.status === 'known' ? basis.amount.amountJpy : null
     if (!validIsoCalendarDate(item.incurredOn)) {
       const reason = `発生日 ${item.incurredOn} が実在する年月日ではないため、年度帰属は未確認です。表示期間は確認対象年であり、利用期間ではありません。`
       basis.amount = { status: 'unknown', amountJpy: null, reasons: [reason] }
       basis.method.explanation = reason
       basis.warnings.push(reason)
       basis.affectedTaxUnitIds = affected
-      if (item.amountJpy === null)
-        source.unknownOriginalAmountReasons = [item.unknownAmountReason ?? '原額が未確認です。']
       continue
     }
-    if (item.amountJpy === null) {
-      source.unknownOriginalAmountReasons = [item.unknownAmountReason ?? '原額が未確認です。']
+    if (costAmountJpy === null) {
       basis.amount = {
         status: 'unknown',
         amountJpy: null,
-        reasons: [...source.unknownOriginalAmountReasons],
+        reasons: basis.amount.status === 'unknown' ? basis.amount.reasons : source.unknownOriginalAmountReasons ?? ['訂正後の費用基礎が未確認です。'],
       }
       basis.affectedTaxUnitIds = affected
       continue
@@ -568,7 +587,7 @@ export function buildWorkspaceCostSnapshot(
           .join(' / ')
       if (item.targets.some((target) => target.shareBps === null))
         basis.warnings.push('未確認の制作物割合を推定せず、残額を未配分として保持します。')
-      for (const part of allocateBusinessTargets(item.amountJpy, item.targets))
+      for (const part of allocateBusinessTargets(costAmountJpy, item.targets))
         addContribution(
           basis,
           part.taxUnitId === null
@@ -589,7 +608,7 @@ export function buildWorkspaceCostSnapshot(
     addContribution(
       basis,
       target,
-      item.amountJpy,
+      costAmountJpy,
       target.kind === 'unallocated'
         ? '直接対応または対応先が未確認。'
         : '入力した費用の対応先。税務上の当年費用の採用を意味しません。',

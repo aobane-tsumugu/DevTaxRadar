@@ -5,6 +5,8 @@ import {
   type CostSnapshot,
 } from '../accounting/costs.js'
 
+import { evaluateSourceAdjustments } from './sourceAdjustments.js'
+
 export class CostProjectionError extends Error {
   constructor(message: string) {
     super(message)
@@ -132,9 +134,12 @@ export function projectAnnualCosts(input: CostSnapshot, year: number): AnnualCos
     const known = roots.flatMap((basis) =>
       basis.amount.status === 'known' ? [basis.amount.amountJpy] : [],
     )
-    if (source.originalAmountJpy === null && known.length)
-      fail(`費用源 ${source.id} の原額が不明なため、数値の費用基礎を生成できません。`)
-    if (source.originalAmountJpy !== null && sum(known) > source.originalAmountJpy)
+    const costLimit = source.adjustments?.length
+      ? evaluateSourceAdjustments(source, source.adjustments).costAmountJpy
+      : source.originalAmountJpy
+    if (costLimit === null && known.length)
+      fail(`費用源 ${source.id} の原額または訂正後の基礎が不明なため、数値の費用基礎を生成できません。`)
+    if (costLimit !== null && sum(known) > costLimit)
       fail(`費用源 ${source.id} の原額を重複して組み入れています。`)
   }
 

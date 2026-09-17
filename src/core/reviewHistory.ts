@@ -1,4 +1,5 @@
 import type { ReviewMaterials } from '../accounting/reviewMaterials.js'
+import type { AnnualCostProjection } from '../accounting/costs.js'
 import type { BalanceSnapshot } from '../accounting/types.js'
 
 function ordered(value: unknown): unknown {
@@ -17,6 +18,16 @@ function ordered(value: unknown): unknown {
   if (value && typeof value === 'object')
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, ordered(item)]))
   return value
+}
+
+// incurredOn is duplicated from the existing dated direct-cost record. Adding
+// this metadata must not turn a no-adjustment legacy year into a correction.
+function comparableCosts(costs: AnnualCostProjection): AnnualCostProjection {
+  return { ...costs, sources: costs.sources.map((source) => {
+    if (source.adjustments?.length) return source
+    const { incurredOn: _duplicateDate, ...compatible } = source
+    return compatible
+  }) }
 }
 
 /** Year-scoped evidence used to guard a carry-forward; later scans and unrelated future inputs are not historical changes. */
@@ -43,6 +54,12 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
     ...pendingDecisions.flatMap((row) => row.sourceIds),
   ])
   const costIds = new Set(material.costs.sources.map((source) => source.id))
+  const adjustments = (material.planning.sourceAdjustments ?? []).filter((row) =>
+    row.effect === 'restate-original-cost'
+      ? costIds.has(row.sourceId) || row.sourceYear === year
+      : inYear(row.occurredOn),
+  )
+  for (const row of adjustments) for (const id of row.evidenceIds) evidenceIds.add(id)
   const directCosts = material.planning.directCosts
     .filter((row) => inYear(row.incurredOn))
     .map((row) => {
@@ -76,10 +93,11 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
   return ordered({
     year,
     timeZone: material.timeZone,
-    costs: material.costs,
+    costs: comparableCosts(material.costs),
+    ...(adjustments.length ? { sourceAdjustments: adjustments } : {}),
     ...(material.costLinks?.costs.some((row) => row.year !== year)
       ? {
-          linkedCostInputs: material.costLinks.costs.filter((row) => row.year !== year),
+          linkedCostInputs: material.costLinks.costs.filter((row) => row.year !== year).map(comparableCosts),
         }
       : {}),
     directCosts,

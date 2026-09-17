@@ -1,3 +1,4 @@
+import { adjustmentBalanceLinkIssues } from './adjustmentBalanceLinks.js'
 import { externalOpeningIssues } from './externalOpening.js'
 import type { BalanceSnapshot } from '../accounting/types.js'
 import type { PlanningSnapshot } from '../planning/types.js'
@@ -18,6 +19,7 @@ export type BalanceReferenceIssue = {
     | 'decision-unit'
     | 'pending-unit'
     | 'changed-answer'
+    | 'adjustment-link'
   message: string
 }
 export type BalanceReferenceCheck = {
@@ -203,6 +205,12 @@ export function checkBalanceReferences(
         '未判断の制作物と対応する残高の制作物が一致しません。',
       )
   }
+  const adjustments = planning.sourceAdjustments ?? []
+  for (const row of adjustments) {
+    if (row.effect === 'balance-reduction') sources('movement', row.balanceMovementId!, [row.sourceId, ...row.evidenceIds])
+  }
+  for (const issue of adjustmentBalanceLinkIssues(adjustments, snapshot))
+    add('movement', issue.movementId, issue.recordId, 'adjustment-link', issue.message)
   for (const issue of externalOpeningIssues(snapshot, planning))
     add('pending', issue.recordId, issue.accountId, 'changed-answer', issue.message)
   return {

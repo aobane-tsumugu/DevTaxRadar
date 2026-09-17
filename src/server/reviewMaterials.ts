@@ -48,6 +48,9 @@ export function buildReviewMaterials(
   const costYears = [
     ...new Set([
       year,
+      ...(planning.sourceAdjustments ?? [])
+        .filter((row) => row.effect === 'restate-original-cost' || Number(row.occurredOn.slice(0, 4)) <= year)
+        .map((row) => row.sourceYear).filter((value) => value <= year),
       ...balances.movements
         .filter((row) => row.kind === 'addition' && Number(row.occurredOn.slice(0, 4)) <= year)
         .flatMap((row) =>
@@ -105,7 +108,7 @@ export function buildReviewMaterials(
     })),
     referenceCheck: checkBalanceReferences(
       balances,
-      planning,
+      { ...planning, sourceAdjustments: (planning.sourceAdjustments ?? []).filter((row) => row.effect === 'restate-original-cost' || Number(row.occurredOn.slice(0, 4)) <= year) },
       configuration.chargePeriods ?? [],
       linkedCosts.flatMap((row) => row.sources),
     ),
