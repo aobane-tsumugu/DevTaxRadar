@@ -1,4 +1,4 @@
-import { adjustmentBalanceLinkIssues } from './adjustmentBalanceLinks.js'
+import { adjustmentBalanceLinkIssues, type AdjustmentCostContext } from './adjustmentBalanceLinks.js'
 import { externalOpeningIssues } from './externalOpening.js'
 import type { BalanceSnapshot } from '../accounting/types.js'
 import type { PlanningSnapshot } from '../planning/types.js'
@@ -34,6 +34,7 @@ export function checkBalanceReferences(
   planning: PlanningSnapshot,
   chargePeriods: readonly { id: string }[],
   calculatedSources: readonly { id: string }[] = [],
+  adjustmentCosts?: AdjustmentCostContext,
 ): BalanceReferenceCheck {
   const issues: BalanceReferenceIssue[] = []
   const units = new Set(planning.taxUnits.map((row) => row.id))
@@ -209,7 +210,7 @@ export function checkBalanceReferences(
   for (const row of adjustments) {
     if (row.effect === 'balance-reduction') sources('movement', row.balanceMovementId!, [row.sourceId, ...row.evidenceIds])
   }
-  for (const issue of adjustmentBalanceLinkIssues(adjustments, snapshot))
+  for (const issue of adjustmentBalanceLinkIssues(adjustments, snapshot, adjustmentCosts))
     add('movement', issue.movementId, issue.recordId, 'adjustment-link', issue.message)
   for (const issue of externalOpeningIssues(snapshot, planning))
     add('pending', issue.recordId, issue.accountId, 'changed-answer', issue.message)

@@ -64,6 +64,7 @@ export function buildReviewMaterials(
   ].sort((a, b) => a - b)
   const linkedCosts = projectWorkspaceYears(workspace, observation, costYears).projections
   const costs = linkedCosts.find((row) => row.year === year)!
+  const balanceLotTrace = traceBalanceLots(balances, linkedCosts, year)
   const instant = (value: unknown) =>
     typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null
   const count = (value: unknown) =>
@@ -111,9 +112,10 @@ export function buildReviewMaterials(
       { ...planning, sourceAdjustments: (planning.sourceAdjustments ?? []).filter((row) => row.effect === 'restate-original-cost' || Number(row.occurredOn.slice(0, 4)) <= year) },
       configuration.chargePeriods ?? [],
       linkedCosts.flatMap((row) => row.sources),
+      { costs: linkedCosts, trace: balanceLotTrace },
     ),
     balanceFlowCheck: checkBalanceFlowLinks(balances, year),
-    balanceLotTrace: traceBalanceLots(balances, linkedCosts, year),
+    balanceLotTrace,
     costLinks: {
       costs: linkedCosts,
       check: checkBalanceCostProvenance(balances, linkedCosts, year),
