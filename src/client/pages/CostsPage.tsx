@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import SourceAdjustmentDetails from './SourceAdjustmentDetails'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AnnualCostProjection, CostTarget } from '../../accounting/costs'
 import { getCostProjection } from '../api'
 import { yen } from './shared'
@@ -27,7 +28,9 @@ export default function CostsPage({
   readOnly = false,
   recordState = 'draft',
   evidence,
+  adjustmentsEditor,
 }: {
+  adjustmentsEditor?: (projection: AnnualCostProjection) => ReactNode
   initial?: AnnualCostProjection
   onEdit: () => void
   local: boolean
@@ -97,6 +100,7 @@ export default function CostsPage({
         </div>
       )}
       {error && <p role="alert">{error}。表示中の資料は更新されていません。</p>}
+      {!readOnly && local && projection && adjustmentsEditor?.(projection)}
       {busy ? (
         <p role="status">費用資料を読み込んでいます。</p>
       ) : !projection ? (
@@ -195,10 +199,12 @@ export default function CostsPage({
                   利用期間 {source.servicePeriod.startedOn} ～ {source.servicePeriod.endedOn}
                 </p>
               )}
+              {source.incurredOn && <p>発生日 {source.incurredOn}</p>}
               {source.acquiredOn && <p>取得日 {source.acquiredOn}</p>}
               {source.billedOn && <p>請求日 {source.billedOn}</p>}
               <p>証拠参照 {source.evidenceIds.length}件 / 原額を費用基礎へ重ねて加算しません。</p>
               <EvidenceReferences ids={source.evidenceIds} records={evidence} />
+              <SourceAdjustmentDetails records={source.adjustments ?? []} />
               {projection.bases
                 .filter((basis) => basis.sourceId === source.id)
                 .map((basis) => (

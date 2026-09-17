@@ -1,3 +1,6 @@
+import SourceAdjustmentsEditor from './client/pages/SourceAdjustmentsEditor'
+import { editSourceAdjustment } from './core/sourceAdjustmentEdit'
+import type { SourceAdjustmentRecord } from './core/sourceAdjustments'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import WorkspaceAttemptPanel from './client/pages/WorkspaceAttemptPanel'
 import { retainWorkspaceAttempt, removeWorkspaceAttempt, type WorkspaceAttempt } from './client/workspaceAttempt'
@@ -332,6 +335,13 @@ export default function App() {
     reviewCompletion.current = null
     await afterResolvedSave('変更の影響を確認した内容を保存しました。入力を続けられます。')
   }
+  async function reviewAdjustment(next: SourceAdjustmentRecord | null, previous: SourceAdjustmentRecord | null): Promise<boolean> {
+    const base = workspaceBase.current
+    if (!base || onboarding || comparison || impact || reviewCompletion.current)
+      throw new Error('別の入力・確認が進行中です。その内容を保存またはキャンセルしてから操作してください。')
+    const sourceAdjustments = editSourceAdjustment(base.planning.sourceAdjustments ?? [], next, previous)
+    return reviewWorkspace(base.configuration, { ...base.planning, sourceAdjustments })
+  }
   async function storeRules(rules: ProjectRuleRecord[]): Promise<void> {
     setRulesBusy(true)
     try {
@@ -445,7 +455,15 @@ export default function App() {
           navigation={balanceNavigation} key={runtime?.datasetId} datasetId={runtime?.datasetId}
           planning={planning} configuration={configuration} local={data.meta.source === 'local'} onManageUnits={() => editAt(2)}
         /></div>}
-        {page === 'balances' ? null : page === 'costs' ? <CostsPage initial={data.costProjection} evidence={planning.evidence} local={data.meta.source === 'local'} onEdit={() => editAt(3)} />
+        <div hidden={page !== 'costs'}><CostsPage
+          initial={data.costProjection} evidence={planning.evidence} local={data.meta.source === 'local'} onEdit={() => editAt(3)}
+          adjustmentsEditor={runtime?.datasetId ? (projection) => <SourceAdjustmentsEditor
+            key={runtime.datasetId} datasetId={runtime.datasetId!} projection={projection}
+            records={planning.sourceAdjustments ?? []} evidence={planning.evidence}
+            disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onReview={reviewAdjustment}
+          /> : undefined}
+        /></div>
+        {page === 'balances' || page === 'costs' ? null
           : page === 'summary' ? <SummaryPage key={runtime?.datasetId} onOpenBalances={openBalances} data={data} planning={planning} diagnosis={diagnosis} months={filteredMonths} undatedMonths={annual.undatedMonths} onOpenCosts={() => setPage('costs')} totals={filteredTotals} onOpenOnboarding={() => editAt(0)} retention={runtime?.retention ?? null} />
             : page === 'evidence' ? <EvidencePage data={data} planning={planning} diagnosis={diagnosis} allocations={allocations} selected={selectedAllocation} onSelect={setSelectedAllocation} busy={rulesBusy} error={rulesError} onReclassify={reclassifyAllocation} />
               : page === 'folders' ? <FolderAssignmentPage folders={folders} planning={planning} busy={rulesBusy} error={rulesError} onSaveRules={storeRules} />
