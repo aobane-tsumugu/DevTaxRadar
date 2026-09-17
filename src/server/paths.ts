@@ -50,6 +50,20 @@ export function historyRootKey(root: string): string {
   return platform() === 'win32' ? normalized.toLocaleLowerCase('en-US') : normalized
 }
 
+/**
+ * Keep an unchanged disabled source as an opaque record, even after an OS change.
+ * New or enabled bindings still have to be valid local absolute paths.
+ */
+export function resolveRestoreHistoryRoot(
+  choice: { root: string; enabled: boolean },
+  previous: { root_path: string; root_key: string },
+): { root: string; rootKey: string } {
+  if (!choice.enabled && choice.root === previous.root_path)
+    return { root: previous.root_path, rootKey: previous.root_key }
+  const root = normalizeHistoryRoot(choice.root)
+  return { root, rootKey: historyRootKey(root) }
+}
+
 export function getClaudeSettingsPath(): string {
   // Overridable so the write path can be exercised against a temporary copy.
   // Never point this at a real settings.json in a test.

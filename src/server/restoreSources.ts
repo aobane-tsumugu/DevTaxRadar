@@ -3,7 +3,7 @@ import { accessSync, constants, existsSync, readFileSync, statSync, unlinkSync }
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
-import { historyRootKey, normalizeHistoryRoot } from './paths.js'
+import { resolveRestoreHistoryRoot } from './paths.js'
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const schema = z
@@ -78,7 +78,7 @@ export function previewRestoreSources(db: DatabaseSync, directory: string) {
   }
 }
 
-/** Apply all source bindings atomically; preserve IDs and numeric history, invalidate root-bound caches only. */
+/** Apply all source bindings atomically; preserve IDs and numeric history, invalidate pre-restore file caches. */
 export function applyRestoreSources(db: DatabaseSync, directory: string, input: unknown) {
   const plan = schema.parse(input)
   const planHash = hash(plan)
@@ -114,8 +114,7 @@ export function applyRestoreSources(db: DatabaseSync, directory: string, input: 
         throw new Error('すべての読み取り元を一度ずつ指定してください。')
       const normalized = plan.sources.map((s) => ({
         ...s,
-        root: normalizeHistoryRoot(s.root),
-        rootKey: historyRootKey(s.root),
+        ...resolveRestoreHistoryRoot(s, existing.find((row) => row.id === s.sourceId)!),
       }))
       const keys = new Set<string>()
       for (const row of normalized) {
@@ -136,12 +135,12 @@ export function applyRestoreSources(db: DatabaseSync, directory: string, input: 
           row.sourceId,
         )
       for (const row of normalized) {
-        const original = existing.find((s) => s.id === row.sourceId)!
         db.prepare(
           'UPDATE history_sources SET root_path=?, root_key=?, enabled=?, updated_at=? WHERE id=?',
         ).run(row.root, row.rootKey, row.enabled ? 1 : 0, new Date().toISOString(), row.sourceId)
-        if (original.root_key !== row.rootKey)
-          db.prepare('DELETE FROM history_file_cache WHERE source_id=?').run(row.sourceId)
+        // The same absolute path on another PC is not proof of identical files.
+        // Keep numeric records, but require a fresh read before reusing any cache.
+        db.prepare('DELETE FROM history_file_cache WHERE source_id=?').run(row.sourceId)
       }
       db.prepare(
         "INSERT INTO app_settings(key,value) VALUES ('restore_source_reconnect',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
