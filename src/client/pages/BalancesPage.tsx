@@ -1,4 +1,5 @@
 import DateInput from './DateInput'
+import TreatmentBalanceDraftPanel from './TreatmentBalanceDraftPanel'
 import type { ConsultationNavigation } from '../consultationNavigation'
 import { decisionIsConfirmed } from '../../core/decisionConfirmation'
 import { checkBalanceReferences } from '../../core/balanceReferences'
@@ -55,7 +56,7 @@ export default function BalancesPage({
   local: boolean
   onManageUnits: () => void
   datasetId?: string
-  navigation?: { year: number; request: number; datasetId?: string }
+  navigation?: { year: number; request: number; datasetId?: string; contributionId?: string }
   onReviewAnswer?: (context: ConsultationNavigation) => void
 }) {
   const [draft, setDraft] = useState<BalanceDraft | null>(null)
@@ -459,6 +460,11 @@ export default function BalancesPage({
               {dirty ? '入力を破棄して保存済みを読み直す' : '保存済みを読み直す'}
             </button>
           </div>
+          {local && navigation?.contributionId && <TreatmentBalanceDraftPanel
+            request={{ ...navigation, contributionId: navigation.contributionId }} datasetId={datasetId}
+            snapshot={draft.snapshot} planning={planning} disabled={busy || conflict}
+            onApply={(snapshot) => edit((current) => Object.assign(current, snapshot))}
+          />}
           {conflict && (
             <div>
               <p role="alert">

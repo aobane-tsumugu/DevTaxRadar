@@ -1,3 +1,4 @@
+import { costTreatmentMarkdown } from './costTreatmentExport.js'
 import type { AnnualCostProjection, CostTarget } from '../accounting/costs.js'
 
 // Free text stays readable but cannot introduce headings, HTML or hidden links.
@@ -95,5 +96,5 @@ export function costProjectionMarkdown(
         `    - 寄与ID: ${text(item.id)} / 出典: ${item.sourceIds.map(text).join('、')}${item.consumedByBasisId ? ` / ${text(item.consumedByBasisId)}へ組入れ済み（合計に二重加算しない）` : ''}`,
       )
   }
-  return lines.join('\n') + '\n'
+  return lines.join('\n') + '\n' + costTreatmentMarkdown(projection.treatments)
 }

@@ -1,4 +1,9 @@
 import SourceAdjustmentsEditor from './client/pages/SourceAdjustmentsEditor'
+import TreatmentHandoffPanel from './client/pages/TreatmentHandoffPanel'
+import { draftTreatmentDecision, refreshTreatmentDecision } from './core/costTreatmentDraft'
+import type { AnnualCostProjection } from './accounting/costs'
+import CostTreatmentFactsEditor from './client/pages/CostTreatmentFactsEditor'
+import { editCostTreatmentFacts, type CostTreatmentFacts } from './core/costTreatmentFacts'
 import { editSourceAdjustment } from './core/sourceAdjustmentEdit'
 import type { SourceAdjustmentRecord } from './core/sourceAdjustments'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -52,7 +57,7 @@ export default function App() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [page, setPage] = useState<Page>('summary')
   const [balancesOpened, setBalancesOpened] = useState(false)
-  const [balanceNavigation, setBalanceNavigation] = useState<{ year: number; request: number; datasetId?: string }>()
+  const [balanceNavigation, setBalanceNavigation] = useState<{ year: number; request: number; datasetId?: string; contributionId?: string }>()
   const [provider, setProvider] = useState<Provider>('すべて')
   const [product, setProduct] = useState('すべて')
   const [onboarding, setOnboarding] = useState(false)
@@ -342,6 +347,24 @@ export default function App() {
     const sourceAdjustments = editSourceAdjustment(base.planning.sourceAdjustments ?? [], next, previous)
     return reviewWorkspace(base.configuration, { ...base.planning, sourceAdjustments })
   }
+  async function reviewTreatment(next: CostTreatmentFacts | null, previous: CostTreatmentFacts | null): Promise<boolean> {
+    const base = workspaceBase.current
+    if (!base || onboarding || comparison || impact || reviewCompletion.current)
+      throw new Error('別の入力・確認が進行中です。その内容を保存またはキャンセルしてから操作してください。')
+    const costTreatmentFacts = editCostTreatmentFacts(base.planning.costTreatmentFacts ?? [], next, previous)
+    return reviewWorkspace(base.configuration, { ...base.planning, costTreatmentFacts })
+  }
+  async function reviewTreatmentDecision(costs: AnnualCostProjection, contributionId: string, existingId?: string): Promise<boolean> {
+    const base = workspaceBase.current
+    if (!base || onboarding || comparison || impact || reviewCompletion.current)
+      throw new Error('別の入力・確認が進行中です。先に保存またはキャンセルしてください。')
+    const decision = existingId
+      ? refreshTreatmentDecision(costs, base.planning, contributionId, existingId)
+      : draftTreatmentDecision(costs, base.planning, contributionId, crypto.randomUUID(), new Date().toISOString())
+    const decisions = existingId ? base.planning.decisions.map((row) => row.id === existingId ? decision : row)
+      : [...base.planning.decisions, decision]
+    return reviewWorkspace(base.configuration, { ...base.planning, decisions })
+  }
   async function storeRules(rules: ProjectRuleRecord[]): Promise<void> {
     setRulesBusy(true)
     try {
@@ -457,6 +480,16 @@ export default function App() {
         /></div>}
         <div hidden={page !== 'costs'}><CostsPage
           initial={data.costProjection} evidence={planning.evidence} local={data.meta.source === 'local'} onEdit={() => editAt(3)}
+          treatmentEditor={runtime?.datasetId ? (projection) => <div key={runtime.datasetId}>
+            <CostTreatmentFactsEditor projection={projection} planning={planning}
+              disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onReview={reviewTreatment} />
+            <TreatmentHandoffPanel costs={projection} planning={planning}
+              disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)}
+              onDecision={reviewTreatmentDecision} onBalance={(year, contributionId) => {
+                setBalanceNavigation((previous) => ({ year, contributionId, request: (previous?.request ?? 0) + 1, datasetId: runtime.datasetId }))
+                setBalancesOpened(true); setPage('balances')
+              }} />
+          </div> : undefined}
           adjustmentsEditor={runtime?.datasetId ? (projection) => <SourceAdjustmentsEditor
             key={runtime.datasetId} datasetId={runtime.datasetId!} projection={projection}
             records={planning.sourceAdjustments ?? []} evidence={planning.evidence}

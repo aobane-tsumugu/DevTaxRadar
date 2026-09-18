@@ -1,4 +1,5 @@
 import SourceAdjustmentDetails from './SourceAdjustmentDetails'
+import CostTreatmentPanel from './CostTreatmentPanel'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AnnualCostProjection, CostTarget } from '../../accounting/costs'
 import { getCostProjection } from '../api'
@@ -29,8 +30,10 @@ export default function CostsPage({
   recordState = 'draft',
   evidence,
   adjustmentsEditor,
+  treatmentEditor,
 }: {
   adjustmentsEditor?: (projection: AnnualCostProjection) => ReactNode
+  treatmentEditor?: (projection: AnnualCostProjection) => ReactNode
   initial?: AnnualCostProjection
   onEdit: () => void
   local: boolean
@@ -101,12 +104,14 @@ export default function CostsPage({
       )}
       {error && <p role="alert">{error}。表示中の資料は更新されていません。</p>}
       {!readOnly && local && projection && adjustmentsEditor?.(projection)}
+      {!readOnly && local && projection && treatmentEditor?.(projection)}
       {busy ? (
         <p role="status">費用資料を読み込んでいます。</p>
       ) : !projection ? (
         <p>この表示には全費用の資料が登録されていません。</p>
       ) : (
         <>
+          <CostTreatmentPanel report={projection.treatments} />
           <article className="panel cost-overview">
             <h2>{projection.year}年の費用基礎と対応先</h2>
             <p>

@@ -2,11 +2,7 @@ import { z } from 'zod'
 import { validIsoCalendarDate } from './chargePeriods.js'
 
 /** Published rate table; never replace this with acquisitionCost / usefulLifeYears. */
-const rates = [
-  500, 334, 250, 200, 167, 143, 125, 112, 100, 91, 84, 77, 72, 67, 63, 59, 56, 53, 50, 48, 46, 44,
-  42, 40, 39, 38, 36, 35, 34, 33, 32, 31, 30, 29, 28, 28, 27, 26, 25, 25, 24, 24, 23, 23, 22, 22,
-  21, 21, 20,
-] as const
+import { STRAIGHT_LINE_RATES as rates } from './straightLineRates.js'
 export const EQUIPMENT_STRAIGHT_LINE_RULE = {
   id: 'jp-individual-tangible-straight-line/1',
   verifiedOn: '2026-09-08',
