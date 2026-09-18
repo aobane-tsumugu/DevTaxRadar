@@ -1,3 +1,4 @@
+import type { CostTreatmentFacts } from '../core/costTreatmentFacts.js'
 import type { SourceAdjustmentRecord } from '../core/sourceAdjustments.js'
 import type { AllocationTarget } from './allocationTargets.js'
 import type { CostPresenceRecord } from './costPresence.js'
@@ -121,6 +122,7 @@ export type EvidenceRecord = {
   taxUnitId?: string
 }
 export type DecisionRecord = {
+  treatmentBinding?: import('../core/treatmentDecisionBinding.js').TreatmentDecisionBinding
   id: string
   taxUnitId: string
   taxYear: number
@@ -133,6 +135,7 @@ export type DecisionRecord = {
   confirmedAt?: string
 }
 export type PlanningSnapshot = {
+  costTreatmentFacts?: CostTreatmentFacts[]
   sourceAdjustments?: SourceAdjustmentRecord[]
   costPresence?: CostPresenceRecord[]
   equipmentMethods?: EquipmentAnnualMethod[]
