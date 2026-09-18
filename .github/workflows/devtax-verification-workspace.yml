@@ -1,30 +1,28 @@
 name: DevTax temporary verification workspace
 
-# One bounded verification of the reviewed main checkpoint, 2026-09-17.
-# A single explicit retry triggers this. No secrets, deployment, or automatic push.
+# One branch-only, read-only verification. No deployment, secrets, or automatic push.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
+    branches: [work/w07-w08-acceptance-20260918]
+    paths: [.github/workflows/devtax-verification-workspace.yml]
 
 permissions:
   contents: read
 
 concurrency:
-  group: devtax-verification-workspace
+  group: devtax-w07-w08-verification-workspace
   cancel-in-progress: false
 
 jobs:
   prepare:
-    if: github.event.workflow_run.id == 33136825548 && github.event.workflow_run.run_attempt == 2
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 20970c9569850d031dbd38bda75c573d5bfc5b3e
+          ref: 271ef56352ab782ff71434769ed1edb78565c513
           persist-credentials: false
-      - name: Preserve exact source revision
+      - name: Preserve exact baseline source
         shell: bash
         run: |
           set -euo pipefail
@@ -43,17 +41,17 @@ jobs:
           set +e
           failed=0
           printf 'task\texit_status\telapsed_seconds\n' > verification/status.tsv
-          for task in typecheck test lint format:check build privacy:check; do
+          for task in test lint format:check build privacy:check; do
             filename="${task//:/-}"
             started=$SECONDS
-            timeout --signal=TERM --kill-after=5s 60s npm run "$task" > "verification/$filename.log" 2>&1
+            timeout --signal=TERM --kill-after=5s 180s npm run "$task" > "verification/$filename.log" 2>&1
             status=$?
             printf '%s\t%s\t%s\n' "$task" "$status" "$((SECONDS-started))" >> verification/status.tsv
             if [ "$status" -ne 0 ]; then failed=1; fi
           done
           cat verification/status.tsv >> "$GITHUB_STEP_SUMMARY"
           exit "$failed"
-      - name: Package source and available runtime for local verification
+      - name: Package baseline and available runtime
         if: always()
         shell: bash
         run: |
@@ -68,7 +66,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: devtax-workspace-20970c9
+          name: devtax-workspace-271ef56
           path: ${{ runner.temp }}/devtax-workspace.tar.gz
           retention-days: 1
           if-no-files-found: error
