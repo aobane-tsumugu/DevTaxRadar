@@ -1,9 +1,11 @@
 name: DevTax temporary verification workspace
 
-# One branch-only, read-only verification. No deployment, secrets, or automatic push.
+# Branch-only, read-only verification. No deployment, secrets, or automatic push.
 on:
   push:
     branches: [work/w07-w08-acceptance-20260918]
+    paths: [.github/workflows/devtax-verification-workspace.yml]
+  pull_request:
     paths: [.github/workflows/devtax-verification-workspace.yml]
 
 permissions:
@@ -15,6 +17,7 @@ concurrency:
 
 jobs:
   prepare:
+    if: github.ref == 'refs/heads/work/w07-w08-acceptance-20260918' || github.head_ref == 'work/w07-w08-acceptance-20260918'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
