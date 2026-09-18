@@ -51,7 +51,10 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
     material.costs,
     ...(material.costLinks?.costs.filter((row) => row.year !== year) ?? []),
   ]
+  const costYears = new Set(costInputs.map((cost) => cost.year))
+  const costTreatmentFacts = (material.planning.costTreatmentFacts ?? []).filter((fact) => costYears.has(fact.costYear))
   const evidenceIds = new Set([
+    ...costTreatmentFacts.flatMap((fact) => fact.evidenceIds),
     ...costInputs.flatMap((costs) => costs.sources.flatMap((source) => source.evidenceIds)),
     ...costInputs.flatMap((costs) => costs.contributions.flatMap((item) => item.evidenceIds)),
     ...costInputs.flatMap((costs) => costs.sources.flatMap((source) =>
@@ -103,6 +106,7 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
     year,
     timeZone: material.timeZone,
     costs: comparableCosts(material.costs),
+    ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}),
     ...(adjustments.length ? { sourceAdjustments: adjustments } : {}),
     ...(material.costLinks?.costs.some((row) => row.year !== year)
       ? {

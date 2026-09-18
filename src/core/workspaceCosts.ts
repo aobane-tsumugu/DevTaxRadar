@@ -1,3 +1,4 @@
+import { attachCostTreatments } from './costTreatments.js'
 import { createSourceAdjuster, adjustSubscriptionScope } from './adjustedCostSources.js'
 import { allocateBusinessTargets } from './businessAllocation.js'
 import type {
@@ -622,8 +623,9 @@ export function projectWorkspaceCosts(
   planning: PlanningSnapshot,
   subscriptions: SubscriptionCostScope[],
 ) {
-  return projectAnnualCosts(
+  const costs = projectAnnualCosts(
     buildWorkspaceCostSnapshot(planning, subscriptions),
     planning.profile.taxYear,
   )
+  return attachCostTreatments(costs, planning)
 }

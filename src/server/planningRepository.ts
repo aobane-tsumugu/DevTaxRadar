@@ -1,4 +1,6 @@
 import { readSourceAdjustments, writeSourceAdjustments } from './sourceAdjustmentsRepository.js'
+import { readDecisionTreatmentBindings, writeDecisionTreatmentBindings } from './decisionTreatmentBindingsRepository.js'
+import { readCostTreatmentFacts, writeCostTreatmentFacts } from './costTreatmentFactsRepository.js'
 import { planningSnapshotSchema, planningSaveSchema, PlanningValidationError } from '../planning/schema.js'
 export { planningSnapshotSchema, planningSaveSchema, projectRulesSchema, PlanningValidationError } from '../planning/schema.js'
 export { planningMarkdown } from '../core/planningExport.js'
@@ -22,7 +24,9 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     activity_started_on AS activityStartedOn, monetization_status AS monetizationStatus,
     has_bookkeeping AS hasBookkeeping, notes FROM planning_profiles WHERE singleton_id = 1`).get() as Record<string, unknown> | undefined
   const sourceAdjustments = readSourceAdjustments(db)
-  if (!profile) return { ...emptyPlanningSnapshot(), ...(sourceAdjustments.length ? { sourceAdjustments } : {}) }
+  const decisionBindings = readDecisionTreatmentBindings(db)
+  const costTreatmentFacts = readCostTreatmentFacts(db)
+  if (!profile) return { ...emptyPlanningSnapshot(), ...(sourceAdjustments.length ? { sourceAdjustments } : {}), ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}) }
   const snapshot = {
     version: 1 as const,
     profile: { ...profile, activityStartedOn: optional(profile.activityStartedOn as string | null), notes: optional(profile.notes as string | null), hasBookkeeping: Boolean(profile.hasBookkeeping) },
@@ -69,11 +73,12 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     decisions: (db.prepare(`SELECT id, tax_unit_id AS taxUnitId, tax_year AS taxYear,
       engine_version AS engineVersion, candidate, status, selected_candidate AS selectedCandidate,
       reason, created_at AS createdAt, confirmed_at AS confirmedAt FROM planning_decisions ORDER BY rowid`).all() as Array<Record<string, unknown>>).map((row) => ({
-        ...row, selectedCandidate: optional(row.selectedCandidate as string | null), reason: optional(row.reason as string | null), confirmedAt: optional(row.confirmedAt as string | null),
+        ...row, ...(decisionBindings.has(String(row.id)) ? { treatmentBinding: decisionBindings.get(String(row.id)) } : {}), selectedCandidate: optional(row.selectedCandidate as string | null), reason: optional(row.reason as string | null), confirmedAt: optional(row.confirmedAt as string | null),
       })),
   }
   const costPresence = readCostPresence(db), equipmentMethods = readEquipmentMethods(db)
   return planningSnapshotSchema.parse({ ...snapshot,
+    ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}),
     ...(sourceAdjustments.length ? { sourceAdjustments } : {}),
     ...(costPresence.length ? { costPresence } : {}), ...(equipmentMethods.length ? { equipmentMethods } : {}),
   })
@@ -84,6 +89,8 @@ export function savePlanningSnapshot(snapshot: PlanningSnapshot, db: DatabaseSyn
   db.exec('SAVEPOINT devtax_planning_write')
   try {
     writeSourceAdjustments(db, parsed.sourceAdjustments)
+    writeDecisionTreatmentBindings(db, parsed.decisions)
+    writeCostTreatmentFacts(db, parsed.costTreatmentFacts)
     writeCostPresence(db, parsed.costPresence ?? [])
     db.exec('DELETE FROM planning_equipment_methods')
     for (const table of ['planning_decisions', 'planning_lifecycle_events', 'planning_project_rules', 'planning_equipment', 'planning_home_costs', 'planning_direct_costs', 'planning_evidence', 'planning_tax_units', 'planning_profiles']) db.exec(`DELETE FROM ${table}`)

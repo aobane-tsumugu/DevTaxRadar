@@ -1,4 +1,6 @@
 import { sourceAdjustmentsSchema } from './sourceAdjustmentSchema.js'
+import { treatmentDecisionBindingSchema } from './treatmentDecisionBindingSchema.js'
+import { costTreatmentFactsSchema } from './costTreatmentFactsSchema.js'
 import { allocationTargetsSchema } from './allocationTargets.js'
 import { planningDateIssues } from './calendarDates.js'
 import { z } from 'zod'
@@ -219,6 +221,7 @@ const decisionSchema = z
     taxYear: z.number().int().min(2000).max(2100),
     engineVersion: z.string().trim().min(1).max(120),
     candidate: z.string().trim().min(1).max(160),
+    treatmentBinding: treatmentDecisionBindingSchema.optional(),
     status: z.enum(['pending', 'confirmed', 'overridden']),
     selectedCandidate: z.string().trim().min(1).max(160).optional(),
     reason: z.string().trim().max(2_000).optional(),
@@ -244,6 +247,7 @@ const decisionSchema = z
 export const planningSnapshotSchema = z
   .object({
     sourceAdjustments: sourceAdjustmentsSchema.optional(),
+    costTreatmentFacts: costTreatmentFactsSchema.optional(),
     costPresence: costPresenceRecordsSchema.optional(),
     equipmentMethods: equipmentMethodsSchema.optional(),
     version: z.literal(1),

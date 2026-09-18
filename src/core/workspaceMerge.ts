@@ -224,5 +224,15 @@ export function mergeWorkspaceDrafts(
       (value) => value.id,
     )
   }
+  if (base.planning.costTreatmentFacts || local.planning.costTreatmentFacts || latest.planning.costTreatmentFacts) {
+    result.planning.costTreatmentFacts = records(
+      'costTreatmentFacts',
+      '費用の処理条件',
+      base.planning.costTreatmentFacts ?? [],
+      local.planning.costTreatmentFacts ?? [],
+      latest.planning.costTreatmentFacts ?? [],
+      (value) => JSON.stringify([value.costYear, value.contributionId]),
+    )
+  }
   return { changes, contents: unresolved ? null : structuredClone(result) }
 }

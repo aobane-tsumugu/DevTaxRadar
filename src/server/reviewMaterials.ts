@@ -1,3 +1,4 @@
+import { checkTreatmentDecisionReferences } from '../core/treatmentDecisionReferences.js'
 import { sanitizedCaptureContext } from './observationRecords.js'
 import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
@@ -48,6 +49,10 @@ export function buildReviewMaterials(
   const costYears = [
     ...new Set([
       year,
+      ...planning.decisions.filter((decision) => decision.treatmentBinding && decision.taxYear <= year &&
+        (balances.movements.some((movement) => movement.decisionId === decision.id && Number(movement.occurredOn.slice(0, 4)) <= year) ||
+         balances.pendingDecisions.some((pending) => pending.resolution?.decisionId === decision.id && pending.resolution.taxYear <= year)))
+        .map((decision) => decision.treatmentBinding!.costYear),
       ...(planning.sourceAdjustments ?? [])
         .filter((row) => row.effect === 'restate-original-cost' || Number(row.occurredOn.slice(0, 4)) <= year)
         .map((row) => row.sourceYear).filter((value) => value <= year),
@@ -107,14 +112,14 @@ export function buildReviewMaterials(
           ? scan.status
           : 'unknown',
     })),
-    referenceCheck: checkBalanceReferences(
+    referenceCheck: checkTreatmentDecisionReferences(balances, planning, linkedCosts, year, checkBalanceReferences(
       balances,
       planning,
       configuration.chargePeriods ?? [],
       linkedCosts.flatMap((row) => row.sources),
       { costs: linkedCosts, trace: balanceLotTrace },
       year,
-    ),
+    )),
     balanceFlowCheck: checkBalanceFlowLinks(balances, year),
     balanceLotTrace,
     costLinks: {
