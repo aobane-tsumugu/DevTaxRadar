@@ -1,4 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
+import {
+  canonicalReviewValue as canonical,
+  reviewContentHash as hash,
+  readStoredReview,
+} from './storedReview.js'
 import type { DatabaseSync } from 'node:sqlite'
 import type { AnnualBalanceProjection, BalanceSnapshot } from '../accounting/types.js'
 import type { ReviewMaterials } from '../accounting/reviewMaterials.js'
@@ -16,23 +21,6 @@ export class BalanceConflictError extends Error {
     super(message)
     this.name = 'BalanceConflictError'
   }
-}
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  if (value !== null && typeof value === 'object') {
-    const object = value as Record<string, unknown>
-    return `{${Object.keys(object)
-      .filter((key) => object[key] !== undefined)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`)
-      .join(',')}}`
-  }
-  return JSON.stringify(value)
-}
-
-function hash(value: unknown): string {
-  return createHash('sha256').update(canonical(value)).digest('hex')
 }
 
 function integerRevision(value: number): void {
@@ -273,15 +261,7 @@ function head(db: DatabaseSync, year: number): string | null {
 }
 
 export function getBalanceReview(db: DatabaseSync, id: string): BalanceReview | null {
-  const row = db
-    .prepare('SELECT payload, content_hash FROM balance_reviews WHERE id = ?')
-    .get(id) as { payload: string; content_hash: string } | undefined
-  if (!row) return null
-  const parsed = JSON.parse(row.payload) as BalanceReview
-  if (parsed.schemaVersion !== 1 || parsed.id !== id || hash(parsed) !== row.content_hash)
-    throw new Error('採用済み資料の形式または保存内容を検証できませんでした。')
-  // Read stored results without running them through a newer calculation engine.
-  return parsed
+  return readStoredReview(db, id)
 }
 
 export type ReviewMaterialsReader = (

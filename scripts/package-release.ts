@@ -49,6 +49,7 @@ cpSync(join(root, 'dist'), join(releaseRoot, 'dist'), {
 })
 copyRequiredFile('README.md')
 copyRequiredFile('LICENSE')
+copyRequiredFile(join('docs', 'READING-SAVED-REVIEWS.md'))
 if (existsSync(join(root, 'docs', 'SECURITY.md'))) {
   copyRequiredFile(join('docs', 'SECURITY.md'))
 }
@@ -58,6 +59,7 @@ await build({
     'server/index': join(root, 'src', 'server', 'index.ts'),
     'tools/data-backup': join(root, 'scripts', 'data-backup.ts'),
     'tools/restore-sources': join(root, 'scripts', 'restore-sources.ts'),
+    'tools/read-review': join(root, 'scripts', 'read-review.ts'),
   },
   outdir: join(releaseRoot, 'runtime'),
   outExtension: { '.js': '.mjs' },
@@ -86,6 +88,7 @@ writeFileSync(
         start: 'node runtime/server/index.mjs',
         'data:backup': 'node runtime/tools/data-backup.mjs',
         'data:reconnect': 'node runtime/tools/restore-sources.mjs',
+        'data:read': 'node runtime/tools/read-review.mjs',
       },
     },
     null,
@@ -116,6 +119,12 @@ writeFileSync(
     'Original history files and evidence originals must be stored separately.',
     'Backups contain private local settings and notes; do not publish them.',
     '',
+    'Read saved reviews without starting the app or reconnecting original folders:',
+    'npm run data:read -- list "DATA_OR_BACKUP_DIRECTORY"',
+    'npm run data:read -- export "DATA_OR_BACKUP_DIRECTORY" "REVIEW_ID" json "NEW_OUTPUT_FILE"',
+    'Use markdown instead of json for the readable report. Existing files are never overwritten.',
+    'See docs/READING-SAVED-REVIEWS.md for verification limits and privacy precautions.',
+    '',
   ].join('\n'),
 )
 
@@ -123,6 +132,7 @@ inspectReleaseTree(releaseRoot)
 smokeTestBundle(join(releaseRoot, 'runtime', 'server', 'index.mjs'))
 smokeTestBundle(join(releaseRoot, 'runtime', 'tools', 'data-backup.mjs'))
 smokeTestBundle(join(releaseRoot, 'runtime', 'tools', 'restore-sources.mjs'))
+smokeTestBundle(join(releaseRoot, 'runtime', 'tools', 'read-review.mjs'))
 await verifyReleaseLifecycle(releaseRoot)
 
 mkdirSync(artifactsDirectory, { recursive: true })
