@@ -13,6 +13,7 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
+import { describeBundleFile } from './bundleFile.js'
 
 const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/)
@@ -57,9 +58,6 @@ function readSalt(path: string) {
   if (!/^[A-Za-z0-9_-]{43}\s*$/.test(bytes.toString('utf8')))
     throw new Error('識別子設定が欠けているか不正です。新しい識別子で補完しません。')
   return bytes
-}
-function describeFile(path: string) {
-  return { bytes: statSync(path).size, sha256: digest(readFileSync(path)) }
 }
 function publishNewDirectory<T>(destination: string, action: (stage: string) => T): T {
   const target = resolve(destination)
@@ -108,8 +106,8 @@ export function createDataBundle(dataDirectory: string, destination: string): Da
       createdAt: new Date().toISOString(),
       schemaHash,
       files: {
-        'devtax-radar.db': describeFile(join(stage, 'devtax-radar.db')),
-        'identifier-salt': describeFile(join(stage, 'identifier-salt')),
+        'devtax-radar.db': describeBundleFile(join(stage, 'devtax-radar.db')),
+        'identifier-salt': describeBundleFile(join(stage, 'identifier-salt')),
       },
       originalFilesIncluded: false,
     }
@@ -139,7 +137,7 @@ export function verifyDataBundle(directory: string): DataBundleManifest {
     throw new Error('未対応のファイルを含むバックアップです。')
   for (const name of files) {
     const expected = manifest.files[name],
-      actual = describeFile(join(folder, name))
+      actual = describeBundleFile(join(folder, name))
     if (actual.bytes !== expected.bytes || actual.sha256 !== expected.sha256)
       throw new Error(name + 'のサイズまたはhashが一致しません。')
   }
@@ -167,7 +165,7 @@ export function restoreDataBundle(
   return publishNewDirectory(destination, (stage) => {
     for (const name of files) {
       copyFileSync(join(directory, name), join(stage, name))
-      if (describeFile(join(stage, name)).sha256 !== manifest.files[name].sha256)
+      if (describeBundleFile(join(stage, name)).sha256 !== manifest.files[name].sha256)
         throw new Error('復元中にバックアップ内容が変更されました。')
     }
     // Keep the archive manifest beside the restored data for provenance; no process is started here.

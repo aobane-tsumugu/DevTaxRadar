@@ -1,0 +1,18 @@
+{
+  "scope": "checksum helper and document verifier with synthetic fixtures only",
+  "node": "v22.16.0",
+  "typescript": "5.8.3",
+  "platform": "linux",
+  "frameworkChange": "vitest import to node:test only",
+  "validationSubstituted": false,
+  "fullTypecheck": false,
+  "fullVitest": false,
+  "actualProductHtmlVerified": false,
+  "productApiExecuted": false,
+  "hashes": {
+    "src/server/bundleFile.ts": "d2bfc018117bae5c7b0fd9acc2a3546770f9606c81ed062b907065f85eb37944",
+    "tests/server/bundleFile.test.ts": "48f189c344129639411547c263dab07194bdad74213e16c7a3c4a443e966db99",
+    "tests/server/designDocs.test.ts": "0bf572b925135e55806fa4216f9bf8794d5df30dedbf47f674e0ba2fc898da00",
+    "scripts/design/verify-docs.cjs": "6a6d9f1d2d461d7ef7e06d9efac7f52719f34a88b54242e7b183506c484676a6"
+  }
+}
