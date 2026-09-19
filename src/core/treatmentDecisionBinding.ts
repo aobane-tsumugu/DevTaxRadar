@@ -1,6 +1,6 @@
 import type { DecisionRecord, PlanningSnapshot } from '../planning/types.js'
 import type { AnnualCostProjection } from '../accounting/costs.js'
-import { canonicalTreatmentValue } from './costTreatmentFacts.js'
+import { canonicalTreatmentValue, type CostTreatmentFacts } from './costTreatmentFacts.js'
 import { projectCostTreatments } from './costTreatments.js'
 export type TreatmentDecisionBinding = {
   costYear: number
@@ -23,6 +23,28 @@ export function validateTreatmentDecisionBinding(value: unknown): asserts value 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || canonicalTreatmentValue(parsed) !== b.basis)
     throw new Error('候補元の確認記録は正規化した資料である必要があります。')
 }
+/** Production qualification does not depend on an unadopted comparison or its display horizon. */
+function productionFacts(fact: CostTreatmentFacts) {
+  const { methodComparison: _scenario, recordedAt: _editedAt, ...production } = fact
+  return production
+}
+
+/** Read old v1 bindings without rewriting an adopted payload or its hash. */
+function productionBindingValue(binding: TreatmentDecisionBinding): string {
+  const value = JSON.parse(binding.basis) as {
+    version?: unknown; item?: unknown; fact?: CostTreatmentFacts
+  }
+  if (Object.keys(value).sort().join(',') !== 'fact,item,version' ||
+      ![1, 2].includes(value.version as number) || !value.fact ||
+      typeof value.fact !== 'object' || Array.isArray(value.fact))
+    throw new Error('対応していない判断の確認元です。')
+  return canonicalTreatmentValue({
+    costYear: binding.costYear, contributionId: binding.contributionId,
+    factsId: binding.factsId, version: 2,
+    item: value.item, fact: productionFacts(value.fact),
+  })
+}
+
 export function treatmentDecisionBasis(costs: AnnualCostProjection, planning: PlanningSnapshot, id: string) {
   const report = projectCostTreatments(costs, planning)
   const item = report.items.find((row) => row.contributionId === id)
@@ -31,7 +53,7 @@ export function treatmentDecisionBasis(costs: AnnualCostProjection, planning: Pl
     throw new Error('条件付き金額と対象制作物がそろった候補だけを判断案へ取り込めます。')
   const binding: TreatmentDecisionBinding = {
     costYear: costs.year, contributionId: id, factsId: fact.id,
-    basis: canonicalTreatmentValue({ version: 1, item, fact }),
+    basis: canonicalTreatmentValue({ version: 2, item, fact: productionFacts(fact) }),
   }
   validateTreatmentDecisionBinding(binding)
   return { item, binding }
@@ -45,6 +67,6 @@ export function treatmentDecisionBindingMatches(
     const { item, binding } = treatmentDecisionBasis(costs, planning, decision.treatmentBinding.contributionId)
     return decision.taxYear === costs.year && decision.taxUnitId === item.taxUnitId &&
       decision.selectedCandidate === item.candidate &&
-      canonicalTreatmentValue(binding) === canonicalTreatmentValue(decision.treatmentBinding)
+      productionBindingValue(binding) === productionBindingValue(decision.treatmentBinding)
   } catch { return false }
 }
