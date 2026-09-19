@@ -351,7 +351,9 @@ export function buildWorkspaceCostSnapshot(
         equipmentTaxUnitId && projectRatio !== null ? Math.round(business * ratio(projectRatio)) : 0
       if (projectRatio === null)
         basis.warnings.push('年度別の制作物割合が未確認のため、業務分を未配分として保持します。')
-      const reason = `設備全体の普通償却額 ${annual}円 × 業務割合 ${businessRatio} を円単位で四捨五入して業務額 ${business}円。${allocation ? ` ${year}年の配分根拠：${allocation.reason}` : ''}`
+      const annualLabel = calculation.engineVersion === 'jp-individual-small-equipment/1'
+        ? '少額設備の供用年費用基礎' : '普通償却額'
+      const reason = `設備全体の${annualLabel} ${annual}円 × 業務割合 ${businessRatio} を円単位で四捨五入して業務額 ${business}円。${allocation ? ` ${year}年の配分根拠：${allocation.reason}` : ''}`
       basis.method.explanation += ` ${reason}`
       addContribution(
         basis,

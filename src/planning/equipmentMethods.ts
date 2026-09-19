@@ -12,6 +12,7 @@ export const equipmentMethodSchema = equipmentDepreciationInputSchema
     taxpayer: true,
     assetKind: true,
     method: true,
+    rentalUse: true,
     methodReason: true,
     usefulLifeYears: true,
     useThroughYearEnd: true,
