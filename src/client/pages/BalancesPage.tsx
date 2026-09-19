@@ -1,5 +1,6 @@
 import DateInput from './DateInput'
 import TreatmentBalanceDraftPanel from './TreatmentBalanceDraftPanel'
+import SoftwareAcquisitionPanel from './SoftwareAcquisitionPanel'
 import type { ConsultationNavigation } from '../consultationNavigation'
 import { decisionIsConfirmed } from '../../core/decisionConfirmation'
 import { checkBalanceReferences } from '../../core/balanceReferences'
@@ -460,6 +461,8 @@ export default function BalancesPage({
               {dirty ? '入力を破棄して保存済みを読み直す' : '保存済みを読み直す'}
             </button>
           </div>
+          {local && <SoftwareAcquisitionPanel datasetId={datasetId} snapshot={draft.snapshot}
+            planning={planning} busy={busy || conflict} edit={edit} />}
           {local && navigation?.contributionId && <TreatmentBalanceDraftPanel
             request={{ ...navigation, contributionId: navigation.contributionId }} datasetId={datasetId}
             snapshot={draft.snapshot} planning={planning} disabled={busy || conflict}
