@@ -24,6 +24,8 @@
     "typecheck": "tsc -b",
     "start": "tsx src/server/index.ts",
     "data:read": "tsx scripts/read-review.ts",
+    "docs:generate": "node scripts/design/build-workflow-blueprint.cjs",
+    "docs:check": "node scripts/design/build-workflow-blueprint.cjs --check && node scripts/design/verify-docs.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "oxlint",
