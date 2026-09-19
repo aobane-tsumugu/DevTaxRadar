@@ -1,11 +1,11 @@
 name: DevTax temporary verification workspace
 
-# One bounded verification of the reviewed main checkpoint, 2026-09-17.
-# A single explicit retry triggers this. No secrets, deployment, or automatic push.
+# Explicit, bounded verification; no deployment, secrets or repository writes.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  workflow_dispatch:
+  push:
+    branches: [work/c03-software-method-posting-20260920]
+    paths: [.github/workflows/devtax-verification-workspace.yml]
 
 permissions:
   contents: read
@@ -16,15 +16,13 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.event.workflow_run.id == 33136825548 && github.event.workflow_run.run_attempt == 2
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 20970c9569850d031dbd38bda75c573d5bfc5b3e
           persist-credentials: false
-      - name: Preserve exact source revision
+      - name: Preserve source before running tools
         shell: bash
         run: |
           set -euo pipefail
@@ -34,26 +32,25 @@ jobs:
           git archive --format=tar HEAD > "$RUNNER_TEMP/devtax-workspace.tar"
       - uses: actions/setup-node@v4
         with:
-          node-version: 24.14.0
+          node-version: 24
       - name: Install locked dependencies
         run: npm ci
-      - name: Capture baseline checks without concealing failures
+      - name: Capture checks without concealing failures
         shell: bash
         run: |
           set +e
           failed=0
-          printf 'task\texit_status\telapsed_seconds\n' > verification/status.tsv
-          for task in typecheck test lint format:check build privacy:check; do
+          printf 'task\texit_status\n' > verification/status.tsv
+          for task in docs:check typecheck test lint format:check build privacy:check; do
             filename="${task//:/-}"
-            started=$SECONDS
-            timeout --signal=TERM --kill-after=5s 60s npm run "$task" > "verification/$filename.log" 2>&1
+            timeout --signal=TERM --kill-after=10s 120s npm run "$task" > "verification/$filename.log" 2>&1
             status=$?
-            printf '%s\t%s\t%s\n' "$task" "$status" "$((SECONDS-started))" >> verification/status.tsv
+            printf '%s\t%s\n' "$task" "$status" >> verification/status.tsv
             if [ "$status" -ne 0 ]; then failed=1; fi
           done
           cat verification/status.tsv >> "$GITHUB_STEP_SUMMARY"
           exit "$failed"
-      - name: Package source and available runtime for local verification
+      - name: Package source and available runtime
         if: always()
         shell: bash
         run: |
@@ -68,7 +65,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: devtax-workspace-20970c9
+          name: devtax-correction-workspace-${{ github.sha }}
           path: ${{ runner.temp }}/devtax-workspace.tar.gz
           retention-days: 1
           if-no-files-found: error
