@@ -47,10 +47,10 @@ const compareId = (a: { id: string }, b: { id: string }) => a.id < b.id ? -1 : a
 const yen = (value: number) => Number.isSafeInteger(value) && value >= 0
 
 /** Bind the selected terminal cost and its ancestors, not a total or decoded opaque ID. */
-export function costTreatmentBasis(
+function treatmentBasisRecord(
   costs: AnnualCostProjection, planning: PlanningSnapshot, contributionId: string,
   selectedEvidenceIds: readonly string[] = [],
-): string {
+) {
   const one = <T extends { id: string }>(values: T[], id: string): T => {
     const found = values.filter((row) => row.id === id)
     if (found.length !== 1) throw new Error('費用の参照を一意に確認できません。')
@@ -93,7 +93,7 @@ export function costTreatmentBasis(
     const { localReference: _private, ...record } = rows[0]!
     return record
   })
-  return canonicalTreatmentValue({
+  return {
     version: 1, year: costs.year, contributionId,
     bases: [...bases.values()].sort(compareId),
     contributions: [...contributions.values()].sort(compareId),
@@ -103,7 +103,14 @@ export function costTreatmentBasis(
       revenueModel: unit.revenueModel, predecessorId: unit.predecessorId,
       sameAsExternalVersion: unit.sameAsExternalVersion } : null,
     events, evidence,
-  })
+  }
+}
+
+export function costTreatmentBasis(
+  costs: AnnualCostProjection, planning: PlanningSnapshot, contributionId: string,
+  selectedEvidenceIds: readonly string[] = [],
+): string {
+  return canonicalTreatmentValue(treatmentBasisRecord(costs, planning, contributionId, selectedEvidenceIds))
 }
 
 /** Draft facts never infer a purpose, service date, or tax method from names. */
@@ -159,7 +166,8 @@ export function projectCostTreatments(
     if (!['tax-unit', 'general'].includes(row.target.kind)) return { ...item, status: 'allocation-needed',
       missingFacts: ['未配分・捕捉外・端数は、特定の処理候補へ自動配分しません。'] }
     if (!fact) return { ...item, missingFacts: ['この費用配分の作業実態と対象年の処理条件'] }
-    const currentBasis = costTreatmentBasis(costs, planning, row.id, fact.evidenceIds)
+    const basisRecord = treatmentBasisRecord(costs, planning, row.id, fact.evidenceIds)
+    const currentBasis = canonicalTreatmentValue(basisRecord)
     if (fact.costBasis !== currentBasis) return { ...item, status: 'stale',
       missingFacts: ['金額・期間・方法・対応先・根拠が確認元から変わっています。結び直してください。'] }
     if (sources.some((source) => source!.kind === 'opening-balance'))
@@ -167,10 +175,10 @@ export function projectCostTreatments(
     const missing = [...item.missingFacts]
     if (!fact.reason.trim()) missing.push('登録した作業実態の理由')
     if (!fact.evidenceIds.length) missing.push('処理条件に対応する根拠参照')
-    const evidenceIds = unique([...fact.evidenceIds, ...row.evidenceIds,
-      ...sources.flatMap((source) => source!.evidenceIds)])
-    if (evidenceIds.some((id) => !planning.evidence.some((e) => e.id === id)))
-      missing.push('存在する根拠参照')
+    // Resealing confirms which records were reviewed, not that a missing
+    // ancestor or lifecycle proof now exists. Check the complete bound graph.
+    if (basisRecord.evidence.some((record) => 'missing' in record))
+      missing.push('親原価・出来事を含めた、存在する根拠参照')
     // A period-wide condition cannot override an explicit in-period lifecycle transition.
     if (row.target.kind === 'tax-unit') {
       const unit = planning.taxUnits.find((u) => row.target.kind === 'tax-unit' && u.id === row.target.taxUnitId)

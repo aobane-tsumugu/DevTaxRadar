@@ -6,9 +6,14 @@ const { createHash } = require('node:crypto');
 const { tmpdir } = require('node:os');
 const { extractRoutes } = require('./route-inventory.cjs');
 
+function requireRegularFile(file) {
+  assert.ok(fs.lstatSync(file).isFile(), file + ': expected a regular file, not a symbolic link');
+}
+
 /** Rebuild in isolation: a check must not repair or overwrite the file it checks. */
 function verifyGeneratedBlueprint(root) {
   const output = 'docs/design/workflow-blueprint.html';
+  requireRegularFile(path.join(root, output));
   const committed = fs.readFileSync(path.join(root, output));
   const stage = fs.mkdtempSync(path.join(tmpdir(), 'devtax-blueprint-'));
   try {
@@ -22,7 +27,7 @@ function verifyGeneratedBlueprint(root) {
     ];
     for (const name of inputs) {
       const source = path.join(root, name);
-      if (!fs.existsSync(source)) continue;
+      if (!fs.lstatSync(source, { throwIfNoEntry: false })) continue;
       fs.cpSync(source, path.join(stage, name), {
         recursive: true,
         filter: file => {
@@ -31,8 +36,16 @@ function verifyGeneratedBlueprint(root) {
           const basename = path.basename(file);
           const stateFile = /\.(?:db|sqlite3?)(?:-(?:wal|shm))?$/i.test(basename) ||
             ['identifier-salt', 'restore-reconnect-required.json', 'restored-from.json'].includes(basename);
-          return relative !== path.normalize(output) && !stateFile &&
-            !parts.some(part => part === 'node_modules' || part === '.git');
+          const privateFile = /^\.env(?:\.|$)/.test(basename) ||
+            ['.npmrc', '.netrc'].includes(basename);
+          if (relative === path.normalize(output) || stateFile || privateFile ||
+              parts.some(part => ['node_modules', '.git', '.claude', '.codex'].includes(part))) return false;
+          const entry = fs.lstatSync(file);
+          // A preserved symlink would still target the original checkout/HOME,
+          // allowing an otherwise isolated generator to read or write through it.
+          assert.ok(!entry.isSymbolicLink(), relative + ': symbolic link is not a generator input');
+          assert.ok(entry.isFile() || entry.isDirectory(), relative + ': unsupported generator input');
+          return true;
         },
       });
     }
@@ -44,6 +57,7 @@ function verifyGeneratedBlueprint(root) {
         timeout: 60_000,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
+      requireRegularFile(generatedPath);
       return fs.readFileSync(generatedPath);
     };
     const first = generate();

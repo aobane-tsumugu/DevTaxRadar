@@ -4,6 +4,7 @@ import type { BalanceSnapshot } from '../../accounting/types'
 import type { PlanningSnapshot } from '../../planning/types'
 import { draftTreatmentAddition } from '../../core/costTreatmentDraft'
 import { getCostProjection, getRuntime } from '../api'
+import { readTreatmentProjection } from '../treatmentProjectionRead'
 import DateInput from './DateInput'
 export type TreatmentBalanceRequest = { year: number; contributionId: string; request: number; datasetId?: string }
 export default function TreatmentBalanceDraftPanel({ request, datasetId, snapshot, planning, disabled, onApply }: {
@@ -22,20 +23,22 @@ export default function TreatmentBalanceDraftPanel({ request, datasetId, snapsho
   const generation = useRef(0)
   useEffect(() => { generation.current++; setCosts(null); setAccountId(''); setDate(''); setBusy(false); setMessage('')
     return () => { generation.current++ }
-  }, [request?.request, request?.contributionId, datasetId])
+  }, [request?.request, request?.contributionId, request?.year, request?.datasetId, datasetId])
   if (!request || request.datasetId !== datasetId) return null
   const activeRequest = request
   async function load() {
+    if (disabled || busy) return
     const token = ++generation.current
     setBusy(true)
+    setCosts(null)
     try {
-      if ((await getRuntime()).datasetId !== datasetId) throw new Error('接続先の資料が変わっています。')
-      const result = await getCostProjection(activeRequest.year)
+      const result = await readTreatmentProjection(datasetId, activeRequest.year, getRuntime, getCostProjection)
       if (token === generation.current) { setCosts(result); setMessage('最新の費用を読みました。まだ入力へ追加していません。') }
     } catch (error) { if (token === generation.current) setMessage(error instanceof Error ? error.message : '読込みに失敗しました。') }
     finally { if (token === generation.current) setBusy(false) }
   }
   function apply() {
+    if (disabled || busy) return
     try {
       if (!costs) throw new Error('最新の費用を読み取ってください。')
       const decisions = planning.decisions.filter((row) => row.treatmentBinding?.costYear === activeRequest.year && row.treatmentBinding.contributionId === activeRequest.contributionId)
