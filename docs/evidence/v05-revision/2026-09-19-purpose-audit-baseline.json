@@ -1,0 +1,325 @@
+{
+  "kind": "purpose-audit-baseline",
+  "version": 1,
+  "repository": "aobane-tsumugu/DevTaxRadar",
+  "auditedCommit": "e98c8167abb8a06ede1dfb7eca071b64e802fa2d",
+  "recordedOn": "2026-09-19",
+  "provenance": {
+    "artifact": "DevTax_purpose_audit_20260919.zip",
+    "sha256": "bf642d1c376be81d1a346681ffc038de67c8141d2ea61a9297d3db544eb98f03",
+    "importedFromPriorAudit": true,
+    "rerunDuringPlanCreation": false
+  },
+  "limitations": [
+    "Recorded synthetic pure-function observations, not corrected behavior.",
+    "No HTTP API, React interaction, Node24 or tax acceptance is established by these records.",
+    "Source copies were not added to the repository; immutable blobs are identified below."
+  ],
+  "sourceHashes": {
+    "src/core/annualMethodComparison.ts": {
+      "gitBlob": "20b0c07522e707b0f9478bfe313632787b9d2ab8",
+      "sha256": "b3ca5665782605c9039c63c6e9abde4f226fa7054390ef18c6f9cbdc845a1951"
+    },
+    "src/core/straightLineRates.ts": {
+      "gitBlob": "04a77bdbe2280482979667dc5ec701775b3caa0a",
+      "sha256": "089372efc1c178206e4ec6204c289e865a2bb463343d094b12f21aae781ac43a"
+    },
+    "src/core/taxDecision.ts": {
+      "gitBlob": "70b3bf5cc3128e120f82ad70cb846f844eae2e89",
+      "sha256": "ac096b26074bcb7744dddac85466d8249fd06a39620892a4254a2062bd1f9025"
+    }
+  },
+  "methodProbes": {
+    "repositoryHead": "e98c8167abb8a06ede1dfb7eca071b64e802fa2d",
+    "node": "v22.16.0",
+    "typescript": "5.8.3",
+    "scope": "Exact Git-blob-matched pure function; synthetic inputs; no UI/API/Node24 acceptance",
+    "probes": [
+      {
+        "amountJpy": 80000,
+        "patch": {},
+        "status": "compared",
+        "reasons": [
+          "各方法は代替案です。方法間の金額を合算しません。将来年は継続使用等を仮定し、過去の採用資料を置換しません。"
+        ],
+        "scenarios": [
+          {
+            "method": "straight-line",
+            "status": "conditional",
+            "firstYear": {
+              "year": 2026,
+              "openingJpy": 0,
+              "additionsJpy": 80000,
+              "expenseJpy": 16000,
+              "closingJpy": 64000,
+              "assumption": true
+            },
+            "reasons": [
+              "登録した取得原価・適用条件を仮定する独立した比較です。制度適用・方法選択の確定や記帳は行いません。"
+            ]
+          },
+          {
+            "method": "immediate-expense",
+            "status": "conditional",
+            "firstYear": {
+              "year": 2026,
+              "openingJpy": 0,
+              "additionsJpy": 80000,
+              "expenseJpy": 80000,
+              "closingJpy": 0,
+              "assumption": true
+            },
+            "reasons": [
+              "登録した取得原価・適用条件を仮定する独立した比較です。制度適用・方法選択の確定や記帳は行いません。"
+            ]
+          },
+          {
+            "method": "three-year-pool",
+            "status": "not-eligible",
+            "firstYear": null,
+            "reasons": [
+              "この比較の一括償却対象は資産全体で10万円以上20万円未満です。"
+            ]
+          },
+          {
+            "method": "blue-special",
+            "status": "not-eligible",
+            "firstYear": null,
+            "reasons": [
+              "取得時期に対応する特例の金額範囲外です。",
+              "この所得区分・申告条件では青色特例を適用しません。",
+              "特例の事業者要件を満たしていません。",
+              "供用年の事業月数・他資産の特例使用額・明細の準備を確認してください。"
+            ]
+          }
+        ]
+      },
+      {
+        "amountJpy": 180000,
+        "patch": {
+          "businessOnly": false
+        },
+        "status": "missing-facts",
+        "reasons": [
+          "個人・資産全体原価・業務専用・通常条件・取得と供用日・比較理由を確認してください。"
+        ],
+        "scenarios": [
+          {
+            "method": "straight-line",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "個人・資産全体原価・業務専用・通常条件・取得と供用日・比較理由を確認してください。"
+            ]
+          },
+          {
+            "method": "immediate-expense",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "個人・資産全体原価・業務専用・通常条件・取得と供用日・比較理由を確認してください。"
+            ]
+          },
+          {
+            "method": "three-year-pool",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "個人・資産全体原価・業務専用・通常条件・取得と供用日・比較理由を確認してください。"
+            ]
+          },
+          {
+            "method": "blue-special",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "個人・資産全体原価・業務専用・通常条件・取得と供用日・比較理由を確認してください。"
+            ]
+          }
+        ]
+      },
+      {
+        "amountJpy": 80000,
+        "patch": {
+          "roundingConfirmed": null
+        },
+        "status": "missing-facts",
+        "reasons": [
+          "円未満切上げ・最終年は未償却額で上限を設ける比較上の端数方法を確認してください。"
+        ],
+        "scenarios": [
+          {
+            "method": "straight-line",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "円未満切上げ・最終年は未償却額で上限を設ける比較上の端数方法を確認してください。"
+            ]
+          },
+          {
+            "method": "immediate-expense",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "円未満切上げ・最終年は未償却額で上限を設ける比較上の端数方法を確認してください。"
+            ]
+          },
+          {
+            "method": "three-year-pool",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "円未満切上げ・最終年は未償却額で上限を設ける比較上の端数方法を確認してください。"
+            ]
+          },
+          {
+            "method": "blue-special",
+            "status": "missing-facts",
+            "firstYear": null,
+            "reasons": [
+              "円未満切上げ・最終年は未償却額で上限を設ける比較上の端数方法を確認してください。"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "taxProbes": {
+    "head": "e98c8167abb8a06ede1dfb7eca071b64e802fa2d",
+    "node": "v22.16.0",
+    "scope": "Exact pure function with synthetic inputs; does not invoke UI or API",
+    "ordinaryOperation": [
+      {
+        "placedInService": "unknown",
+        "result": {
+          "candidate": "unclassified",
+          "confidence": "low",
+          "appliedRuleIds": [],
+          "reasons": [],
+          "missingFacts": [
+            "実際の供用開始状況"
+          ],
+          "userConfirmationRequired": true,
+          "currentYearExpenseEstimate": null,
+          "futureBalanceEstimate": null,
+          "estimateStatus": "not-calculated"
+        }
+      },
+      {
+        "placedInService": "before",
+        "result": {
+          "candidate": "unclassified",
+          "confidence": "low",
+          "appliedRuleIds": [
+            "TAX-LIFECYCLE-CONFLICT"
+          ],
+          "reasons": [
+            "供用前という状態と保守・修繕目的が矛盾しています。"
+          ],
+          "missingFacts": [
+            "実際の供用開始状況"
+          ],
+          "userConfirmationRequired": true,
+          "currentYearExpenseEstimate": null,
+          "futureBalanceEstimate": null,
+          "estimateStatus": "not-calculated"
+        }
+      },
+      {
+        "placedInService": "after",
+        "result": {
+          "candidate": "ordinary-expense",
+          "confidence": "high",
+          "appliedRuleIds": [
+            "TAX-REPAIR-MAINTENANCE"
+          ],
+          "reasons": [
+            "供用後の障害除去、原状回復または効用維持に対応します。"
+          ],
+          "missingFacts": [],
+          "userConfirmationRequired": false,
+          "currentYearExpenseEstimate": 1000,
+          "futureBalanceEstimate": 0,
+          "estimateStatus": "estimated"
+        }
+      }
+    ],
+    "improvement": {
+      "candidate": "capital-expenditure",
+      "confidence": "medium",
+      "appliedRuleIds": [
+        "TAX-CAPITAL-IMPROVEMENT"
+      ],
+      "reasons": [
+        "供用後の新機能、機能向上、価値増加等に対応します。",
+        "修繕費判定の20万円基準は、新規資産の20万円境界とは別に確認します。"
+      ],
+      "missingFacts": [
+        "供用日、耐用年数、償却方法"
+      ],
+      "userConfirmationRequired": true,
+      "currentYearExpenseEstimate": null,
+      "futureBalanceEstimate": null,
+      "estimateStatus": "not-calculated"
+    }
+  },
+  "issues": {
+    "parent": 19,
+    "acquisitionBasis": 20,
+    "eligibility": 21,
+    "annualPosting": 22,
+    "usability": 23,
+    "verificationScope": 24,
+    "acceptanceRelease": 25
+  },
+  "probeInputs": {
+    "compareAnnualMethods": {
+      "ownerFactsId": "audit",
+      "costYear": 2026,
+      "profile": {
+        "filingType": "white",
+        "incomeCategory": "miscellaneous"
+      },
+      "facts": {
+        "assetKind": "software",
+        "contributionIds": [
+          "software-cost"
+        ],
+        "scopeBasis": "",
+        "completeCostConfirmed": true,
+        "businessOnly": true,
+        "acquiredOn": "2026-01-01",
+        "usedOn": "2026-01-01",
+        "usefulLifeYears": 5,
+        "taxpayer": "individual",
+        "ordinaryConditions": true,
+        "rentalUse": "none",
+        "throughYear": 2031,
+        "eligibleSmallBusiness": false,
+        "annualSpecialUsedJpy": 0,
+        "businessMonths": 12,
+        "statementReady": false,
+        "roundingConfirmed": true,
+        "reason": "Purpose-audit synthetic test"
+      }
+    },
+    "decideTaxCandidate": {
+      "base": {
+        "amountJpy": 1000,
+        "businessUse": "business",
+        "workPurpose": "ordinary-operation",
+        "serviceProvidedInCurrentPeriod": true,
+        "userConfirmed": true
+      },
+      "ordinaryOperationPlacedInService": [
+        "unknown",
+        "before",
+        "after"
+      ],
+      "improvementPatch": {
+        "workPurpose": "feature-addition",
+        "placedInService": "after"
+      }
+    }
+  }
+}
