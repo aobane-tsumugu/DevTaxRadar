@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { tmpdir } = require('node:os');
+const { extractRoutes } = require('./route-inventory.cjs');
 
 /** Rebuild in isolation: a check must not repair or overwrite the file it checks. */
 function verifyGeneratedBlueprint(root) {
@@ -38,7 +39,7 @@ function verifyGeneratedBlueprint(root) {
     const generatedPath = path.join(stage, output);
     const generate = () => {
       fs.rmSync(generatedPath, { force: true });
-      execFileSync(process.execPath, [path.join(stage, 'scripts/design/build-workflow-blueprint.cjs')], {
+      execFileSync(process.execPath, [path.join(stage, 'scripts/design/build-workflow-blueprint.cjs'), '--verify-inputs'], {
         cwd: stage,
         timeout: 60_000,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -73,8 +74,9 @@ function verifyDocs(root = path.resolve(__dirname, '../..')) {
   const api = html.slice(apiStart, apiEnd);
   const routeSource = ['src/server/index.ts', 'src/server/balanceRoutes.ts', 'src/server/observationRoutes.ts']
     .map(read).join('\n');
-  const routes = [...routeSource.matchAll(/app\.(get|post|put|patch|delete)\(\s*['"]([^'"]+)['"]/g)];
+  const routes = extractRoutes(routeSource);
   const registered = new Set(routes.map(([, method, route]) => method.toUpperCase() + ' ' + route));
+  assert.equal(registered.size, routes.length, 'duplicate registered API route');
   const documented = new Set([...api.matchAll(/\b(GET|POST|PUT|PATCH|DELETE)\s+(\/api\/[A-Za-z0-9_:.-][A-Za-z0-9_/:.-]*)/g)]
     .map(([, method, route]) => method + ' ' + route));
   for (const route of registered) assert.ok(documented.has(route), 'undocumented route: ' + route);
@@ -103,9 +105,11 @@ function verifyDocs(root = path.resolve(__dirname, '../..')) {
     assert.ok(references.length, line);
     for (const id of references) assert.ok(acceptance.has(id), id);
   }
+  const currentInputs = fs.existsSync(path.join(root, 'docs/design/current-design.json'))
+    ? require('./verify-current-inputs.cjs').verifyCurrentInputs(root) : undefined;
   // Financial invariants belong to tests of the actual calculation, not copied constants here.
   const regeneration = verifyGeneratedBlueprint(root);
-  return { requirements: requirements.length, acceptanceScenarios: acceptance.size,
+  return { ...(currentInputs ? { currentInputs } : {}), requirements: requirements.length, acceptanceScenarios: acceptance.size,
     sections: (html.match(/<section id=/g) ?? []).length, diagrams: (html.match(/<figure id=/g) ?? []).length,
     apiRoutes: routes.length, encoding: 'UTF-8', regeneration, scope: 'document checks, not product acceptance' };
 }
