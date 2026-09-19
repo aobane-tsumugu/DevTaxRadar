@@ -7,7 +7,6 @@ import type {
 } from './types.js'
 
 const ORDINARY_PURPOSES: ReadonlySet<WorkPurpose> = new Set([
-  'ordinary-operation',
   'maintenance',
   'bug-fix',
   'restoration',
@@ -97,6 +96,10 @@ export function decideTaxCandidate(input: TaxDecisionInput): TaxDecision {
     candidate = 'prepaid-expense'
     appliedRuleIds.push('TAX-TIMING-PREPAID')
     reasons.push('当期末時点でサービス提供を受けていない期間に対応します。')
+  } else if (input.workPurpose === 'ordinary-operation') {
+    candidate = 'ordinary-expense'
+    appliedRuleIds.push('TAX-ORDINARY-OPERATION')
+    reasons.push('特定資産の供用・修繕とは別の通常業務です。受益期間・債務確定等は費用の条件として確認します。')
   } else if (input.workPurpose === 'sales-production') {
     if (input.workInProgressAtPeriodEnd === true) {
       candidate = 'production-cost'

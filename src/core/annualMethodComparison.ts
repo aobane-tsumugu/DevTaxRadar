@@ -34,7 +34,7 @@ export type MethodScenario = {
   years: MethodYear[] | null
 }
 export type AnnualMethodComparison = {
-  engineVersion: 'annual-method-comparison/1'
+  engineVersion: 'annual-method-comparison/1' | 'annual-method-comparison/2'
   ownerFactsId: string
   year: number
   amountJpy: number | null
@@ -47,7 +47,7 @@ export type AnnualMethodComparison = {
   taxTreatmentVerified: false
 }
 export const ANNUAL_METHOD_RULE = {
-  version: '2026-09-18',
+  version: '2026-09-19',
   sourceUrls: [
     'https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/2100.htm',
     'https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/2106.htm',
@@ -114,7 +114,7 @@ export function compareAnnualMethods(
   if (amountJpy !== null && !safeYen(amountJpy)) throw new Error('資産全体額は安全な整数円である必要があります。')
   const methods = ['straight-line', 'immediate-expense', 'three-year-pool', 'blue-special'] as const
   const result: AnnualMethodComparison = {
-    engineVersion: 'annual-method-comparison/1', ownerFactsId, year: costYear,
+    engineVersion: 'annual-method-comparison/2', ownerFactsId, year: costYear,
     amountJpy, basisMeaning: 'whole-asset-before-business-allocation', status: 'compared', reasons: [],
     scenarios: [], sourceUrls: ANNUAL_METHOD_RULE.sourceUrls,
     automaticPosting: false, taxTreatmentVerified: false,
@@ -126,6 +126,8 @@ export function compareAnnualMethods(
   })
   if (facts.taxpayer === 'corporation' || facts.ordinaryConditions === false)
     return stop('unsupported', '法人・私用転用・方法変更・特殊調整・中断を普通計算へ置き換えません。')
+  if (facts.businessOnly === false)
+    return stop('unsupported', '私用を含む資産の比較はこの業務専用経路の対象外です。未入力として再確認を求めません。')
   if (facts.taxpayer !== 'individual' || facts.assetKind === 'unknown' || facts.completeCostConfirmed !== true ||
       facts.businessOnly !== true || facts.ordinaryConditions !== true || amountJpy === null ||
       !facts.reason.trim() || !facts.acquiredOn || !facts.usedOn)
@@ -142,8 +144,6 @@ export function compareAnnualMethods(
   const acquiredYear = Number(facts.acquiredOn.slice(0, 4)), usedYear = Number(facts.usedOn.slice(0, 4))
   if (usedYear > facts.throughYear || acquiredYear > facts.throughYear)
     return stop('missing-facts', '供用年まで含む比較期間を指定してください。')
-  if (facts.roundingConfirmed !== true)
-    return stop('missing-facts', '円未満切上げ・最終年は未償却額で上限を設ける比較上の端数方法を確認してください。')
   const cost = BigInt(amountJpy)
   const build = (method: MethodScenario['method']): MethodYear[] => {
     let closing = priorAsset ? BigInt(priorClosing!.amountJpy) : 0n
@@ -178,6 +178,14 @@ export function compareAnnualMethods(
     const reject = (s: MethodScenario['status'], r: string) => { if (status === 'conditional') status = s; reasons.push(r) }
     if (amountJpy < 1) reject('not-eligible', '取得額0円を償却資産へ変えません。')
     if (method === 'straight-line') {
+      // Income tax No.2100 notes 1/4: ordinary small assets are expensed on use;
+      // post-2022 non-primary rental is the explicit exception, never inferred.
+      if (amountJpy < 100000) {
+        if (facts.acquiredOn >= '2022-04-01' && facts.rentalUse === 'unknown')
+          reject('missing-facts', '10万円未満の資産は原則として供用年の全額費用です。貸付例外の有無を確認してください。')
+        else if (facts.acquiredOn < '2022-04-01' || facts.rentalUse !== 'other')
+          reject('not-eligible', '10万円未満の通常の資産は供用年の全額費用とし、通常償却を選択肢にしません。')
+      }
       if (facts.usefulLifeYears === null) reject('missing-facts', '法定耐用年数とその根拠を確認してください。')
       else if (facts.assetKind === 'software' && ![3, 5].includes(facts.usefulLifeYears))
         reject('unsupported', 'ソフトウエアの区分と3年・5年の耐用年数を確認してください。')
@@ -210,6 +218,8 @@ export function compareAnnualMethods(
           reject('not-eligible', '供用年の他資産分を含めた特例上限を超えています。')
       }
     }
+    if (status === 'conditional' && ['straight-line', 'three-year-pool'].includes(method) && facts.roundingConfirmed !== true)
+      reject('missing-facts', 'この方法の円未満切上げ・最終年残額上限という比較上の端数条件を確認してください。')
     if (status === 'conditional') reasons.push('登録した取得原価・適用条件を仮定する独立した比較です。制度適用・方法選択の確定や記帳は行いません。')
     result.scenarios.push({ method, status, reasons, years: status === 'conditional' ? build(method) : null })
   }

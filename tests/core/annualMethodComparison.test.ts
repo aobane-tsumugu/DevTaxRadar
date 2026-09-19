@@ -61,7 +61,7 @@ describe('explicit whole-asset annual alternatives', () => {
   })
   for (const [name, patch] of [
     ['whole amount', { completeCostConfirmed: null }], ['mixed/private', { businessOnly: false }],
-    ['missing date', { usedOn: null }], ['rounding assumption', { roundingConfirmed: null }],
+    ['missing date', { usedOn: null }],
     ['unknown taxpayer', { taxpayer: 'unknown' }], ['special adjustment', { ordinaryConditions: false }],
     ['corporation', { taxpayer: 'corporation' }], ['reverse dates', { usedOn: '2026-03-01' }],
   ] as const) it(`keeps ${name} uncalculated rather than zero`, () => {
