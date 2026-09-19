@@ -1,0 +1,112 @@
+{
+  "node": "v22.16.0",
+  "typescript": "5.8.3",
+  "platform": "linux",
+  "scope": "W06-W08 scoped execution, not the full repository acceptance suite",
+  "frameworkChange": "vitest import to node:test only",
+  "productionLogicSubstituted": false,
+  "databaseSubstituted": false,
+  "datasetReadTests": "injected readers; no HTTP server",
+  "fullTypecheck": false,
+  "fullNode24Vitest": false,
+  "fullApi": false,
+  "reactInteraction": false,
+  "fullCheckoutDocumentationCheck": false,
+  "deviceAcceptance": false,
+  "tests": 209,
+  "suites": 19,
+  "passed": 209,
+  "failed": 0,
+  "skipped": 0,
+  "cancelled": 0,
+  "exitStatus": 0,
+  "syntaxOnly": [
+    "src/client/pages/TreatmentBalanceDraftPanel.tsx"
+  ],
+  "selectedTests": [
+    "tests/core/treatmentEvidenceClosure.test.ts",
+    "tests/core/costTreatments.test.ts",
+    "tests/core/costTreatmentDraft.test.ts",
+    "tests/core/annualMethodComparison.test.ts",
+    "tests/core/costTreatmentIntegration.test.ts",
+    "tests/server/costTreatmentFactsRepository.test.ts",
+    "tests/server/decisionTreatmentBindingsRepository.test.ts",
+    "tests/server/currentDesign.test.ts",
+    "tests/server/currentDesignInputs.test.ts",
+    "tests/server/designInputIsolation.test.ts",
+    "tests/client/treatmentProjectionRead.test.ts"
+  ],
+  "generated": {
+    "scope": "generated documentation only; not product acceptance",
+    "artifacts": {
+      "docs/design/requirements-matrix.md": {
+        "bytes": 21306,
+        "sha256": "90bf27e957c0a29fa098808527d7da942f058d0ba5b83f0ec4ab18c9777c233a"
+      },
+      "docs/design/workflow-blueprint.html": {
+        "bytes": 45003,
+        "sha256": "dfe7c6c6d9948310b3552d7f3d40d0b96ae4deaa8abd89da59f76b262f15f59d"
+      }
+    },
+    "checked": true
+  },
+  "rawTapSha256": "dc0683490c4805091f4fd340f8b1f19a68ee0bf2f394a9911cbad94d76b86a68",
+  "baseCommit": "f6649d02c21f0c54d727b73f6d2eb5b6b25e8686",
+  "verifiedImplementationCommit": "b1f8635c11c9f87a4b07ff3d1bdc3f46c6152b84",
+  "verifiedTree": "684d1951321326f663e719ebe009bf76968a3401",
+  "gitBlobs": {
+    "src/core/taxDecision.ts": "70b3bf5cc3128e120f82ad70cb846f844eae2e89",
+    "src/core/costTreatmentFacts.ts": "c959dda0a385d175f239884a12e1881405eab85e",
+    "src/core/costTreatments.ts": "badc9db72ba676aa5290958160a2c772e39f8400",
+    "src/core/costTreatmentExport.ts": "6e18d3f25bcb8d2529920b79105316666d829ce4",
+    "src/core/workspaceMerge.ts": "68d1ad27dfdeb7228855d9f74c6d409db3c9f70f",
+    "src/core/workspaceChange.ts": "241890223b07e619b990653317b8fe8ad7c913fd",
+    "src/core/reviewHistory.ts": "c19f6fc5e15bdd06349b2d6344c2a7c49189ca3a",
+    "src/core/annualMethodComparison.ts": "20b0c07522e707b0f9478bfe313632787b9d2ab8",
+    "src/core/straightLineRates.ts": "04a77bdbe2280482979667dc5ec701775b3caa0a",
+    "src/core/costMethodConnection.ts": "58c609880a03cdbe96dcb8acf48543532aecfd85",
+    "src/core/treatmentDecisionBinding.ts": "ad6501f25f0bd92f4fba33b60267b8d43fa69a2d",
+    "src/core/costTreatmentDraft.ts": "27785b593ff441989c51b5cc7fd106a4075c46ad",
+    "src/core/treatmentDecisionReferences.ts": "ea01ad75a271ab6652b59637b89c167af221ae9d",
+    "src/core/balanceCostDraft.ts": "06839f9a97434eb8330a23e60cf80bdbd6791cc8",
+    "src/core/decisionConfirmation.ts": "744f04407de4a76a2d94782beac6eb226d0e6c34",
+    "src/server/costTreatmentFactsRepository.ts": "7f1d2ef3abbdb93a51625bba3501d18bc046068a",
+    "src/server/decisionTreatmentBindingsRepository.ts": "0038f67a3bfdafd6b553560677d4dd3fd63ef930",
+    "src/client/treatmentProjectionRead.ts": "6d7417aa1bd54061c2bcd71711881201d80f855d",
+    "tests/core/helpers/treatmentFixtures.ts": "93b56a9b60632ed10593c48b4a4b8145a3437ea9",
+    "src/client/pages/TreatmentBalanceDraftPanel.tsx": "2e7960befb1906aab34b1ccdee08ddd6f3e929c7",
+    "tests/core/treatmentEvidenceClosure.test.ts": "baddfb848b3054bad0e85f2c8994fe4f7f31c0c4",
+    "tests/core/costTreatments.test.ts": "f39a4c050ffab10639374db0f8093744a1b176ad",
+    "tests/core/costTreatmentDraft.test.ts": "51270156a593217679627a6ce02525e149df1a4e",
+    "tests/core/annualMethodComparison.test.ts": "b2cce18b479f27271a97d535a618c90865f5109f",
+    "tests/core/costTreatmentIntegration.test.ts": "81cb7062731598597bf48af8db2fcca5c17850c1",
+    "tests/server/costTreatmentFactsRepository.test.ts": "7b07f0c52fa9f5b7659cd277b6bf891df0003436",
+    "tests/server/decisionTreatmentBindingsRepository.test.ts": "326034a3979c27a55a1deaba3b3c60ae01d8a34c",
+    "tests/server/currentDesign.test.ts": "2f953b0fb024cc3911655bf349dc95c0e16db853",
+    "tests/server/currentDesignInputs.test.ts": "f5e994b1ab5c50d6b16b57a246e8f60d6d9440ed",
+    "tests/server/designInputIsolation.test.ts": "21ccd9759d3b53cdab8ff69ae3990f39573beefa",
+    "tests/client/treatmentProjectionRead.test.ts": "154337e6139e38123245229caa1298e39fa498d5",
+    "scripts/design/route-inventory.cjs": "4bb7dc65e6e938af00f00acfa0e223548ec2f235",
+    "scripts/design/render-current-design.cjs": "3c8ca10dd9a3699969dafbcaf57733850981e43a",
+    "scripts/design/build-workflow-blueprint.cjs": "9d89ef2355a4d3dbd7eee9716a8500e369d52e46",
+    "scripts/design/verify-docs.cjs": "49eaef8de34c646f1200b33f666a30f6348fbbaf",
+    "scripts/design/verify-current-inputs.cjs": "4e1c3e2b5b3cd70e2e14dd9593b265baa1e841a3",
+    "docs/design/current-design.json": "22163729bd9ef0081895ecc7446d1dc8960702d1",
+    "docs/design/acceptance-scenarios.md": "8381d82ec6f824ae307d776ab6c395647160ad3b",
+    "docs/design/requirements-matrix.md": "0b9b2b5a8a9bff7d79d13c5314fdded9b3b8dda6",
+    "docs/design/workflow-blueprint.html": "8f32f15adf2c51aa692d668325b5ff92c52a36ed",
+    "src/server/observationRoutes.ts": "89312522da733e41d08b16d48490d6b27bdff05b"
+  },
+  "redPhase": {
+    "evidenceClosure": {
+      "tests": 6,
+      "passed": 3,
+      "failed": 3
+    },
+    "generationIsolation": {
+      "tests": 12,
+      "passed": 4,
+      "failed": 8
+    }
+  }
+}
