@@ -1,3 +1,4 @@
+import { softwareMethodAdoptionIssues, softwareMethodHistoryValue } from '../core/softwareMethod.js'
 import { randomUUID } from 'node:crypto'
 import {
   canonicalReviewValue as canonical,
@@ -44,6 +45,7 @@ function copySnapshot(snapshot: BalanceSnapshot): BalanceSnapshot {
       openingYear: a.openingYear,
       opening: amount(a.opening),
       openingRevisionId: a.openingRevisionId,
+      ...(a.softwareMethod === undefined ? {} : { softwareMethod: structuredClone(a.softwareMethod) }),
     })),
     movements: snapshot.movements.map((m) => ({
       id: m.id,
@@ -52,6 +54,7 @@ function copySnapshot(snapshot: BalanceSnapshot): BalanceSnapshot {
       sourceIds: [...m.sourceIds],
       decisionId: m.decisionId,
       reason: m.reason,
+      ...(m.softwareExpense === undefined ? {} : { softwareExpense: structuredClone(m.softwareExpense) }),
       ...(m.balanceAllocations === undefined
         ? {}
         : {
@@ -241,6 +244,18 @@ export function saveBalanceDraft(
     }
     if (current.revision !== expectedRevision)
       throw new BalanceConflictError('別の画面で更新されています。最新の内容を読み直してください。')
+    // Older writers must not silently erase method provenance from retained records.
+    for (const account of current.snapshot.accounts) if (account.softwareMethod) {
+      const next = sanitized.accounts.find((row) => row.id === account.id)
+      if (next && (next.softwareMethod === undefined ||
+          (next.softwareMethod === null && current.snapshot.movements.some((row) => row.softwareExpense?.accountId === account.id))))
+        throw new BalanceValidationError('invalid-input', '保存済みのソフトウェア方法を含む入力で更新してください。確認元だけを省略できません。')
+    }
+    for (const movement of current.snapshot.movements) if (movement.softwareExpense) {
+      const next = sanitized.movements.find((row) => row.id === movement.id)
+      if (next && next.softwareExpense === undefined)
+        throw new BalanceValidationError('invalid-input', '年額の確認元だけを削除できません。訂正では該当する費用化記録を明示的に見直してください。')
+    }
     const revision = current.revision + 1
     integerRevision(revision)
     db.prepare(
@@ -282,9 +297,18 @@ export function previewBalanceReview(
     ? reviewChainChanges(db, getBalanceReview(db, previousReviewId)!)
     : []
   const materials = readMaterials?.(db, draft.snapshot, year)
+  const softwareIssues = softwareMethodAdoptionIssues(draft.snapshot, year, materials?.planning)
   const checkedMaterials = materials
     ? {
         ...materials,
+        referenceCheck: {
+          ...materials.referenceCheck,
+          status: softwareIssues.length ? 'needs-review' as const : materials.referenceCheck.status,
+          issues: [...materials.referenceCheck.issues, ...softwareIssues.map((issue) => ({
+            recordType: 'account' as const, recordId: issue.accountId, referenceId: issue.accountId,
+            code: 'unconfirmed-decision' as const, message: issue.message,
+          }))],
+        },
         openingLotCarry: checkOpeningLotCarry(
           previousReviewId ? getBalanceReview(db, previousReviewId) : null,
           projection,
@@ -336,6 +360,9 @@ function historicalPostings(snapshot: BalanceSnapshot, year: number): unknown {
         openingYear: account.openingYear,
         opening: account.opening,
         openingRevisionId: account.openingRevisionId,
+        ...(account.softwareMethod && Number(snapshot.movements.find((row) =>
+          row.id === account.softwareMethod!.acquisitionMovementId)?.occurredOn.slice(0, 4)) <= year
+          ? { softwareMethod: softwareMethodHistoryValue(account.softwareMethod, year) } : {}),
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     movements: snapshot.movements
@@ -406,6 +433,9 @@ export function adoptBalanceReview(
       throw new BalanceConflictError(
         '確認後に入力または採用版が変わりました。差分を確認してください。',
       )
+    const softwareIssues = softwareMethodAdoptionIssues(preview.snapshot, input.year, preview.materials?.planning)
+    if (softwareIssues.length)
+      throw new BalanceValidationError('invalid-input', softwareIssues.map((issue) => issue.message).join(' / '))
     if (preview.materials?.equipmentCarryCheck?.rows.some((row) => row.status === 'mismatch'))
       throw new BalanceValidationError(
         'invalid-input',

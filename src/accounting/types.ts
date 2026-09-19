@@ -14,6 +14,8 @@ export type BalanceAccount = {
   opening: AmountState
   /** The adopted record providing the opening, when carried from another record. */
   openingRevisionId?: string
+  /** Explicit method selection; null deliberately clears an unused selection. */
+  softwareMethod?: import('../core/softwareMethod.js').SoftwareMethod | null
 }
 
 type MovementBase = {
@@ -26,6 +28,8 @@ type MovementBase = {
   reason: string
   /** Explicit sources consumed by expense, reduction, or transfer; never inferred FIFO. */
   balanceAllocations?: BalanceFlowAllocation[]
+  /** Present only on an amount generated from a saved whole-asset method. */
+  softwareExpense?: import('../core/softwareMethod.js').SoftwareExpense
 }
 
 export type BalanceFlowAllocation = {
