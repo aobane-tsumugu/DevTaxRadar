@@ -20,7 +20,7 @@ import type {
   FolderSummary, HistorySource, HistorySourceInput, HistorySourceTestResult,
   LocalConfiguration, ProviderKey, RuntimeData, ScanMode, ScanResult,
 } from './client/types'
-import type { Diagnosis, PlanningSnapshot, ProjectClassification, ProjectRuleRecord } from './planning/types'
+import type { DecisionRecord, Diagnosis, PlanningSnapshot, ProjectClassification, ProjectRuleRecord } from './planning/types'
 import { annualAiView, belongsToYear } from './client/annualView'
 import Onboarding from './client/pages/Onboarding'
 import type { ConsultationNavigation } from './client/consultationNavigation'
@@ -354,6 +354,22 @@ export default function App() {
     const costTreatmentFacts = editCostTreatmentFacts(base.planning.costTreatmentFacts ?? [], next, previous)
     return reviewWorkspace(base.configuration, { ...base.planning, costTreatmentFacts })
   }
+  async function reviewSoftwareAnnualDecision(
+    decision: DecisionRecord,
+    expectedRevision: number,
+  ): Promise<boolean> {
+    const base = workspaceBase.current
+    if (!base || onboarding || comparison || impact || reviewCompletion.current)
+      throw new Error('別の入力・確認が進行中です。先に保存またはキャンセルしてください。')
+    if (base.revision !== expectedRevision)
+      throw new Error('年額判断を作った保存版からworkspaceが変わっています。同じ画面で再読取りしてください。')
+    if (base.planning.decisions.some((row) => row.id === decision.id))
+      throw new Error('同じ判断IDが既にあります。既存記録を上書きしません。')
+    return reviewWorkspace(base.configuration, {
+      ...base.planning,
+      decisions: [...base.planning.decisions, structuredClone(decision)],
+    })
+  }
   async function reviewTreatmentDecision(costs: AnnualCostProjection, contributionId: string, existingId?: string): Promise<boolean> {
     const base = workspaceBase.current
     if (!base || onboarding || comparison || impact || reviewCompletion.current)
@@ -477,6 +493,7 @@ export default function App() {
           onReviewAnswer={(context) => { setOnboardingStep(context.answer.kind === 'fact' ? 2 : 3); openOnboarding(context) }}
           navigation={balanceNavigation} key={runtime?.datasetId} datasetId={runtime?.datasetId}
           planning={planning} configuration={configuration} local={data.meta.source === 'local'} onManageUnits={() => editAt(2)}
+          onReviewSoftwareAnnualDecision={reviewSoftwareAnnualDecision}
         /></div>}
         <div hidden={page !== 'costs'}><CostsPage
           initial={data.costProjection} evidence={planning.evidence} local={data.meta.source === 'local'} onEdit={() => editAt(3)}
