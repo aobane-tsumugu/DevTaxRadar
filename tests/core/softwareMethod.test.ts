@@ -40,6 +40,17 @@ describe('C01 original cost through the selected method and actual stock expense
     assert.deepEqual(draftSoftwareYearExpense(first, f.planning, f.costs, expenseInput(2027)), first)
     assert.throws(() => methodFixture('straight-line', 80000), /10万円/)
   })
+  it('posts a 350000 blue-special asset once from the same whole-cost engine and preserves the election', () => {
+    const f = methodFixture('blue-special', 350000)
+    const first = draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, expenseInput(2026))
+    assert.equal(closing(first, 2026).expensesJpy, 350000)
+    assert.equal(closing(first, 2026).closing.amountJpy, 0)
+    assert.deepEqual(draftSoftwareYearExpense(first, f.planning, f.costs, expenseInput(2027)), first)
+    assert.equal(asset(first).softwareMethod!.blueSpecial?.annualSpecialUsedJpy, 0)
+    const changed = structuredClone(f.planning); changed.profile.filingType = 'white'
+    assert.throws(() => draftSoftwareYearExpense(f.snapshot, changed, f.costs, expenseInput(2026)), /青色申告/)
+    assert.equal(JSON.stringify(f.snapshot), JSON.stringify(methodFixture('blue-special', 350000).snapshot))
+  })
   it('requires no extra zero-value judgment once the fully expensed asset has no annual charge', () => {
     const f = methodFixture('immediate-expense', 80000)
     const first = draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, expenseInput(2026))
@@ -132,8 +143,16 @@ describe('ordinary server-side balance validation retains method provenance', ()
   it('rejects malformed or unsupported selection fields instead of stripping them', () => {
     const f = methodFixture(), selection = asset(f.snapshot).softwareMethod!
     for (const patch of [{ version: 2 }, { extra: true }, { allocationPolicy: 'FIFO' }, { usedOn: '2026-02-30' },
-      { method: 'blue-special' }, { usefulLifeYears: 4 }, { acquisitionBasis: 'null' }, { confirmedAt: 'invalid' }, { evidenceIds: ['proof', 'proof'] }])
+      { usefulLifeYears: 4 }, { acquisitionBasis: 'null' }, { confirmedAt: 'invalid' }, { evidenceIds: ['proof', 'proof'] }])
       assert.throws(() => validateSoftwareMethod({ ...selection, ...patch }))
+  })
+  it('requires complete and method-scoped blue-special conditions', () => {
+    const f = methodFixture('blue-special', 350000), selected = asset(f.snapshot).softwareMethod!
+    assert.doesNotThrow(() => validateSoftwareMethod(selected))
+    assert.throws(() => validateSoftwareMethod({ ...selected, blueSpecial: undefined }))
+    assert.throws(() => validateSoftwareMethod({ ...selected, roundingConfirmed: true }))
+    const ordinary = methodFixture().snapshot.accounts.find((row) => row.id === 'asset')!.softwareMethod!
+    assert.throws(() => validateSoftwareMethod({ ...ordinary, blueSpecial: selected.blueSpecial }))
   })
   it('rejects wrong account and year in an expense stamp', () => {
     const f = methodFixture(); f.snapshot = draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, expenseInput(2026))

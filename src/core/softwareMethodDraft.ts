@@ -19,6 +19,9 @@ export function chooseSoftwareMethod(
     throw new Error('方法を記録するソフトウェア・改良計画を選択してください。')
   if (input.evidenceIds.some((id) => !planning.evidence.some((row) => row.id === id)))
     throw new Error('方法・耐用年数等の根拠が現在の資料にありません。')
+  if (input.blueSpecial && (planning.profile.filingType !== input.blueSpecial.filingType ||
+      planning.profile.incomeCategory !== input.blueSpecial.incomeCategory))
+    throw new Error('青色申告・所得区分を現在の基本情報と一致させて確認してください。')
   const selection: SoftwareMethod = {
     ...structuredClone(input), version: 1, engineVersion: 'annual-method-comparison/2',
     acquisitionBasis: softwareAcquisitionBasis(snapshot, accountId, input.acquisitionMovementId),
@@ -26,8 +29,6 @@ export function chooseSoftwareMethod(
   }
   validateSoftwareMethod(selection)
   softwareMethodSchedule(snapshot, accountId, selection, Number(selection.usedOn.slice(0, 4)))
-  // Re-confirming identical inputs is a no-op. Do not invalidate prior postings
-  // merely because the browser supplied a new confirmation timestamp.
   const retained = account?.softwareMethod
   if (retained && canonicalSoftwareValue({ ...selection, confirmedAt: retained.confirmedAt }) === canonicalSoftwareValue(retained))
     return structuredClone(snapshot)
@@ -50,6 +51,9 @@ export function draftSoftwareYearExpense(
     throw new Error('供用年以降の費用化年を指定してください。')
   if (selection.ordinaryThroughYear !== undefined && input.year > selection.ordinaryThroughYear)
     throw new Error('この年は通常計算の終了後です。記録した理由に沿って既存の判断・残額使用で確認してください。')
+  if (selection.blueSpecial && (planning.profile.filingType !== selection.blueSpecial.filingType ||
+      planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory))
+    throw new Error('青色申告・所得区分が方法確認時から変わっています。方法を再確認してください。')
   if (softwareEvidenceBasis(planning.evidence, selection.evidenceIds) !== selection.evidenceBasis)
     throw new Error('方法の根拠内容が変わっています。変更を確認してから方法を更新してください。')
   if (selection.evidenceIds.some((id) => !planning.evidence.some((row) => row.id === id)))
@@ -64,33 +68,29 @@ export function draftSoftwareYearExpense(
   const methodBasis = softwareMethodPostingBasis(selection)
   for (const prior of schedule.filter((row) => row.year < input.year && row.expenseJpy > 0)) {
     const found = expenses.filter((row) => row.occurredOn.startsWith(prior.year + '-'))
-    if (found.length !== 1 || found[0]!.amountJpy !== prior.expenseJpy ||
-        found[0]!.softwareExpense?.methodBasis !== methodBasis)
+    if (found.length !== 1 || found[0]!.amountJpy !== prior.expenseJpy || found[0]!.softwareExpense?.methodBasis !== methodBasis)
       throw new Error(`${prior.year}年の費用化が未記録または変更されています。実績を推定して翌年へ進みません。`)
   }
   const existing = expenses.filter((row) => row.occurredOn.startsWith(input.year + '-'))
   if (existing.length) {
-    if (existing.length === 1 && existing[0]!.id === 'balance-use:' + input.requestId &&
-        existing[0]!.decisionId === input.decisionId && existing[0]!.amountJpy === expected.expenseJpy &&
-        existing[0]!.softwareExpense?.methodBasis === methodBasis) return structuredClone(snapshot)
+    if (existing.length === 1 && existing[0]!.id === 'balance-use:' + input.requestId && existing[0]!.decisionId === input.decisionId &&
+        existing[0]!.amountJpy === expected.expenseJpy && existing[0]!.softwareExpense?.methodBasis === methodBasis) return structuredClone(snapshot)
     throw new Error('この資産の対象年の費用化は既にあります。重ねて追加せず、既存記録を確認してください。')
   }
-  if (snapshot.movements.some((row) => row.kind === 'transfer' ? row.fromAccountId === account.id :
-    row.kind === 'reduction' && row.accountId === account.id))
+  if (snapshot.movements.some((row) => row.kind === 'transfer' ? row.fromAccountId === account.id : row.kind === 'reduction' && row.accountId === account.id))
     throw new Error('振替・減少を伴う資産は通常の継続償却案から分けて確認してください。')
   if (expected.expenseJpy === 0) return structuredClone(snapshot)
   if (!input.ordinaryYearConfirmed) throw new Error('対象年の継続使用と、転用・中止・特殊調整がないことを確認してください。')
   const decision = planning.decisions.find((row) => row.id === input.decisionId)
-  if (!decision || !decisionIsConfirmed(decision) || decision.taxYear !== input.year ||
-      decision.taxUnitId !== account.taxUnitId || decision.treatmentBinding || decision.selectedCandidate !== 'ordinary-expense')
+  if (!decision || !decisionIsConfirmed(decision) || decision.taxYear !== input.year || decision.taxUnitId !== account.taxUnitId ||
+      decision.treatmentBinding || decision.selectedCandidate !== 'ordinary-expense')
     throw new Error('対象年・ソフトウェアに対応する年額費用の確認済み判断を選択してください。取得原価への組入れ判断は転用しません。')
-  const source = balanceUseSources(snapshot, costs, `${input.year}-12-31`)
-    .find((row) => row.sourceKind === 'movement' && row.sourceId === selection.acquisitionMovementId)
+  const source = balanceUseSources(snapshot, costs, `${input.year}-12-31`).find((row) => row.sourceKind === 'movement' && row.sourceId === selection.acquisitionMovementId)
   if (!source || source.accountId !== account.id || source.amountJpy !== expected.openingJpy + expected.additionsJpy)
     throw new Error('保存した前年費用化と現在の原価残額が一致しません。後年度の使用予約も確認してください。')
-  if (source.untracedJpy !== 0 && source.lots.some((lot) => lot.remainingJpy !== 0)) throw new Error('個別原価内訳が未収録の部分は、比例配分で推定せず既存の残額使用で確認してください。')
-  const allocations = source.lots.some((lot) => lot.remainingJpy !== 0)
-    ? allocateSoftwareExpense(expected.expenseJpy, source.lots) : undefined
+  if (source.untracedJpy !== 0 && source.lots.some((lot) => lot.remainingJpy !== 0))
+    throw new Error('個別原価内訳が未収録の部分は、比例配分で推定せず既存の残額使用で確認してください。')
+  const allocations = source.lots.some((lot) => lot.remainingJpy !== 0) ? allocateSoftwareExpense(expected.expenseJpy, source.lots) : undefined
   const next = draftBalanceUse(snapshot, planning, costs, {
     requestId: input.requestId, kind: 'expense', sourceKind: 'movement', sourceId: source.sourceId,
     occurredOn: `${input.year}-12-31`, amountJpy: expected.expenseJpy, decisionId: input.decisionId,
@@ -104,7 +104,6 @@ export function draftSoftwareYearExpense(
   return next
 }
 
-/** Explicit handoff for retirement, conversion or a method change; never rewrites old postings. */
 export function endSoftwareOrdinaryMethod(snapshot: BalanceSnapshot, accountId: string, lastYear: number, reason: string): BalanceSnapshot {
   const next = structuredClone(snapshot)
   const selected = next.accounts.find((account) => account.id === accountId)?.softwareMethod

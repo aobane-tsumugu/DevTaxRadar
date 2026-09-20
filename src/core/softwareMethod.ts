@@ -1,5 +1,16 @@
 import type { BalanceSnapshot } from '../accounting/types.js'
-import { compareAnnualMethods, type AnnualMethodFacts, type MethodYear } from './annualMethodComparison.js'
+import { ANNUAL_METHOD_RULE, compareAnnualMethods, type AnnualMethodFacts, type MethodYear } from './annualMethodComparison.js'
+
+export type SoftwareBlueSpecial = {
+  version: 1
+  ruleVersion: '2026-09-19'
+  filingType: 'blue'
+  incomeCategory: 'business'
+  eligibleSmallBusiness: true
+  annualSpecialUsedJpy: number
+  businessMonths: number
+  statementReady: true
+}
 
 /** Persisted with the existing asset account, not a separate accounting ledger. */
 export type SoftwareMethod = {
@@ -7,13 +18,14 @@ export type SoftwareMethod = {
   engineVersion: 'annual-method-comparison/2'
   acquisitionMovementId: string
   acquisitionBasis: string
-  method: 'straight-line' | 'immediate-expense' | 'three-year-pool'
+  method: 'straight-line' | 'immediate-expense' | 'three-year-pool' | 'blue-special'
   usedOn: string
   usefulLifeYears: 3 | 5 | null
   businessOnly: true
   ordinaryConditions: true
   rentalUse: 'none' | 'primary-business' | 'other'
   roundingConfirmed: boolean
+  blueSpecial?: SoftwareBlueSpecial
   allocationPolicy: 'proportional-largest-remainder'
   evidenceIds: string[]
   evidenceBasis: string
@@ -49,16 +61,27 @@ function calendarDate(value: string): boolean {
   const date = new Date(value + 'T00:00:00Z')
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
+function validateBlueSpecial(value: unknown): asserts value is SoftwareBlueSpecial {
+  exactFields(value, ['version','ruleVersion','filingType','incomeCategory','eligibleSmallBusiness',
+    'annualSpecialUsedJpy','businessMonths','statementReady'], '青色少額資産特例の確認条件')
+  if (value.version !== 1 || value.ruleVersion !== ANNUAL_METHOD_RULE.version ||
+      value.filingType !== 'blue' || value.incomeCategory !== 'business' ||
+      value.eligibleSmallBusiness !== true || value.statementReady !== true ||
+      !Number.isSafeInteger(value.annualSpecialUsedJpy) || Number(value.annualSpecialUsedJpy) < 0 ||
+      !Number.isInteger(value.businessMonths) || Number(value.businessMonths) < 1 || Number(value.businessMonths) > 12)
+    throw new Error('青色少額資産特例の事業者条件・他資産使用額・事業月数・明細準備を確認してください。')
+}
 export function validateSoftwareMethod(value: unknown): asserts value is SoftwareMethod {
   exactFields(value, ['version','engineVersion','acquisitionMovementId','acquisitionBasis','method','usedOn',
     'usefulLifeYears','businessOnly','ordinaryConditions','rentalUse','roundingConfirmed','allocationPolicy',
     'evidenceIds','evidenceBasis','reason','confirmedAt',
+    ...(value && typeof value === 'object' && 'blueSpecial' in value ? ['blueSpecial'] : []),
     ...(value && typeof value === 'object' && 'ordinaryThroughYear' in value ? ['ordinaryThroughYear'] : []),
     ...(value && typeof value === 'object' && 'terminationReason' in value ? ['terminationReason'] : []),
   ], 'ソフトウェアの方法記録')
   if (value.version !== 1 || value.engineVersion !== 'annual-method-comparison/2' ||
       !nonempty(value.acquisitionMovementId, 200) || !nonempty(value.acquisitionBasis, 524288) ||
-      !['straight-line','immediate-expense','three-year-pool'].includes(String(value.method)) ||
+      !['straight-line','immediate-expense','three-year-pool','blue-special'].includes(String(value.method)) ||
       typeof value.usedOn !== 'string' || !calendarDate(value.usedOn) ||
       ![null, 3, 5].includes(value.usefulLifeYears as null | number) || value.businessOnly !== true ||
       value.ordinaryConditions !== true || !['none','primary-business','other'].includes(String(value.rentalUse)) ||
@@ -69,6 +92,19 @@ export function validateSoftwareMethod(value: unknown): asserts value is Softwar
       !/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/.test(value.confirmedAt) ||
       !calendarDate(value.confirmedAt.slice(0, 10)) || !Number.isFinite(Date.parse(value.confirmedAt)))
     throw new Error('ソフトウェアの方法・供用日・原価・根拠を確認してください。')
+  if (value.method === 'straight-line') {
+    if (![3, 5].includes(value.usefulLifeYears as number) || value.blueSpecial !== undefined)
+      throw new Error('定額法の耐用年数と方法固有条件を確認してください。')
+  } else if (value.usefulLifeYears !== null) {
+    throw new Error('定額法以外へ耐用年数を混在させません。')
+  }
+  if (value.method === 'blue-special') {
+    validateBlueSpecial(value.blueSpecial)
+    if (value.roundingConfirmed !== false)
+      throw new Error('青色少額資産特例に、定額法・一括償却用の端数仮定を混在させません。')
+  } else if (value.blueSpecial !== undefined) {
+    throw new Error('青色少額資産特例の条件は、その方法を選んだ資産だけに保存します。')
+  }
   if (value.ordinaryThroughYear !== undefined || value.terminationReason !== undefined) {
     if (!Number.isInteger(value.ordinaryThroughYear) || Number(value.ordinaryThroughYear) < Number(value.usedOn.slice(0, 4)) - 1 ||
         Number(value.ordinaryThroughYear) > 2151 || !nonempty(value.terminationReason, 1800))
@@ -137,16 +173,22 @@ export function softwareMethodSchedule(snapshot: BalanceSnapshot, accountId: str
   const origin = snapshot.movements.find((row) => row.id === selection.acquisitionMovementId)!
   const acquiredYear = Number(origin.occurredOn.slice(0, 4))
   const usedYear = Number(selection.usedOn.slice(0, 4))
+  const special = selection.blueSpecial
   const facts: AnnualMethodFacts = {
     assetKind: 'software', contributionIds: [origin.id], scopeBasis: '', completeCostConfirmed: true,
     businessOnly: selection.businessOnly, acquiredOn: origin.occurredOn, usedOn: selection.usedOn,
     usefulLifeYears: selection.usefulLifeYears, taxpayer: 'individual', ordinaryConditions: selection.ordinaryConditions,
     rentalUse: selection.rentalUse, throughYear: Math.max(throughYear, usedYear),
-    eligibleSmallBusiness: null, annualSpecialUsedJpy: null, businessMonths: null, statementReady: null,
+    eligibleSmallBusiness: special?.eligibleSmallBusiness ?? null,
+    annualSpecialUsedJpy: special?.annualSpecialUsedJpy ?? null,
+    businessMonths: special?.businessMonths ?? null,
+    statementReady: special?.statementReady ?? null,
     roundingConfirmed: selection.roundingConfirmed, reason: selection.reason,
   }
   const result = compareAnnualMethods(origin.amountJpy, facts,
-    { filingType: 'undecided', incomeCategory: 'undecided' }, accountId, acquiredYear)
+    special ? { filingType: special.filingType, incomeCategory: special.incomeCategory }
+      : { filingType: 'undecided', incomeCategory: 'undecided' },
+    accountId, acquiredYear)
   const scenario = result.scenarios.find((row) => row.method === selection.method)
   if (result.status !== 'compared' || !scenario?.years || scenario.status !== 'conditional')
     throw new Error([...result.reasons, ...(scenario?.reasons ?? [])].join(' / '))
@@ -238,7 +280,9 @@ export function softwareEvidenceBasis(evidence: readonly { id: string; localRefe
 /** Reuse the existing annual-adoption boundary, not a new approval workflow. */
 export function softwareMethodAdoptionIssues(
   snapshot: BalanceSnapshot, year: number,
-  planning?: { evidence: readonly { id: string; localReference?: string }[]; lifecycleEvents?: readonly { taxUnitId: string; eventType: string; occurredOn: string }[] },
+  planning?: { evidence: readonly { id: string; localReference?: string }[];
+    lifecycleEvents?: readonly { taxUnitId: string; eventType: string; occurredOn: string }[];
+    profile?: { filingType: string; incomeCategory: string } },
 ): { accountId: string; message: string }[] {
   const issues: { accountId: string; message: string }[] = []
   for (const account of snapshot.accounts) {
@@ -246,6 +290,10 @@ export function softwareMethodAdoptionIssues(
     if (!selection || Number(selection.usedOn.slice(0, 4)) > year ||
         (selection.ordinaryThroughYear !== undefined && year > selection.ordinaryThroughYear)) continue
     try {
+      if (selection.blueSpecial && planning?.profile &&
+          (planning.profile.filingType !== selection.blueSpecial.filingType ||
+           planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory))
+        throw new Error('青色申告・所得区分が方法確認時から変わっています。')
       if (planning?.lifecycleEvents?.some((event) => event.taxUnitId === account.taxUnitId &&
           ['retired','abandoned'].includes(event.eventType) && event.occurredOn <= `${year}-12-31`))
         throw new Error('終了・中止の記録があります。通常計算の年額と別の処理を確認してください。')
@@ -275,7 +323,7 @@ export function allocateSoftwareExpense(amount: number, lots: readonly { costYea
     remainder: BigInt(amount) * BigInt(lot.remainingJpy!) % total,
   }))
   let rest = BigInt(amount) - allocated.reduce((sum, row) => sum + row.amount, 0n)
-  allocated.sort((a, b) => a.remainder === b.remainder ? a.key < b.key ? -1 : a.key > b.key ? 1 : 0 : a.remainder > b.remainder ? -1 : 1)
+  allocated.sort((a, b) => a.remainder === b.remainder ? a.key < b.key ? -1 : a.key > b.key ? 1 : a.remainder > b.remainder ? -1 : 1)
   for (const row of allocated) if (rest > 0n) { row.amount++; rest-- }
   if (rest !== 0n) throw new Error('原価への費用化配分が一致しません。')
   return allocated.filter((row) => row.amount > 0n).sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0)

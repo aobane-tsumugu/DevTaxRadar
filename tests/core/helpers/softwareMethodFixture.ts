@@ -1,6 +1,7 @@
 import type { AnnualCostProjection } from '../../../src/accounting/costs.js'
 import type { BalanceSnapshot } from '../../../src/accounting/types.js'
 import type { PlanningSnapshot } from '../../../src/planning/types.js'
+import { ANNUAL_METHOD_RULE } from '../../../src/core/annualMethodComparison.js'
 
 export function acquisitionFixture() {
   const planning: PlanningSnapshot = {
@@ -63,7 +64,8 @@ export function methodFixture(method: SoftwareMethod['method'] = 'straight-line'
   const unselected = structuredClone(f.snapshot)
   f.snapshot = chooseSoftwareMethod(f.snapshot, f.planning, 'asset', {
     acquisitionMovementId: acquisitionId, method, usedOn: '2026-07-01', usefulLifeYears: method === 'straight-line' ? 5 : null,
-    businessOnly: true, ordinaryConditions: true, rentalUse: 'none', roundingConfirmed: method !== 'immediate-expense',
+    businessOnly: true, ordinaryConditions: true, rentalUse: 'none', roundingConfirmed: ['straight-line','three-year-pool'].includes(method),
+    ...(method === 'blue-special' ? { blueSpecial: { version: 1 as const, ruleVersion: ANNUAL_METHOD_RULE.version, filingType: 'blue' as const, incomeCategory: 'business' as const, eligibleSmallBusiness: true as const, annualSpecialUsedJpy: 0, businessMonths: 12, statementReady: true as const } } : {}),
     allocationPolicy: 'proportional-largest-remainder', evidenceIds: ['proof'], reason: '業務用ソフト全体原価・適用方法・端数条件を確認', confirmedAt: '2026-07-01T00:00:00Z',
   })
   return { ...f, unselected, acquisitionId }

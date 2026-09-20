@@ -19,6 +19,16 @@ describe('C03 saved-method rendering without live inputs', () => {
     for (const token of ['120,000円', '12,000円', '2025年 / part-2025 / 使用額 6,000円', '2026年 / part-2026 / 使用額 6,000円', 'confirmed-2026']) assert.ok(result.includes(token), token)
     assert.deepEqual(review, before)
   })
+  it('renders the frozen blue-special election conditions without a live recalculation', () => {
+    const review = saved(), method = review.snapshot.accounts[0]!.softwareMethod!
+    method.method = 'blue-special'; method.usefulLifeYears = null; method.roundingConfirmed = false
+    method.blueSpecial = { version: 1, ruleVersion: '2026-09-19', filingType: 'blue', incomeCategory: 'business',
+      eligibleSmallBusiness: true, annualSpecialUsedJpy: 400000, businessMonths: 12, statementReady: true }
+    const result = softwareMethodMarkdown(review)
+    assert.ok(result.includes('青色申告の少額資産特例'))
+    assert.ok(result.includes('他資産使用済額 400,000円'))
+    assert.ok(result.includes('事業月数 12'))
+  })
   it('adds nothing to an old record without method metadata', () => {
     const review = saved(); delete review.snapshot.accounts[0]!.softwareMethod
     assert.equal(softwareMethodMarkdown(review), '')

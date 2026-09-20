@@ -5,6 +5,7 @@ const profile = { filingType: 'blue', incomeCategory: 'business' }
 const form = (patch: Partial<SoftwareMethodForm> = {}): SoftwareMethodForm => ({
   accountId: 'asset', acquisitionMovementId: 'transfer', method: 'straight-line', usedOn: '2026-01-01', life: '5',
   rental: 'none', business: true, ordinary: true, rounding: true, evidenceIds: ['proof'], reason: '明示した通常の合成条件',
+  specialEligibility: '', specialUsedJpy: '', businessMonths: '', statementReady: '',
   year: '2027', decisionId: '', ordinaryYear: false, endYear: '', endReason: '', ...patch,
 })
 describe('C03 user-facing alternatives reuse the actual C02 method engine', () => {
@@ -14,7 +15,7 @@ describe('C03 user-facing alternatives reuse the actual C02 method engine', () =
     const straight = result.find((row) => row.method === 'straight-line')!
     assert.equal(straight.status, 'conditional')
     assert.deepEqual(straight.years!.map((row) => [row.year, row.openingJpy, row.expenseJpy, row.closingJpy]), [[2026, 0, 24000, 96000], [2027, 96000, 24000, 72000]])
-    assert.deepEqual(input, original); assert.equal(result.some((row) => row.method === 'blue-special'), false)
+    assert.deepEqual(input, original)
   })
   it('T03: 80,000 is immediate, not ordinary or pooled, and needs no rounding agreement', () => {
     const result = softwareMethodAlternatives(form({ rounding: false, life: '' }), 80000, '2026-01-01', profile)
@@ -29,6 +30,14 @@ describe('C03 user-facing alternatives reuse the actual C02 method engine', () =
       assert.equal(results.find((row) => row.method === 'immediate-expense')!.status === 'conditional', immediate)
       assert.equal(results.find((row) => row.method === 'three-year-pool')!.status === 'conditional', pool)
     })
+  it('supports a 350000 post-April-2026 blue-special alternative only with its own explicit conditions', () => {
+    const eligible = softwareMethodAlternatives(form({ method: 'blue-special', specialEligibility: 'yes', specialUsedJpy: '0', businessMonths: '12', statementReady: 'yes', rounding: false }), 350000, '2026-04-01', profile)
+      .find((row) => row.method === 'blue-special')!
+    assert.equal(eligible.status, 'conditional'); assert.equal(eligible.years![0]!.expenseJpy, 350000)
+    const missing = softwareMethodAlternatives(form({ method: 'blue-special', rounding: false }), 350000, '2026-04-01', profile)
+      .find((row) => row.method === 'blue-special')!
+    assert.equal(missing.status, 'missing-facts')
+  })
   it('does not treat an unknown or non-primary rental as no rental', () => {
     assert.equal(softwareMethodAlternatives(form({ rental: '' }), 80000, '2026-01-01', profile).find((row) => row.method === 'immediate-expense')!.status, 'missing-facts')
     assert.equal(softwareMethodAlternatives(form({ rental: 'other' }), 80000, '2026-01-01', profile).find((row) => row.method === 'immediate-expense')!.status, 'not-eligible')
@@ -39,7 +48,7 @@ describe('C03 user-facing alternatives reuse the actual C02 method engine', () =
     assert.deepEqual(input, original)
   })
   it('retains raw unfinished dates/years for editing, but cannot calculate them', () => {
-    assert.ok(validSoftwareMethodForm(form({ usedOn: '2026-', year: '202' })))
+    assert.ok(validSoftwareMethodForm(form({ usedOn: '2026-', year: '202', specialUsedJpy: '1e', businessMonths: '-' })))
     assert.deepEqual(softwareMethodAlternatives(form({ year: '' }), 120000, '2026-01-01', profile), [])
     assert.throws(() => softwareMethodAlternatives(form({ usedOn: '2026-' }), 120000, '2026-01-01', profile), /日付/)
   })
