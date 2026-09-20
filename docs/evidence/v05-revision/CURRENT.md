@@ -27,6 +27,8 @@
 
 この実行環境はNode 22.16.0で、repository checkout・lockfile依存がなく、package要件はNode >=24.14.0のため、今回追加したVitest・typecheck・build等のnpmゲートは**実行していない**。GitHub Actionsもこの是正作業ブランチの観測HEADにはrun/statusがなかった。したがって過去commitの成功件数は今回結果へ加算せず、今回実施したGitHubソース静的監査と、外部Node24で実行する試験を分離して記録する。
 
+C04静的受入では、DecisionEditorのdataset/revision付き復旧、復旧時の非送信、未完成年文字列保持、競合時の確認抑止、生成年額判断の読取専用表示、方法画面に `ordinary-expense` 自由入力がないこと、0円年・同年再利用・stale・movement decisionId・workspace revision guardを現行ソースで再確認した。C06静的監査は31要件=PRODUCT_SPEC、current-design参照欠落0、API登録元blob差分0、21受入条件hash一致、8完了条件hash一致、要件表/HTML再生成一致を確認した。
+
 ## 現行文書
 
 [現行モデル](../../design/current-design.json)、[要件表](../../design/requirements-matrix.md)、[HTML設計図](../../design/workflow-blueprint.html)は是正候補HEADの接続状態へ更新済み。既存21AC行と8完了条件を弱めていない。
