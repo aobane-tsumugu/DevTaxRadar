@@ -482,7 +482,8 @@ export default function App() {
           initial={data.costProjection} evidence={planning.evidence} local={data.meta.source === 'local'} onEdit={() => editAt(3)}
           treatmentEditor={runtime?.datasetId ? (projection) => <div key={runtime.datasetId}>
             <CostTreatmentFactsEditor projection={projection} planning={planning}
-              disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onReview={reviewTreatment} />
+              datasetId={runtime.datasetId!} parentRevision={workspaceBase.current?.revision ?? 0}
+              disabled={!workspaceBase.current || onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onReview={reviewTreatment} />
             <TreatmentHandoffPanel costs={projection} planning={planning}
               disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)}
               onDecision={reviewTreatmentDecision} onBalance={(year, contributionId) => {

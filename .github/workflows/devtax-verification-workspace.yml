@@ -1,11 +1,16 @@
 name: DevTax temporary verification workspace
 
-# Explicit, bounded verification; no deployment, secrets or repository writes.
+# Bounded correction checks; no deployment, secrets or repository writes.
 on:
   workflow_dispatch:
   push:
     branches: [work/c03-software-method-posting-20260920]
-    paths: [.github/workflows/devtax-verification-workspace.yml]
+    paths:
+      - .github/workflows/devtax-verification-workspace.yml
+      - src/core/softwareMethod*.ts
+      - src/client/workspaceRecovery.ts
+      - tests/core/correctionPurposeJourney.test.ts
+      - tests/client/correctionEditorHook.test.ts
 
 permissions:
   contents: read

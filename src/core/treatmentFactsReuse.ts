@@ -25,7 +25,7 @@ export function proposeCommonTreatmentFacts(
   const unit = planning.taxUnits.find((row) => destination.target.kind === 'tax-unit' && row.id === destination.target.taxUnitId)
   if (!unit || original?.target.kind !== 'tax-unit' || original.target.taxUnitId !== unit.id ||
       basis.unit?.id !== unit.id || basis.unit.unitType !== unit.unitType || basis.unit.usageMode !== unit.usageMode ||
-      basis.year !== source.costYear || !originalPeriod || originalPeriod.endedOn > period.startedOn)
+      basis.year !== source.costYear || !originalPeriod || originalPeriod.endedOn >= period.startedOn)
     throw new Error('別の制作物・用途・将来期間の条件を流用しません。')
   if (planning.lifecycleEvents.some((row) => row.taxUnitId === unit.id &&
       ['internal-use-started', 'improvement-started', 'retired', 'abandoned'].includes(row.eventType) &&

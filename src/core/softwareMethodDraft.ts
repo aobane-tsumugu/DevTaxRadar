@@ -4,7 +4,7 @@ import type { PlanningSnapshot } from '../planning/types.js'
 import { validateBalanceSnapshot } from './annualBalances.js'
 import { balanceUseSources, draftBalanceUse } from './balanceUseDraft.js'
 import { decisionIsConfirmed } from './decisionConfirmation.js'
-import { softwareAcquisitionBasis, softwareMethodSchedule,
+import { canonicalSoftwareValue, softwareAcquisitionBasis, softwareMethodSchedule,
   validateSoftwareMethod, softwareEvidenceBasis, softwareMethodPostingBasis, allocateSoftwareExpense, type SoftwareMethod } from './softwareMethod.js'
 
 /** Explicit confirmation once per asset; saving still uses the existing balance endpoint. */
@@ -26,6 +26,11 @@ export function chooseSoftwareMethod(
   }
   validateSoftwareMethod(selection)
   softwareMethodSchedule(snapshot, accountId, selection, Number(selection.usedOn.slice(0, 4)))
+  // Re-confirming identical inputs is a no-op. Do not invalidate prior postings
+  // merely because the browser supplied a new confirmation timestamp.
+  const retained = account?.softwareMethod
+  if (retained && canonicalSoftwareValue({ ...selection, confirmedAt: retained.confirmedAt }) === canonicalSoftwareValue(retained))
+    return structuredClone(snapshot)
   const next = structuredClone(snapshot)
   next.accounts.find((row) => row.id === accountId)!.softwareMethod = selection
   validateBalanceSnapshot(next)

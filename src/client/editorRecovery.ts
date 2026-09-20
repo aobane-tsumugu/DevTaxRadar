@@ -9,13 +9,16 @@ export type EditorCopy<T> = {
   value: T
 }
 export const EDITOR_COPY_LIMIT = 2 * 1024 * 1024
+export const EDITOR_FILE_LIMIT = 16 * 1024 * 1024
 const prefix = (datasetId: string, editor: string) =>
   'devtax:editor-draft:v1:' + encodeURIComponent(datasetId) + ':' + encodeURIComponent(editor) + ':'
 export const editorCopyKey = (copy: EditorCopy<unknown>) => prefix(copy.datasetId, copy.editor) + copy.id
 const identifier = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(value)
 
-export function encodeEditorCopy<T>(copy: EditorCopy<T>): string {
+export function encodeEditorCopy<T>(copy: EditorCopy<T>, maxBytes = EDITOR_COPY_LIMIT): string {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > EDITOR_FILE_LIMIT)
+    throw new Error('編集控えの容量指定が不正です。')
   if (copy.version !== 1 || !identifier(copy.datasetId) || !identifier(copy.editor) ||
       !identifier(copy.id) || !Number.isSafeInteger(copy.parentRevision) || copy.parentRevision < 0 ||
       typeof copy.updatedAt !== 'string' || !Number.isFinite(Date.parse(copy.updatedAt)) ||
@@ -26,16 +29,16 @@ export function encodeEditorCopy<T>(copy: EditorCopy<T>): string {
       throw new Error('未完成の数値は控えに保存できません。画面の入力は保持しています。')
     return value
   })
-  if (new TextEncoder().encode(raw).byteLength > EDITOR_COPY_LIMIT)
+  if (new TextEncoder().encode(raw).byteLength > maxBytes)
     throw new Error('編集控えの容量を超えました。入力は保持しています。個人用ファイルへ控えを保存してください。')
   return raw
 }
 
 export function decodeEditorCopy<T>(raw: string, valid: (value: unknown) => value is T): EditorCopy<T> {
-  if (new TextEncoder().encode(raw).byteLength > EDITOR_COPY_LIMIT) throw new Error('編集控えが大きすぎます。')
+  if (new TextEncoder().encode(raw).byteLength > EDITOR_FILE_LIMIT) throw new Error('編集控えが大きすぎます。')
   const copy = JSON.parse(raw) as EditorCopy<T>
   if (!copy || typeof copy !== 'object' || Array.isArray(copy)) throw new Error('編集控えの形式が不正です。')
-  encodeEditorCopy(copy)
+  encodeEditorCopy(copy, EDITOR_FILE_LIMIT)
   if (!valid(copy.value)) throw new Error('この編集画面に対応しない控えです。削除せず保持します。')
   return copy
 }

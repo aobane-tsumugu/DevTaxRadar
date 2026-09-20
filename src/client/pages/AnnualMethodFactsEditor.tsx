@@ -1,3 +1,4 @@
+import type { MethodNumberKey } from '../treatmentEditorValue'
 import type { AnnualCostProjection } from '../../accounting/costs'
 import type { PlanningSnapshot } from '../../planning/types'
 import type { CostTreatmentFacts } from '../../core/costTreatmentFacts'
@@ -7,9 +8,11 @@ import { costTreatmentBasis } from '../../core/costTreatments'
 import { useState } from 'react'
 import DateInput from './DateInput'
 
-export default function AnnualMethodFactsEditor({ costs, planning, facts, onChange }: {
+export default function AnnualMethodFactsEditor({ costs, planning, facts, onChange, numericInputs, onNumericInput }: {
   costs: AnnualCostProjection; planning: PlanningSnapshot; facts: CostTreatmentFacts;
   onChange: (method: AnnualMethodFacts | undefined) => void
+  numericInputs?: Partial<Record<MethodNumberKey, string>>
+  onNumericInput?: (key: MethodNumberKey, raw: string) => void
 }) {
   const [error, setError] = useState('')
   const method = facts.methodComparison
@@ -18,6 +21,13 @@ export default function AnnualMethodFactsEditor({ costs, planning, facts, onChan
     <label>{label}<select value={method?.[key] === null ? 'unknown' : String(method?.[key])} onChange={(event) => edit({ [key]: event.target.value === 'unknown' ? null : event.target.value === 'true' })}>
       <option value="unknown">未確認</option><option value="true">はい</option><option value="false">いいえ</option>
     </select></label>
+  const numberInput = (key: MethodNumberKey, label: string) => <label>{label}<input inputMode="numeric" maxLength={120}
+    value={numericInputs?.[key] ?? method?.[key] ?? ''} onChange={(event) => {
+      const raw = event.target.value
+      if (onNumericInput) onNumericInput(key, raw)
+      else if (raw === '' && key !== 'throughYear') edit({ [key]: null })
+      else if (/^\d+$/.test(raw) && Number.isSafeInteger(Number(raw))) edit({ [key]: Number(raw) })
+    }} /></label>
   return <fieldset><legend>任意：資産全体の方法別年次比較</legend>
     <p>購入原額と年額の配分、ソフトの資産全体原価を区別します。数値は同じ費用資料から取得し、別の費用台帳には転記しません。</p>
     {!method ? <button type="button" onClick={() => onChange(newAnnualMethodFacts(facts.costYear, facts.contributionId))}>方法比較の条件を追加</button> : <>
@@ -36,14 +46,14 @@ export default function AnnualMethodFactsEditor({ costs, planning, facts, onChan
       <label>納税者<select value={method.taxpayer} onChange={(e) => edit({ taxpayer: e.target.value as AnnualMethodFacts['taxpayer'] })}><option value="unknown">未確認</option><option value="individual">個人</option><option value="corporation">法人（この方法では未対応）</option></select></label>
       <label>取得・製作完了日<DateInput value={method.acquiredOn ?? ''} onValueChange={(date) => edit({ acquiredOn: date || null })} /></label>
       <label>業務供用開始日<DateInput value={method.usedOn ?? ''} onValueChange={(date) => edit({ usedOn: date || null })} /></label>
-      <label>確認した法定耐用年数<input type="number" min="1" max="100" value={method.usefulLifeYears ?? ''} onChange={(e) => edit({ usefulLifeYears: e.target.value === '' ? null : e.target.valueAsNumber })} /></label>
-      <label>比較を表示する最終年<input type="number" min={facts.costYear} max={Math.min(facts.costYear + 51, 2151)} value={method.throughYear} onChange={(e) => edit({ throughYear: e.target.valueAsNumber })} /></label>
+      {numberInput('usefulLifeYears', '確認した法定耐用年数')}
+      {numberInput('throughYear', '比較を表示する最終年')}
       {yesNo('ordinaryConditions', '表示期間の継続使用を仮定する。私用転用・方法変更・特殊調整・中断は含まない')}
       <label>貸付用途<select value={method.rentalUse} onChange={(e) => edit({ rentalUse: e.target.value as AnnualMethodFacts['rentalUse'] })}><option value="unknown">未確認</option><option value="none">貸付用ではない</option><option value="primary-business">主要業務の貸付</option><option value="other">それ以外の貸付</option></select></label>
       <p>青色／白色と所得区分は保存済みの基本情報を使います。比較だけで申告区分を変更しません。</p>
       {yesNo('eligibleSmallBusiness', '取得時期の青色少額資産特例の事業者要件を満たす')}
-      <label>供用年の他資産分の特例使用額<input type="number" min="0" value={method.annualSpecialUsedJpy ?? ''} onChange={(e) => edit({ annualSpecialUsedJpy: e.target.value === '' ? null : e.target.valueAsNumber })} /></label>
-      <label>供用年の事業月数<input type="number" min="1" max="12" value={method.businessMonths ?? ''} onChange={(e) => edit({ businessMonths: e.target.value === '' ? null : e.target.valueAsNumber })} /></label>
+      {numberInput('annualSpecialUsedJpy', '供用年の他資産分の特例使用額')}
+      {numberInput('businessMonths', '供用年の事業月数')}
       {yesNo('statementReady', '特例対象の明細等を準備している')}
       {yesNo('roundingConfirmed', 'この比較では円未満切上げ、最終年は残額を上限とする端数方法を使う')}
       <label>全体原価・耐用年数・方法条件の根拠<textarea value={method.reason} maxLength={2000} onChange={(e) => edit({ reason: e.target.value })} /></label>

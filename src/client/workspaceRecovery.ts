@@ -27,10 +27,22 @@ export function editingShape(schema: z.ZodType): z.ZodType {
   if (schema instanceof z.ZodNullable) return editingShape(schema.unwrap() as z.ZodType).nullable()
   if (schema instanceof z.ZodArray)
     return z.array(editingShape(schema.element as z.ZodType)).max(20000)
+  // These opaque fields are not edited in this wizard. Keep their real validator
+  // and transformation rather than stripping it or failing during module import.
+  if (schema instanceof z.ZodPipe || schema instanceof z.ZodCustom) return schema
+  if (schema instanceof z.ZodUnion) {
+    const options = schema.options.map((option) => editingShape(option as z.ZodType))
+    return z.union(options as [z.ZodType, z.ZodType, ...z.ZodType[]])
+  }
+  if (schema instanceof z.ZodRecord)
+    return z.record(schema.keyType, editingShape(schema.valueType as z.ZodType))
   if (
     schema instanceof z.ZodEnum ||
     schema instanceof z.ZodLiteral ||
-    schema instanceof z.ZodBoolean
+    schema instanceof z.ZodBoolean ||
+    schema instanceof z.ZodNull ||
+    schema instanceof z.ZodUndefined ||
+    schema instanceof z.ZodUnknown
   )
     return schema
   throw new Error('Unsupported editing schema')

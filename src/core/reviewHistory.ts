@@ -23,7 +23,12 @@ function ordered(value: unknown): unknown {
 // incurredOn is duplicated from the existing dated direct-cost record. Adding
 // this metadata must not turn a no-adjustment legacy year into a correction.
 function comparableCosts(costs: AnnualCostProjection): AnnualCostProjection {
-  return { ...costs, sources: costs.sources.map((source) => {
+  const treatments = costs.treatments
+  const qualification = treatments ? (() => {
+    const { methodComparisons: _unadoptedScenarios, ...recordedQualification } = treatments
+    return recordedQualification
+  })() : undefined
+  return { ...costs, ...(qualification ? { treatments: qualification } : {}), sources: costs.sources.map((source) => {
     if (source.adjustments?.length) return source
     const { incurredOn: _duplicateDate, ...compatible } = source
     return compatible
@@ -52,7 +57,14 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
     ...(material.costLinks?.costs.filter((row) => row.year !== year) ?? []),
   ]
   const costYears = new Set(costInputs.map((cost) => cost.year))
-  const costTreatmentFacts = (material.planning.costTreatmentFacts ?? []).filter((fact) => costYears.has(fact.costYear))
+  const costTreatmentFacts = (material.planning.costTreatmentFacts ?? [])
+    .filter((fact) => costYears.has(fact.costYear))
+    .map((fact) => {
+      // Actual method selections live on asset accounts. A hypothetical chart or
+      // its display horizon must not force a correction of production facts.
+      const { methodComparison: _scenario, recordedAt: _editedAt, ...production } = fact
+      return production
+    })
   const evidenceIds = new Set([
     ...costTreatmentFacts.flatMap((fact) => fact.evidenceIds),
     ...costInputs.flatMap((costs) => costs.sources.flatMap((source) => source.evidenceIds)),
