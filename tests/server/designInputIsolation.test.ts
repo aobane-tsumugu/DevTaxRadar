@@ -9,57 +9,61 @@ const { verifyGeneratedBlueprint } = createRequire(import.meta.url)('../../scrip
 const expected = '<html lang="ja">合成の生成結果</html>\n'
 function fixture(action: (root: string, outside: string) => void, body = '') {
   const temp = mkdtempSync(join(tmpdir(), 'devtax-doc-isolation-'))
-  const root = join(temp, 'repo')
-  const outside = join(temp, 'outside.txt')
+  const root = join(temp, 'repo'), outside = join(temp, 'outside.txt')
   try {
     for (const part of ['src', 'scripts/design', 'docs/design']) mkdirSync(join(root, part), { recursive: true })
     writeFileSync(outside, 'untouched')
     writeFileSync(join(root, 'docs/design/workflow-blueprint.html'), expected)
+    writeFileSync(join(root, 'docs/design/current-design.json'), '{}')
+    writeFileSync(join(root, 'docs/design/acceptance-scenarios.md'), 'synthetic')
+    writeFileSync(join(root, 'docs/design/requirements-matrix.md'), 'synthetic')
+    writeFileSync(join(root, 'scripts/design/render-current-design.cjs'), '// synthetic generator does not import a renderer')
     writeFileSync(join(root, 'scripts/design/build-workflow-blueprint.cjs'),
       "const fs=require('node:fs'),path=require('node:path');const root=path.resolve(__dirname,'../..');\n" +
       body + `\nfs.writeFileSync(path.join(root,'docs/design/workflow-blueprint.html'),${JSON.stringify(expected)});\n`)
     action(root, outside)
   } finally { rmSync(temp, { recursive: true, force: true }) }
 }
-
-describe('isolated generation does not copy live links or private local files', () => {
+describe('isolated generation uses only declared inputs, never live links', () => {
   it('runs an ordinary generator and leaves the original tree untouched', () => fixture((root, outside) => {
     assert.equal(verifyGeneratedBlueprint(root).passes, 2)
     assert.equal(readFileSync(outside, 'utf8'), 'untouched')
     assert.equal(readFileSync(join(root, 'docs/design/workflow-blueprint.html'), 'utf8'), expected)
   }))
-
-  it('rejects a file symlink before the copied generator can write through it', () => fixture((root, outside) => {
-    symlinkSync(outside, join(root, 'src/link.txt'))
-    assert.throws(() => verifyGeneratedBlueprint(root), /symbolic link/)
-    assert.equal(readFileSync(outside, 'utf8'), 'untouched')
-  }, "fs.writeFileSync(path.join(root,'src/link.txt'),'unexpected modification');"))
-
-  it('rejects an input directory symlink', () => fixture((root, outside) => {
-    const external = join(root, '..', 'external')
-    mkdirSync(external)
-    symlinkSync(external, join(root, 'src/linked-directory'), 'dir')
+  it('rejects a declared input symlink before the generator can follow it', () => fixture((root, outside) => {
+    const input = join(root, 'docs/design/current-design.json'); rmSync(input); symlinkSync(outside, input)
     assert.throws(() => verifyGeneratedBlueprint(root), /symbolic link/)
     assert.equal(readFileSync(outside, 'utf8'), 'untouched')
   }))
-
+  it('rejects a declared input parent symlink', () => fixture((root, outside) => {
+    const scripts = join(root, 'scripts'); rmSync(scripts, { recursive: true })
+    const external = join(root, '..', 'external'); mkdirSync(external)
+    symlinkSync(external, scripts, 'dir')
+    assert.throws(() => verifyGeneratedBlueprint(root), /symbolic link/)
+    assert.equal(readFileSync(outside, 'utf8'), 'untouched')
+  }))
+  it('does not traverse or copy an unrelated linked application source', () => fixture((root, outside) => {
+    symlinkSync(outside, join(root, 'src/link.txt'))
+    assert.equal(verifyGeneratedBlueprint(root).passes, 2)
+    assert.equal(readFileSync(outside, 'utf8'), 'untouched')
+  }, "if(fs.existsSync(path.join(root,'src'))) throw new Error('application code copied');"))
   it('rejects a symlink used as the checked-in generated artifact', () => fixture((root, outside) => {
-    const output = join(root, 'docs/design/workflow-blueprint.html')
-    rmSync(output)
-    writeFileSync(outside, expected)
-    symlinkSync(outside, output)
+    const output = join(root, 'docs/design/workflow-blueprint.html'); rmSync(output)
+    writeFileSync(outside, expected); symlinkSync(outside, output)
     assert.throws(() => verifyGeneratedBlueprint(root), /regular file/)
     assert.equal(readFileSync(outside, 'utf8'), expected)
   }))
-
   for (const name of ['.env', '.env.local', '.npmrc', '.netrc', 'identifier-salt', 'devtax-radar.db', 'devtax-radar.db-wal']) {
-    it(`excludes ${name} from the generation copy`, () => fixture((root) => {
-      writeFileSync(join(root, 'src', name), 'private synthetic value')
+    it(`excludes ${name}, including files next to the generator`, () => fixture((root) => {
+      writeFileSync(join(root, 'scripts/design', name), 'private synthetic value')
       assert.equal(verifyGeneratedBlueprint(root).passes, 2)
-      assert.equal(readFileSync(join(root, 'src', name), 'utf8'), 'private synthetic value')
-    }, `if(fs.existsSync(path.join(root,'src',${JSON.stringify(name)})))throw new Error('private input was copied');`))
+      assert.equal(readFileSync(join(root, 'scripts/design', name), 'utf8'), 'private synthetic value')
+    }, `if(fs.existsSync(path.join(root,'scripts/design',${JSON.stringify(name)})))throw new Error('private input copied');`))
   }
-
+  it('rejects a missing declared input instead of substituting an empty placeholder', () => fixture((root) => {
+    rmSync(join(root, 'docs/design/current-design.json'))
+    assert.throws(() => verifyGeneratedBlueprint(root), /ENOENT/)
+  }))
   it('rejects a symlink emitted in place of the generated file', () => fixture((root) => {
     const script = join(root, 'scripts/design/build-workflow-blueprint.cjs')
     writeFileSync(script,

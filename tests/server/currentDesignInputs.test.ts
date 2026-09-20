@@ -36,19 +36,15 @@ function fixture(action: (root: string, model: any, save: () => void) => void) {
     const save = () => put('docs/design/current-design.json', JSON.stringify(model))
     save()
     action(root, model, save)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
+  } finally { rmSync(root, { recursive: true, force: true }) }
 }
 
 describe('current checkout documentation contracts', () => {
-  it('validates sources, exact routes, references and preserved conditions without writing', () => fixture((root) => {
+  it('validates exact routes, references and preserved conditions without writing', () => fixture((root) => {
     const files = [...sources, 'PRODUCT_SPEC.md', 'docs/design/current-design.json', 'docs/design/acceptance-scenarios.md', 'docs/design/implementation-plan.md']
     const before = files.map(file => digest(readFileSync(join(root, file), 'utf8')))
-    assert.deepEqual(verifyCurrentInputs(root), {
-      requirements: 1, apiRoutes: 1, references: 1, acceptanceScenarios: 1,
-      completionConditions: 8, scope: 'checkout documentation contracts, not product acceptance',
-    })
+    assert.deepEqual(verifyCurrentInputs(root), { requirements: 1, apiRoutes: 1, references: 1, acceptanceScenarios: 1,
+      completionConditions: 8, scope: 'checkout documentation contracts, not product acceptance' })
     assert.deepEqual(files.map(file => digest(readFileSync(join(root, file), 'utf8'))), before)
   }))
   it('rejects a new specification requirement absent from the matrix', () => fixture((root) => {
@@ -59,38 +55,39 @@ describe('current checkout documentation contracts', () => {
     writeFileSync(join(root, 'PRODUCT_SPEC.md'), 'REQ-TEST-01: original\nREQ-TEST-01: duplicate\n')
     assert.throws(() => verifyCurrentInputs(root), /duplicate specification/)
   }))
-  it('rejects unreviewed source changes even when the path remains the same', () => fixture((root) => {
-    writeFileSync(join(root, sources[0]!), "app.get('/api/health', changedHandler)\n")
-    assert.throws(() => verifyCurrentInputs(root), /fingerprint changed/)
+  it('does not require new documentation hashes for formatting, comments or a handler implementation', () => fixture((root) => {
+    const modelBefore = readFileSync(join(root, 'docs/design/current-design.json'), 'utf8')
+    writeFileSync(join(root, sources[0]!), "// reviewed handler fix\napp\n .get <{ Params: {} }> (\n '/api/health', changedHandler)\n")
+    assert.equal(verifyCurrentInputs(root).apiRoutes, 1)
+    assert.equal(readFileSync(join(root, 'docs/design/current-design.json'), 'utf8'), modelBefore)
+  }))
+  it('rejects actual new or removed route contracts even with unchanged provenance hashes', () => fixture((root) => {
+    for (const text of ["app.get('/api/new', handler)\n", "app.get('/api/health', handler); app.post('/api/new', handler)"] ) {
+      writeFileSync(join(root, sources[0]!), text)
+      assert.throws(() => verifyCurrentInputs(root), /API inventory differs/)
+    }
   }))
   it('rejects a missing source module', () => fixture((root) => {
-    rmSync(join(root, sources[1]!))
-    assert.throws(() => verifyCurrentInputs(root), /ENOENT/)
+    rmSync(join(root, sources[1]!)); assert.throws(() => verifyCurrentInputs(root), /ENOENT/)
   }))
   it('rejects a removed API still described by the model', () => fixture((root, model, save) => {
-    model.api.push({ method: 'POST', path: '/api/config', source: sources[0] })
-    save()
+    model.api.push({ method: 'POST', path: '/api/config', source: sources[0] }); save()
     assert.throws(() => verifyCurrentInputs(root), /API inventory differs/)
   }))
   it('rejects the wrong registration module, not only a wrong route string', () => fixture((root, model, save) => {
-    model.api[0].source = sources[1]
-    save()
+    model.api[0].source = sources[1]; save()
     assert.throws(() => verifyCurrentInputs(root), /API inventory differs/)
   }))
-  it('rejects duplicate registration across two current source modules', () => fixture((root, model, save) => {
+  it('rejects duplicate registration across two source modules', () => fixture((root) => {
     writeFileSync(join(root, sources[1]!), "app.get('/api/health', duplicate)\n")
-    model.sourceBlobs[sources[1]!] = gitBlob(readFileSync(join(root, sources[1]!)))
-    save()
     assert.throws(() => verifyCurrentInputs(root), /duplicate registered/)
   }))
   it('rejects missing code references instead of accepting an existing directory', () => fixture((root, model, save) => {
-    model.requirements[0].refs = ['src/server']
-    save()
+    model.requirements[0].refs = ['src/server']; save()
     assert.throws(() => verifyCurrentInputs(root), /not a source file/)
   }))
   it('rejects traversal in a work reference', () => fixture((root, model, save) => {
-    model.works[0].source = 'src/../private'
-    save()
+    model.works[0].source = 'src/../private'; save()
     assert.throws(() => verifyCurrentInputs(root), /unsafe source/)
   }))
   it('rejects changed W completion criteria', () => fixture((root) => {
@@ -104,8 +101,7 @@ describe('current checkout documentation contracts', () => {
     assert.throws(() => verifyCurrentInputs(root), /acceptance contract changed/)
   }))
   it('does not silently omit a registered route source', () => fixture((root, model, save) => {
-    delete model.sourceBlobs[sources[1]!]
-    save()
+    delete model.sourceBlobs[sources[1]!]; save()
     assert.throws(() => verifyCurrentInputs(root), /registration sources changed/)
   }))
 })

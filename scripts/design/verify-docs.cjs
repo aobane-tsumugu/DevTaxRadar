@@ -17,37 +17,26 @@ function verifyGeneratedBlueprint(root) {
   const committed = fs.readFileSync(path.join(root, output));
   const stage = fs.mkdtempSync(path.join(tmpdir(), 'devtax-blueprint-'));
   try {
-    // Copy blueprint source folders, not HOME, repository data files, or dependencies.
+    // Only the current generator and its declared inputs are needed. Application
+    // sources, fixtures, history, dependencies and user settings are not copied.
     const inputs = [
-      'scripts', 'src', 'docs', 'tests', 'fixtures', 'public', '.github',
-      'README.md', 'PRODUCT_SPEC.md', 'TECHNICAL_DESIGN.md', 'LICENSE',
-      'package.json', 'package-lock.json', 'index.html', 'tsconfig.json',
-      'tsconfig.app.json', 'tsconfig.node.json', 'vite.config.ts', 'wrangler.toml',
-      '.gitattributes', '.gitignore', '.oxlintrc.json', '.prettierrc.json', '.prettierignore',
+      'scripts/design/build-workflow-blueprint.cjs',
+      'scripts/design/render-current-design.cjs',
+      'docs/design/current-design.json',
+      'docs/design/acceptance-scenarios.md',
+      'docs/design/requirements-matrix.md',
     ];
     for (const name of inputs) {
-      const source = path.join(root, name);
-      if (!fs.lstatSync(source, { throwIfNoEntry: false })) continue;
-      fs.cpSync(source, path.join(stage, name), {
-        recursive: true,
-        filter: file => {
-          const relative = path.relative(root, file);
-          const parts = relative.split(path.sep);
-          const basename = path.basename(file);
-          const stateFile = /\.(?:db|sqlite3?)(?:-(?:wal|shm))?$/i.test(basename) ||
-            ['identifier-salt', 'restore-reconnect-required.json', 'restored-from.json'].includes(basename);
-          const privateFile = /^\.env(?:\.|$)/.test(basename) ||
-            ['.npmrc', '.netrc'].includes(basename);
-          if (relative === path.normalize(output) || stateFile || privateFile ||
-              parts.some(part => ['node_modules', '.git', '.claude', '.codex'].includes(part))) return false;
-          const entry = fs.lstatSync(file);
-          // A preserved symlink would still target the original checkout/HOME,
-          // allowing an otherwise isolated generator to read or write through it.
-          assert.ok(!entry.isSymbolicLink(), relative + ': symbolic link is not a generator input');
-          assert.ok(entry.isFile() || entry.isDirectory(), relative + ': unsupported generator input');
-          return true;
-        },
-      });
+      const parts = name.split('/');
+      for (let end = 1; end <= parts.length; end++) {
+        const source = path.join(root, ...parts.slice(0, end));
+        const entry = fs.lstatSync(source);
+        assert.ok(!entry.isSymbolicLink(), parts.slice(0, end).join('/') + ': symbolic link is not a generator input');
+        assert.ok(end === parts.length ? entry.isFile() : entry.isDirectory(), name + ': unsupported generator input');
+      }
+      const destination = path.join(stage, name);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(root, name), destination);
     }
     const generatedPath = path.join(stage, output);
     const generate = () => {
