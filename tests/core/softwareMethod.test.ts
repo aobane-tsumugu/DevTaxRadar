@@ -3,7 +3,7 @@ import { describe, it } from 'vitest'
 import { buildAnnualBalances, validateBalanceSnapshot } from '../../src/core/annualBalances.js'
 import { traceBalanceLots } from '../../src/core/balanceLotTrace.js'
 import { chooseSoftwareMethod, draftSoftwareYearExpense, allocateSoftwareExpense } from '../../src/core/softwareMethodDraft.js'
-import { canonicalSoftwareValue, softwareMethodSchedule, validateSoftwareMethod, validateSoftwareExpense } from '../../src/core/softwareMethod.js'
+import { canonicalSoftwareValue, softwareMethodAdoptionIssues, softwareMethodSchedule, validateSoftwareMethod, validateSoftwareExpense } from '../../src/core/softwareMethod.js'
 import { methodFixture, expenseInput } from './helpers/softwareMethodFixture.js'
 
 const asset = (snapshot: ReturnType<typeof methodFixture>['snapshot']) => snapshot.accounts.find((a) => a.id === 'asset')!
@@ -50,6 +50,18 @@ describe('C01 original cost through the selected method and actual stock expense
     const changed = structuredClone(f.planning); changed.profile.filingType = 'white'
     assert.throws(() => draftSoftwareYearExpense(f.snapshot, changed, f.costs, expenseInput(2026)), /青色申告/)
     assert.equal(JSON.stringify(f.snapshot), JSON.stringify(methodFixture('blue-special', 350000).snapshot))
+  })
+  it('does not reopen a prior blue-special election when a later zero-expense year has a different filing profile', () => {
+    const f = methodFixture('blue-special', 350000)
+    const first = draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, expenseInput(2026))
+    const changed = structuredClone(f.planning)
+    changed.profile.taxYear = 2027
+    changed.profile.filingType = 'white'
+    changed.decisions = changed.decisions.filter((row) => row.taxYear !== 2027)
+    assert.deepEqual(draftSoftwareYearExpense(first, changed, f.costs,
+      { ...expenseInput(2027), decisionId: '', ordinaryYearConfirmed: false }), first)
+    assert.deepEqual(softwareMethodAdoptionIssues(first, 2027, changed), [])
+    assert.ok(softwareMethodAdoptionIssues(first, 2026, changed).some((row) => row.message.includes('青色申告')))
   })
   it('requires no extra zero-value judgment once the fully expensed asset has no annual charge', () => {
     const f = methodFixture('immediate-expense', 80000)

@@ -51,9 +51,6 @@ export function draftSoftwareYearExpense(
     throw new Error('供用年以降の費用化年を指定してください。')
   if (selection.ordinaryThroughYear !== undefined && input.year > selection.ordinaryThroughYear)
     throw new Error('この年は通常計算の終了後です。記録した理由に沿って既存の判断・残額使用で確認してください。')
-  if (selection.blueSpecial && (planning.profile.filingType !== selection.blueSpecial.filingType ||
-      planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory))
-    throw new Error('青色申告・所得区分が方法確認時から変わっています。方法を再確認してください。')
   if (softwareEvidenceBasis(planning.evidence, selection.evidenceIds) !== selection.evidenceBasis)
     throw new Error('方法の根拠内容が変わっています。変更を確認してから方法を更新してください。')
   if (selection.evidenceIds.some((id) => !planning.evidence.some((row) => row.id === id)))
@@ -64,6 +61,10 @@ export function draftSoftwareYearExpense(
   const schedule = softwareMethodSchedule(snapshot, account.id, selection, input.year)
   const expected = schedule.find((row) => row.year === input.year)
   if (!expected) throw new Error('対象年の費用化額が計算できません。')
+  if (expected.expenseJpy > 0 && selection.blueSpecial &&
+      (planning.profile.filingType !== selection.blueSpecial.filingType ||
+       planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory))
+    throw new Error('青色申告・所得区分が方法確認時から変わっています。方法を再確認してください。')
   const expenses = snapshot.movements.filter((row) => row.kind === 'expense' && row.accountId === account.id)
   const methodBasis = softwareMethodPostingBasis(selection)
   for (const prior of schedule.filter((row) => row.year < input.year && row.expenseJpy > 0)) {

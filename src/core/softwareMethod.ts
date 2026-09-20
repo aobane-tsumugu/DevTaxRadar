@@ -290,16 +290,16 @@ export function softwareMethodAdoptionIssues(
     if (!selection || Number(selection.usedOn.slice(0, 4)) > year ||
         (selection.ordinaryThroughYear !== undefined && year > selection.ordinaryThroughYear)) continue
     try {
-      if (selection.blueSpecial && planning?.profile &&
-          (planning.profile.filingType !== selection.blueSpecial.filingType ||
-           planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory))
-        throw new Error('青色申告・所得区分が方法確認時から変わっています。')
       if (planning?.lifecycleEvents?.some((event) => event.taxUnitId === account.taxUnitId &&
           ['retired','abandoned'].includes(event.eventType) && event.occurredOn <= `${year}-12-31`))
         throw new Error('終了・中止の記録があります。通常計算の年額と別の処理を確認してください。')
       if (planning && softwareEvidenceBasis(planning.evidence, selection.evidenceIds) !== selection.evidenceBasis)
         throw new Error('方法の根拠が確認時から変わっています。')
       const expected = softwareMethodSchedule(snapshot, account.id, selection, year).find((row) => row.year === year)!
+      if (expected.expenseJpy > 0 && selection.blueSpecial && planning?.profile &&
+          (planning.profile.filingType !== selection.blueSpecial.filingType ||
+           planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory))
+        throw new Error('青色申告・所得区分が方法確認時から変わっています。')
       const entries = snapshot.movements.filter((row) => row.kind === 'expense' && row.accountId === account.id && row.occurredOn.startsWith(year + '-'))
       if (expected.expenseJpy === 0 ? entries.length !== 0 : entries.length !== 1 ||
           !entries[0]!.softwareExpense || entries[0]!.amountJpy !== expected.expenseJpy)
