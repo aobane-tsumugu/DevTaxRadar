@@ -123,6 +123,7 @@ export type EvidenceRecord = {
 }
 export type DecisionRecord = {
   treatmentBinding?: import('../core/treatmentDecisionBinding.js').TreatmentDecisionBinding
+  softwareAnnualBinding?: import('../core/softwareAnnualDecision.js').SoftwareAnnualDecisionBinding
   id: string
   taxUnitId: string
   taxYear: number
