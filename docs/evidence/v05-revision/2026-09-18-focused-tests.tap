@@ -1,0 +1,163 @@
+TAP version 13
+# Subtest: bounded-memory bundle file verification
+    # Subtest: hashes all 0 bytes without including unused buffer contents
+    ok 1 - hashes all 0 bytes without including unused buffer contents
+      ---
+      duration_ms: 2.999965
+      type: 'test'
+      ...
+    # Subtest: hashes all 1 bytes without including unused buffer contents
+    ok 2 - hashes all 1 bytes without including unused buffer contents
+      ---
+      duration_ms: 1.12547
+      type: 'test'
+      ...
+    # Subtest: hashes all 65535 bytes without including unused buffer contents
+    ok 3 - hashes all 65535 bytes without including unused buffer contents
+      ---
+      duration_ms: 6.355687
+      type: 'test'
+      ...
+    # Subtest: hashes all 65536 bytes without including unused buffer contents
+    ok 4 - hashes all 65536 bytes without including unused buffer contents
+      ---
+      duration_ms: 5.438478
+      type: 'test'
+      ...
+    # Subtest: hashes all 65537 bytes without including unused buffer contents
+    ok 5 - hashes all 65537 bytes without including unused buffer contents
+      ---
+      duration_ms: 7.195563
+      type: 'test'
+      ...
+    # Subtest: hashes all 196627 bytes without including unused buffer contents
+    ok 6 - hashes all 196627 bytes without including unused buffer contents
+      ---
+      duration_ms: 17.996441
+      type: 'test'
+      ...
+    # Subtest: detects equal-length corruption instead of relying on file size
+    ok 7 - detects equal-length corruption instead of relying on file size
+      ---
+      duration_ms: 1.646967
+      type: 'test'
+      ...
+    # Subtest: rejects a missing file and a directory rather than describing them as empty files
+    ok 8 - rejects a missing file and a directory rather than describing them as empty files
+      ---
+      duration_ms: 0.935315
+      type: 'test'
+      ...
+    1..8
+ok 1 - bounded-memory bundle file verification
+  ---
+  duration_ms: 44.935756
+  type: 'suite'
+  ...
+# Subtest: blueprint regeneration verification
+    # Subtest: compares two real generator executions with the checked-in bytes
+    ok 1 - compares two real generator executions with the checked-in bytes
+      ---
+      duration_ms: 86.659826
+      type: 'test'
+      ...
+    # Subtest: rejects stale output without silently rewriting the working tree
+    ok 2 - rejects stale output without silently rewriting the working tree
+      ---
+      duration_ms: 58.738244
+      type: 'test'
+      ...
+    # Subtest: rejects non-deterministic output even when the generator exits successfully
+    ok 3 - rejects non-deterministic output even when the generator exits successfully
+      ---
+      duration_ms: 72.963621
+      type: 'test'
+      ...
+    # Subtest: does not pass a generator that fails before producing output
+    ok 4 - does not pass a generator that fails before producing output
+      ---
+      duration_ms: 30.927051
+      type: 'test'
+      ...
+    # Subtest: does not reuse a copied artifact when the generator writes nothing
+    ok 5 - does not reuse a copied artifact when the generator writes nothing
+      ---
+      duration_ms: 36.001437
+      type: 'test'
+      ...
+    # Subtest: uses current source and workflow references instead of placeholder files
+    ok 6 - uses current source and workflow references instead of placeholder files
+      ---
+      duration_ms: 112.89553
+      type: 'test'
+      ...
+    # Subtest: does not copy a local database or node_modules into the generation workspace
+    ok 7 - does not copy a local database or node_modules into the generation workspace
+      ---
+      duration_ms: 51.976942
+      type: 'test'
+      ...
+    1..7
+ok 2 - blueprint regeneration verification
+  ---
+  duration_ms: 451.426974
+  type: 'suite'
+  ...
+# Subtest: document verification entry point
+    # Subtest: covers multiline registration and the separate observation route module
+    ok 1 - covers multiline registration and the separate observation route module
+      ---
+      duration_ms: 90.901697
+      type: 'test'
+      ...
+    # Subtest: rejects an observation route missing from the API document
+    ok 2 - rejects an observation route missing from the API document
+      ---
+      duration_ms: 2.347764
+      type: 'test'
+      ...
+    # Subtest: does not accept a longer route as documentation of its shorter prefix
+    ok 3 - does not accept a longer route as documentation of its shorter prefix
+      ---
+      duration_ms: 2.622483
+      type: 'test'
+      ...
+    # Subtest: rejects a removed writer still described as a current API
+    ok 4 - rejects a removed writer still described as a current API
+      ---
+      duration_ms: 3.268908
+      type: 'test'
+      ...
+    # Subtest: rejects duplicate acceptance identifiers instead of silently deduplicating them
+    ok 5 - rejects duplicate acceptance identifiers instead of silently deduplicating them
+      ---
+      duration_ms: 4.057692
+      type: 'test'
+      ...
+    # Subtest: rejects duplicate requirement mappings
+    ok 6 - rejects duplicate requirement mappings
+      ---
+      duration_ms: 2.397454
+      type: 'test'
+      ...
+    # Subtest: rejects a missing API section rather than slicing at a negative index
+    ok 7 - rejects a missing API section rather than slicing at a negative index
+      ---
+      duration_ms: 2.303338
+      type: 'test'
+      ...
+    1..7
+ok 3 - document verification entry point
+  ---
+  duration_ms: 108.420423
+  type: 'suite'
+  ...
+1..3
+# tests 22
+# suites 3
+# pass 22
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 648.08482

@@ -58,7 +58,14 @@ export function checkEquipmentCarry(
             reason:
               '前年資料に一意な設備全体の期末計算が収録されていません。現在の入力で補完しません。',
           }
-        const closing = matches[0]!.result!.calculation!.closingBasisJpy
+        const priorResult = matches[0]!.result!
+        const currentPool = method.method === 'three-year-pool'
+        const priorPool = priorResult.engineVersion === 'jp-individual-equipment-pool/1'
+        if ((currentPool && method.poolElection?.serviceYear !== undefined && method.poolElection.serviceYear !== null &&
+             previous.year >= method.poolElection.serviceYear && !priorPool) || (!currentPool && priorPool))
+          return { ...row, previousClosingJpy: priorResult.calculation!.closingBasisJpy, status: 'mismatch' as const,
+            reason: '前年の採用計算と一括償却の選択が異なります。金額だけの一致で方式変更を通さず、供用年の選択・訂正版を確認してください。' }
+        const closing = priorResult.calculation!.closingBasisJpy
         return {
           ...row,
           previousClosingJpy: closing,

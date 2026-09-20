@@ -1,5 +1,13 @@
 import { z } from 'zod'
 import type { BalanceSnapshot } from './types.js'
+import { validateSoftwareMethod, validateSoftwareExpense, type SoftwareMethod, type SoftwareExpense } from '../core/softwareMethod.js'
+
+const softwareMethodSchema = z.custom<SoftwareMethod>((value) => {
+  try { validateSoftwareMethod(value); return true } catch { return false }
+}, { message: 'ソフトウェアの方法・取得原価・根拠の形式を確認してください。' })
+const softwareExpenseSchema = z.custom<SoftwareExpense>((value) => {
+  try { validateSoftwareExpense(value); return true } catch { return false }
+}, { message: 'ソフトウェアの年額確認記録を確認してください。' })
 
 const id = z.string().trim().min(1).max(200)
 const note = z.string().trim().min(1).max(2000)
@@ -37,6 +45,7 @@ const movement = {
   sourceIds: z.array(id).min(1).max(100),
   decisionId: id,
   reason: note,
+  softwareExpense: softwareExpenseSchema.optional(),
   balanceAllocations: z
     .array(
       z
@@ -72,6 +81,7 @@ export const balanceSnapshotSchema: z.ZodType<BalanceSnapshot> = z
             openingYear: balanceYearSchema,
             opening: amount,
             openingRevisionId: id.optional(),
+            softwareMethod: softwareMethodSchema.nullable().optional(),
           })
           .strict(),
       )

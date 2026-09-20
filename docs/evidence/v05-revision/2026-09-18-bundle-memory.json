@@ -1,0 +1,56 @@
+{
+  "scope": "synthetic file SHA-256 only; not scan, backup/restore, Windows or Node24 acceptance",
+  "node": "v22.16.0",
+  "platform": "linux",
+  "architecture": "x64",
+  "runs": [
+    {
+      "trial": 1,
+      "mode": "original",
+      "bytes": 268435456,
+      "sha256": "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+      "elapsedMs": 1631.66008,
+      "peakRssKiB": 287736
+    },
+    {
+      "trial": 1,
+      "mode": "bounded",
+      "bytes": 268435456,
+      "sha256": "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+      "elapsedMs": 287.62051399999996,
+      "peakRssKiB": 33272
+    },
+    {
+      "trial": 2,
+      "mode": "original",
+      "bytes": 268435456,
+      "sha256": "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+      "elapsedMs": 379.25311600000003,
+      "peakRssKiB": 287736
+    },
+    {
+      "trial": 2,
+      "mode": "bounded",
+      "bytes": 268435456,
+      "sha256": "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+      "elapsedMs": 285.642728,
+      "peakRssKiB": 33268
+    },
+    {
+      "trial": 3,
+      "mode": "original",
+      "bytes": 268435456,
+      "sha256": "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+      "elapsedMs": 356.670987,
+      "peakRssKiB": 287740
+    },
+    {
+      "trial": 3,
+      "mode": "bounded",
+      "bytes": 268435456,
+      "sha256": "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+      "elapsedMs": 285.569242,
+      "peakRssKiB": 33268
+    }
+  ]
+}

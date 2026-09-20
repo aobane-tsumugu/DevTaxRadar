@@ -1,0 +1,26 @@
+{
+  "baseCommit": "c2950f655134bd38a51e8714f23364c7e255c90d",
+  "scope": "Only independent annual method alternatives and route extraction; not the unpublished integration",
+  "node": "v22.16.0",
+  "typescript": "5.8.3",
+  "platform": "linux",
+  "frameworkChange": "vitest import to node:test only",
+  "productionLogicSubstituted": false,
+  "fullVitest": false,
+  "fullTypecheck": false,
+  "applicationApi": false,
+  "deviceAcceptance": false,
+  "tests": 34,
+  "passed": 34,
+  "failed": 0,
+  "skipped": 0,
+  "exitStatus": 0,
+  "hashes": {
+    "src/core/annualMethodComparison.ts": "b3ca5665782605c9039c63c6e9abde4f226fa7054390ef18c6f9cbdc845a1951",
+    "src/core/straightLineRates.ts": "089372efc1c178206e4ec6204c289e865a2bb463343d094b12f21aae781ac43a",
+    "tests/core/annualMethodAlternatives.test.ts": "e073b71ded3fac66be087b99bd969fdba9619b36cd0813fe0eb7ae9a961fb4e2",
+    "tests/server/routeInventory.test.ts": "90f49cde01e187a3320ecfe428841abd32690e15a9883d05433e46718385f904",
+    "scripts/design/route-inventory.cjs": "251f955f31b1bd4b6b1dd6246064f36c812774f6833c79c100a52246ebce4ec7",
+    "src/server/observationRoutes.ts": "948f72c550c31fb2b4dc0bc018dec1281c33dd3298555eff1064f40e1a2e7886"
+  }
+}

@@ -12,7 +12,9 @@ export const equipmentMethodSchema = equipmentDepreciationInputSchema
     taxpayer: true,
     assetKind: true,
     method: true,
+    rentalUse: true,
     methodReason: true,
+    poolElection: true,
     usefulLifeYears: true,
     useThroughYearEnd: true,
     ordinaryTreatment: true,
@@ -50,6 +52,15 @@ export const equipmentMethodsSchema = z
         })
       ids.add(row.id)
       keys.add(key)
+      if (row.method === 'three-year-pool' && row.poolElection?.serviceYear !== null && row.poolElection?.serviceYear !== undefined) {
+        const serviceYear = row.poolElection.serviceYear
+        const inconsistent = rows.some((prior) => prior.equipmentId === row.equipmentId &&
+          prior.taxYear >= serviceYear && prior.taxYear < row.taxYear &&
+          (prior.method !== 'three-year-pool' || (prior.poolElection?.serviceYear !== undefined &&
+            prior.poolElection.serviceYear !== null && prior.poolElection.serviceYear !== serviceYear)))
+        if (inconsistent) ctx.addIssue({ code: 'custom', path: [index, 'poolElection'],
+          message: '供用年以後の保存条件と一括償却の選択が矛盾しています。以前の方式を黙って置き換えず、元の記録を確認してください。' })
+      }
     })
   })
 export type EquipmentAnnualMethod = z.infer<typeof equipmentMethodSchema>

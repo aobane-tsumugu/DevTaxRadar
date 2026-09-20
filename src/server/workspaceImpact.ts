@@ -26,7 +26,7 @@ function yearsIn(input: unknown, years: Set<number>): void {
     return
   }
   for (const [key, value] of Object.entries(input)) {
-    if (key === 'taxYear' && typeof value === 'number') years.add(value)
+    if ((key === 'taxYear' || key === 'costYear') && typeof value === 'number') years.add(value)
     else if (
       /^(month|startedOn|endedOn|serviceStartedOn|serviceEndedOn|billedOn|activityStartedOn|effectiveFrom|effectiveTo|occurredOn|orderedOn|deliveredOn|acquiredOn|businessUseStartedOn|incurredOn)$/.test(
         key,
@@ -146,8 +146,8 @@ export function previewWorkspace(input: unknown): WorkspaceImpact {
       }),
       limitations: [
         '金額は作業中の費用基礎と配分です。税務上の当年費用・採用済み残高の変化ではありません。',
-        '設備の方法・適用条件・前年残高は未接続のため、原額と未算定理由を残しています。未知の額を0円で補っていません。',
-        'AIの当年処理候補・将来分候補・要確認は現在の分類による比較です。全費用の税務判断・繰越計算・採用版への後年度影響は未接続です。',
+        '設備年額は対応する年度条件の範囲で計算し、未対応条件・不明額は未算定のまま残します。未知の額を0円で補っていません。',
+        'AI分類の比較と、登録した事実に基づく全費用の条件付き処理候補は別です。処理候補は保存済み残高を自動変更しません。年度採用・訂正と残高の再確認は別途行います。',
         '変更件数は取得済みの利用記録単位です。捕捉外・未取得の履歴件数を推定していません。',
       ],
     }

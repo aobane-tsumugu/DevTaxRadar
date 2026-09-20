@@ -102,6 +102,8 @@ export type CostSnapshot = z.infer<typeof costSnapshotSchema>
 
 /** These are cost bases and their destinations, not adopted expenses or asset balances. */
 export type AnnualCostProjection = {
+  /** Absent in legacy/no-fact years. Reading a stored version never synthesizes it. */
+  treatments?: import('../core/costTreatments.js').CostTreatmentProjection
   version: 1
   engineVersion: 'cost-projection/1'
   year: number

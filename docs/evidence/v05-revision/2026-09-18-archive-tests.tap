@@ -1,0 +1,249 @@
+TAP version 13
+# (node:926) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: stored review integrity shared by API and archive reader
+    # Subtest: retains the original adoption encoding and digest
+    ok 1 - retains the original adoption encoding and digest
+      ---
+      duration_ms: 1.062417
+      type: 'test'
+      ...
+    # Subtest: sorts object keys but preserves array order, null, zero and Unicode
+    ok 2 - sorts object keys but preserves array order, null, zero and Unicode
+      ---
+      duration_ms: 0.153968
+      type: 'test'
+      ...
+    # Subtest: accepts legacy payloads with different key order and whitespace
+    ok 3 - accepts legacy payloads with different key order and whitespace
+      ---
+      duration_ms: 3.883276
+      type: 'test'
+      ...
+    # Subtest: returns null for a missing ID in the shared reader
+    ok 4 - returns null for a missing ID in the shared reader
+      ---
+      duration_ms: 1.895444
+      type: 'test'
+      ...
+    # Subtest: rejects content without matching hash without changing the source
+    ok 5 - rejects content without matching hash without changing the source
+      ---
+      duration_ms: 2.498991
+      type: 'test'
+      ...
+    # Subtest: rejects hash without changing the source
+    ok 6 - rejects hash without changing the source
+      ---
+      duration_ms: 2.402949
+      type: 'test'
+      ...
+    # Subtest: rejects invalid JSON without changing the source
+    ok 7 - rejects invalid JSON without changing the source
+      ---
+      duration_ms: 2.130043
+      type: 'test'
+      ...
+    # Subtest: rejects null JSON without changing the source
+    ok 8 - rejects null JSON without changing the source
+      ---
+      duration_ms: 2.371802
+      type: 'test'
+      ...
+    # Subtest: rejects array JSON without changing the source
+    ok 9 - rejects array JSON without changing the source
+      ---
+      duration_ms: 1.660756
+      type: 'test'
+      ...
+    # Subtest: rejects indexed year without changing the source
+    ok 10 - rejects indexed year without changing the source
+      ---
+      duration_ms: 1.960581
+      type: 'test'
+      ...
+    # Subtest: rejects unsupported record schema without changing the source
+    ok 11 - rejects unsupported record schema without changing the source
+      ---
+      duration_ms: 2.031446
+      type: 'test'
+      ...
+    # Subtest: rejects mismatched payload ID without changing the source
+    ok 12 - rejects mismatched payload ID without changing the source
+      ---
+      duration_ms: 1.887082
+      type: 'test'
+      ...
+    # Subtest: rejects duplicate IDs rather than selecting whichever row appears first
+    ok 13 - rejects duplicate IDs rather than selecting whichever row appears first
+      ---
+      duration_ms: 0.292935
+      type: 'test'
+      ...
+    1..13
+ok 1 - stored review integrity shared by API and archive reader
+  ---
+  duration_ms: 25.588047
+  type: 'suite'
+  ...
+# Subtest: originals-independent read-only archive
+    # Subtest: reads committed WAL data but never an uncommitted writer transaction
+    ok 1 - reads committed WAL data but never an uncommitted writer transaction
+      ---
+      duration_ms: 3.412488
+      type: 'test'
+      ...
+    # Subtest: reads known and unknown amounts without originals, salt, or app initialization
+    ok 2 - reads known and unknown amounts without originals, salt, or app initialization
+      ---
+      duration_ms: 1.530953
+      type: 'test'
+      ...
+    # Subtest: keeps a restore hold and an unfamiliar application schema untouched
+    ok 3 - keeps a restore hold and an unfamiliar application schema untouched
+      ---
+      duration_ms: 1.747996
+      type: 'test'
+      ...
+    # Subtest: reads a non-writable DB without changing it
+    ok 4 - reads a non-writable DB without changing it
+      ---
+      duration_ms: 1.764721
+      type: 'test'
+      ...
+    # Subtest: lists original and corrected versions without substituting the current head
+    ok 5 - lists original and corrected versions without substituting the current head
+      ---
+      duration_ms: 2.357311
+      type: 'test'
+      ...
+    # Subtest: preserves unknown fields and stored calculation results without recalculation
+    ok 6 - preserves unknown fields and stored calculation results without recalculation
+      ---
+      duration_ms: 2.173978
+      type: 'test'
+      ...
+    # Subtest: does not create a missing database or directory
+    ok 7 - does not create a missing database or directory
+      ---
+      duration_ms: 1.318849
+      type: 'test'
+      ...
+    # Subtest: rejects a missing review and invalid IDs
+    ok 8 - rejects a missing review and invalid IDs
+      ---
+      duration_ms: 1.493928
+      type: 'test'
+      ...
+    # Subtest: rejects a database without stored review tables without migrating it
+    ok 9 - rejects a database without stored review tables without migrating it
+      ---
+      duration_ms: 1.759553
+      type: 'test'
+      ...
+    # Subtest: rejects a view posing as the stored review table
+    ok 10 - rejects a view posing as the stored review table
+      ---
+      duration_ms: 1.376815
+      type: 'test'
+      ...
+    # Subtest: rejects a directory in place of the DB
+    ok 11 - rejects a directory in place of the DB
+      ---
+      duration_ms: 1.055227
+      type: 'test'
+      ...
+    # Subtest: rejects a corrupt SQLite file without repairing it
+    ok 12 - rejects a corrupt SQLite file without repairing it
+      ---
+      duration_ms: 1.463954
+      type: 'test'
+      ...
+    # Subtest: returns an empty index without declaring that all records were confirmed
+    ok 13 - returns an empty index without declaring that all records were confirmed
+      ---
+      duration_ms: 1.46515
+      type: 'test'
+      ...
+    1..13
+ok 2 - originals-independent read-only archive
+  ---
+  duration_ms: 23.363208
+  type: 'suite'
+  ...
+# Subtest: archive CLI and existing export functions
+    # Subtest: preserves frozen costs, evidence and observations in json
+    ok 1 - preserves frozen costs, evidence and observations in json
+      ---
+      duration_ms: 3.853452
+      type: 'test'
+      ...
+    # Subtest: preserves frozen costs, evidence and observations in markdown
+    ok 2 - preserves frozen costs, evidence and observations in markdown
+      ---
+      duration_ms: 16.104534
+      type: 'test'
+      ...
+    # Subtest: runs the command entry without application initialization and reports failures
+    ok 3 - runs the command entry without application initialization and reports failures
+      ---
+      duration_ms: 73.64532
+      type: 'test'
+      ...
+    # Subtest: rejects an export inside the source tree, keeping backup contents unchanged
+    ok 4 - rejects an export inside the source tree, keeping backup contents unchanged
+      ---
+      duration_ms: 2.292264
+      type: 'test'
+      ...
+    # Subtest: lists records as JSON without creating any output or changing the DB
+    ok 5 - lists records as JSON without creating any output or changing the DB
+      ---
+      duration_ms: 1.607827
+      type: 'test'
+      ...
+    # Subtest: exports json with exactly the existing API renderer bytes
+    ok 6 - exports json with exactly the existing API renderer bytes
+      ---
+      duration_ms: 1.496802
+      type: 'test'
+      ...
+    # Subtest: exports markdown with exactly the existing API renderer bytes
+    ok 7 - exports markdown with exactly the existing API renderer bytes
+      ---
+      duration_ms: 1.498285
+      type: 'test'
+      ...
+    # Subtest: rejects existing outputs, including the source DB, without overwriting
+    ok 8 - rejects existing outputs, including the source DB, without overwriting
+      ---
+      duration_ms: 2.605259
+      type: 'test'
+      ...
+    # Subtest: does not publish a file when validation or rendering fails
+    ok 9 - does not publish a file when validation or rendering fails
+      ---
+      duration_ms: 1.333621
+      type: 'test'
+      ...
+    # Subtest: validates arguments before reading a source or creating output
+    ok 10 - validates arguments before reading a source or creating output
+      ---
+      duration_ms: 0.925535
+      type: 'test'
+      ...
+    1..10
+ok 3 - archive CLI and existing export functions
+  ---
+  duration_ms: 105.678388
+  type: 'suite'
+  ...
+1..3
+# tests 36
+# suites 3
+# pass 36
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 230.395001

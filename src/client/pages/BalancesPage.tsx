@@ -1,4 +1,6 @@
 import DateInput from './DateInput'
+import TreatmentBalanceDraftPanel from './TreatmentBalanceDraftPanel'
+import SoftwareAcquisitionPanel from './SoftwareAcquisitionPanel'
 import type { ConsultationNavigation } from '../consultationNavigation'
 import { decisionIsConfirmed } from '../../core/decisionConfirmation'
 import { checkBalanceReferences } from '../../core/balanceReferences'
@@ -11,7 +13,7 @@ import BalanceFlowEditor from './BalanceFlowEditor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AmountState, BalanceMovement, BalanceSnapshot } from '../../accounting/types'
 import type { BalanceDraft } from '../../accounting/balanceWorkspace'
-import type { PlanningSnapshot } from '../../planning/types'
+import type { DecisionRecord, PlanningSnapshot } from '../../planning/types'
 import type { LocalConfiguration } from '../types'
 import { balanceSnapshotSchema } from '../../accounting/balanceSchema'
 import { buildAnnualBalances } from '../../core/annualBalances'
@@ -49,14 +51,19 @@ export default function BalancesPage({
   datasetId,
   navigation,
   onReviewAnswer,
+  onReviewSoftwareAnnualDecision,
 }: {
   planning: PlanningSnapshot
   configuration: LocalConfiguration | null
   local: boolean
   onManageUnits: () => void
   datasetId?: string
-  navigation?: { year: number; request: number; datasetId?: string }
+  navigation?: { year: number; request: number; datasetId?: string; contributionId?: string }
   onReviewAnswer?: (context: ConsultationNavigation) => void
+  onReviewSoftwareAnnualDecision?: (
+    decision: DecisionRecord,
+    expectedRevision: number,
+  ) => Promise<boolean>
 }) {
   const [draft, setDraft] = useState<BalanceDraft | null>(null)
   const [year, setYear] = useState(String(planning.profile.taxYear))
@@ -459,6 +466,14 @@ export default function BalancesPage({
               {dirty ? '入力を破棄して保存済みを読み直す' : '保存済みを読み直す'}
             </button>
           </div>
+          {local && <SoftwareAcquisitionPanel datasetId={datasetId} snapshot={draft.snapshot}
+            planning={planning} busy={busy || conflict} edit={edit}
+            onReviewAnnualDecision={onReviewSoftwareAnnualDecision} />}
+          {local && navigation?.contributionId && <TreatmentBalanceDraftPanel
+            request={{ ...navigation, contributionId: navigation.contributionId }} datasetId={datasetId}
+            snapshot={draft.snapshot} planning={planning} disabled={busy || conflict}
+            onApply={(snapshot) => edit((current) => Object.assign(current, snapshot))}
+          />}
           {conflict && (
             <div>
               <p role="alert">

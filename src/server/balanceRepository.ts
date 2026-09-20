@@ -1,4 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { softwareMethodAdoptionIssues, softwareMethodHistoryValue } from '../core/softwareMethod.js'
+import { randomUUID } from 'node:crypto'
+import {
+  canonicalReviewValue as canonical,
+  reviewContentHash as hash,
+  readStoredReview,
+} from './storedReview.js'
 import type { DatabaseSync } from 'node:sqlite'
 import type { AnnualBalanceProjection, BalanceSnapshot } from '../accounting/types.js'
 import type { ReviewMaterials } from '../accounting/reviewMaterials.js'
@@ -16,23 +22,6 @@ export class BalanceConflictError extends Error {
     super(message)
     this.name = 'BalanceConflictError'
   }
-}
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  if (value !== null && typeof value === 'object') {
-    const object = value as Record<string, unknown>
-    return `{${Object.keys(object)
-      .filter((key) => object[key] !== undefined)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`)
-      .join(',')}}`
-  }
-  return JSON.stringify(value)
-}
-
-function hash(value: unknown): string {
-  return createHash('sha256').update(canonical(value)).digest('hex')
 }
 
 function integerRevision(value: number): void {
@@ -56,6 +45,7 @@ function copySnapshot(snapshot: BalanceSnapshot): BalanceSnapshot {
       openingYear: a.openingYear,
       opening: amount(a.opening),
       openingRevisionId: a.openingRevisionId,
+      ...(a.softwareMethod === undefined ? {} : { softwareMethod: structuredClone(a.softwareMethod) }),
     })),
     movements: snapshot.movements.map((m) => ({
       id: m.id,
@@ -64,6 +54,7 @@ function copySnapshot(snapshot: BalanceSnapshot): BalanceSnapshot {
       sourceIds: [...m.sourceIds],
       decisionId: m.decisionId,
       reason: m.reason,
+      ...(m.softwareExpense === undefined ? {} : { softwareExpense: structuredClone(m.softwareExpense) }),
       ...(m.balanceAllocations === undefined
         ? {}
         : {
@@ -253,6 +244,18 @@ export function saveBalanceDraft(
     }
     if (current.revision !== expectedRevision)
       throw new BalanceConflictError('別の画面で更新されています。最新の内容を読み直してください。')
+    // Older writers must not silently erase method provenance from retained records.
+    for (const account of current.snapshot.accounts) if (account.softwareMethod) {
+      const next = sanitized.accounts.find((row) => row.id === account.id)
+      if (next && (next.softwareMethod === undefined ||
+          (next.softwareMethod === null && current.snapshot.movements.some((row) => row.softwareExpense?.accountId === account.id))))
+        throw new BalanceValidationError('invalid-input', '保存済みのソフトウェア方法を含む入力で更新してください。確認元だけを省略できません。')
+    }
+    for (const movement of current.snapshot.movements) if (movement.softwareExpense) {
+      const next = sanitized.movements.find((row) => row.id === movement.id)
+      if (next && next.softwareExpense === undefined)
+        throw new BalanceValidationError('invalid-input', '年額の確認元だけを削除できません。訂正では該当する費用化記録を明示的に見直してください。')
+    }
     const revision = current.revision + 1
     integerRevision(revision)
     db.prepare(
@@ -273,15 +276,7 @@ function head(db: DatabaseSync, year: number): string | null {
 }
 
 export function getBalanceReview(db: DatabaseSync, id: string): BalanceReview | null {
-  const row = db
-    .prepare('SELECT payload, content_hash FROM balance_reviews WHERE id = ?')
-    .get(id) as { payload: string; content_hash: string } | undefined
-  if (!row) return null
-  const parsed = JSON.parse(row.payload) as BalanceReview
-  if (parsed.schemaVersion !== 1 || parsed.id !== id || hash(parsed) !== row.content_hash)
-    throw new Error('採用済み資料の形式または保存内容を検証できませんでした。')
-  // Read stored results without running them through a newer calculation engine.
-  return parsed
+  return readStoredReview(db, id)
 }
 
 export type ReviewMaterialsReader = (
@@ -302,9 +297,18 @@ export function previewBalanceReview(
     ? reviewChainChanges(db, getBalanceReview(db, previousReviewId)!)
     : []
   const materials = readMaterials?.(db, draft.snapshot, year)
+  const softwareIssues = softwareMethodAdoptionIssues(draft.snapshot, year, materials?.planning)
   const checkedMaterials = materials
     ? {
         ...materials,
+        referenceCheck: {
+          ...materials.referenceCheck,
+          status: softwareIssues.length ? 'needs-review' as const : materials.referenceCheck.status,
+          issues: [...materials.referenceCheck.issues, ...softwareIssues.map((issue) => ({
+            recordType: 'account' as const, recordId: issue.accountId, referenceId: issue.accountId,
+            code: 'unconfirmed-decision' as const, message: issue.message,
+          }))],
+        },
         openingLotCarry: checkOpeningLotCarry(
           previousReviewId ? getBalanceReview(db, previousReviewId) : null,
           projection,
@@ -356,6 +360,9 @@ function historicalPostings(snapshot: BalanceSnapshot, year: number): unknown {
         openingYear: account.openingYear,
         opening: account.opening,
         openingRevisionId: account.openingRevisionId,
+        ...(account.softwareMethod && Number(snapshot.movements.find((row) =>
+          row.id === account.softwareMethod!.acquisitionMovementId)?.occurredOn.slice(0, 4)) <= year
+          ? { softwareMethod: softwareMethodHistoryValue(account.softwareMethod, year) } : {}),
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     movements: snapshot.movements
@@ -426,6 +433,9 @@ export function adoptBalanceReview(
       throw new BalanceConflictError(
         '確認後に入力または採用版が変わりました。差分を確認してください。',
       )
+    const softwareIssues = softwareMethodAdoptionIssues(preview.snapshot, input.year, preview.materials?.planning)
+    if (softwareIssues.length)
+      throw new BalanceValidationError('invalid-input', softwareIssues.map((issue) => issue.message).join(' / '))
     if (preview.materials?.equipmentCarryCheck?.rows.some((row) => row.status === 'mismatch'))
       throw new BalanceValidationError(
         'invalid-input',

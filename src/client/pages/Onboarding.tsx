@@ -2851,8 +2851,11 @@ function Onboarding({
                 <DecisionEditor
                   consultation={consultation}
                   value={planningDraft.decisions}
+                  savedValue={workspaceBase?.planning.decisions ?? planning.decisions}
                   units={planningDraft.taxUnits}
                   year={planningDraft.profile.taxYear}
+                  datasetId={runtime?.datasetId}
+                  parentRevision={workspaceBase?.revision ?? 0}
                   onChange={(decisions) =>
                     setPlanningDraft((current) => ({ ...current, decisions }))
                   }

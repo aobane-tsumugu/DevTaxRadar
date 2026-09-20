@@ -152,6 +152,8 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       ),
     )
   }
+  let savedReviewId = ''
+  const savedExports: Record<string, string> = {}
   try {
     await withServer(source, async (url) => {
       const html = await fetch(url, { signal: AbortSignal.timeout(10_000) })
@@ -256,6 +258,37 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       })
       assert.equal(saved.status, 200, await saved.text())
       await verifySavedInvoice(url)
+      // Bind a real adopted record, then compare the standalone reader with its API output.
+      const preview = await get(url + '/api/balances/preview?year=2026')
+      const adoption = await fetch(url + '/api/balances/reviews', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: url,
+          'x-devtax-csrf': String(runtime.csrfToken),
+        },
+        body: JSON.stringify({
+          year: 2026,
+          expectedDraftRevision: preview.draftRevision,
+          projectionHash: preview.projectionHash,
+          expectedDatasetId: runtime.datasetId,
+          idempotencyKey: randomUUID(),
+          reason: '配布検査：原本なしで読み取る採用資料',
+        }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      const adoptedBody = await adoption.text()
+      assert.equal(adoption.status, 200, adoptedBody)
+      savedReviewId = (JSON.parse(adoptedBody) as { review: { id: string } }).review.id
+      assert.ok(savedReviewId)
+      for (const format of ['json', 'markdown']) {
+        const exported = await fetch(
+          url + '/api/balances/reviews/' + savedReviewId + '/export?format=' + format,
+          { signal: AbortSignal.timeout(10_000) },
+        )
+        assert.equal(exported.status, 200)
+        savedExports[format] = await exported.text()
+      }
     })
     // No history scan is needed for this isolated fixture; supply its own identity.
     writeFileSync(join(source, 'identifier-salt'), randomBytes(32).toString('base64url') + '\n')
@@ -299,6 +332,18 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       original.close()
       copy.close()
     }
+    // Only the dedicated synthetic source is removed. The reader must need neither
+    // the old application DB nor original history folders to read the saved bundle.
+    rmSync(source, { recursive: true, force: true })
+    const index = cli('read-review', 'list', bundle) as { reviews: { id: string }[] }
+    assert.ok(index.reviews.some((review) => review.id === savedReviewId))
+    for (const format of ['json', 'markdown']) {
+      const output = join(temporary, '保存資料-' + format + '.txt')
+      const result = cli('read-review', 'export', bundle, savedReviewId, format, output)
+      assert.equal(result.reviewId, savedReviewId)
+      assert.equal(readFileSync(output, 'utf8'), savedExports[format])
+    }
+    assert.deepEqual(cli('data-backup', 'verify', bundle).files, manifest.files)
     await withServer(restored, async (url) => {
       assert.equal((await get(url + '/api/runtime')).restoreRequiresReconnect, true)
       await verifySavedInvoice(url)
@@ -320,7 +365,7 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       await get(url + '/api/workspace')
     })
     console.log(
-      'Release lifecycle passed: startup, invoice save and projection, backup, verification, full-table restore, reconnect, restart.',
+      'Release lifecycle passed: startup, invoice save and projection, backup, verification, full-table restore, standalone adopted review read, reconnect, restart.',
     )
   } finally {
     // mkdtempSync returned this dedicated directory; no user-supplied path is removed.

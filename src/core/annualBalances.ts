@@ -1,3 +1,4 @@
+import { validateSoftwareMethodHistory } from './softwareMethod.js'
 import type {
   AmountState,
   AnnualBalanceProjection,
@@ -271,6 +272,9 @@ export function validateBalanceSnapshot(snapshot: BalanceSnapshot): void {
       if (pending.taxYear < account.openingYear)
         fail('before-opening', '未判断の対象年が期首より前です。')
     }
+  }
+  try { validateSoftwareMethodHistory(snapshot) } catch (error) {
+    throw new BalanceValidationError('invalid-input', error instanceof Error ? error.message : 'ソフトウェアの方法記録を確認してください。')
   }
 }
 

@@ -1,12 +1,14 @@
 import { z } from 'zod'
+import { calculateEquipmentPool, type EquipmentPoolResult } from './equipmentPool.js'
+import {
+  calculateEquipmentImmediateExpense,
+  smallEquipmentStraightLineRestriction,
+  type EquipmentImmediateExpenseResult,
+} from './equipmentImmediateExpense.js'
 import { validIsoCalendarDate } from './chargePeriods.js'
 
 /** Published rate table; never replace this with acquisitionCost / usefulLifeYears. */
-const rates = [
-  500, 334, 250, 200, 167, 143, 125, 112, 100, 91, 84, 77, 72, 67, 63, 59, 56, 53, 50, 48, 46, 44,
-  42, 40, 39, 38, 36, 35, 34, 33, 32, 31, 30, 29, 28, 28, 27, 26, 25, 25, 24, 24, 23, 23, 22, 22,
-  21, 21, 20,
-] as const
+import { STRAIGHT_LINE_RATES as rates } from './straightLineRates.js'
 export const EQUIPMENT_STRAIGHT_LINE_RULE = {
   id: 'jp-individual-tangible-straight-line/1',
   verifiedOn: '2026-09-08',
@@ -26,8 +28,14 @@ export const equipmentDepreciationInputSchema = z
     taxYear: z.number().int().min(2007).max(2100),
     taxpayer: z.enum(['individual', 'corporation', 'unknown']),
     assetKind: z.enum(['tangible-equipment', 'intangible', 'unknown']),
-    method: z.enum(['straight-line', 'other', 'unknown']),
+    method: z.enum(['straight-line', 'immediate-expense', 'three-year-pool', 'other', 'unknown']),
+    rentalUse: z.enum(['none', 'primary-business', 'other', 'unknown']).optional(),
     methodReason: z.string().max(2000),
+    poolElection: z.object({
+      serviceYear: z.number().int().min(2007).max(2100).nullable(),
+      reference: z.string().max(2000),
+      roundingConfirmed: z.boolean().nullable(),
+    }).strict().optional(),
     acquisitionCostJpy: money.nullable(),
     acquiredOn: date.nullable(),
     businessUseStartedOn: date.nullable(),
@@ -44,7 +52,8 @@ export const equipmentDepreciationInputSchema = z
   })
   .strict()
 export type EquipmentDepreciationInput = z.infer<typeof equipmentDepreciationInputSchema>
-export type EquipmentDepreciationResult = {
+export type EquipmentDepreciationResult = EquipmentImmediateExpenseResult | EquipmentStraightLineResult | EquipmentPoolResult
+export type EquipmentStraightLineResult = {
   engineVersion: typeof EQUIPMENT_STRAIGHT_LINE_RULE.id
   equipmentId: string
   taxYear: number
@@ -70,11 +79,13 @@ export function calculateEquipmentDepreciation(
   value: EquipmentDepreciationInput,
 ): EquipmentDepreciationResult {
   const input = equipmentDepreciationInputSchema.parse(value)
+  if (input.method === 'immediate-expense') return calculateEquipmentImmediateExpense(input)
+  if (input.method === 'three-year-pool') return calculateEquipmentPool(input)
   const result = (
     status: EquipmentDepreciationResult['status'],
     reasons: string[],
-    calculation: EquipmentDepreciationResult['calculation'] = null,
-  ): EquipmentDepreciationResult => ({
+    calculation: EquipmentStraightLineResult['calculation'] = null,
+  ): EquipmentStraightLineResult => ({
     engineVersion: EQUIPMENT_STRAIGHT_LINE_RULE.id,
     equipmentId: input.equipmentId,
     taxYear: input.taxYear,
@@ -120,6 +131,12 @@ export function calculateEquipmentDepreciation(
   if (input.usefulLifeYears !== null && (input.usefulLifeYears < 2 || input.usefulLifeYears > 50))
     unsupported.push('検証済み償却率表の範囲外です。率を推定しません。')
   if (unsupported.length) return result('unsupported', unsupported)
+  const smallRestriction = input.method === 'straight-line' ? smallEquipmentStraightLineRestriction(input) : null
+  if (smallRestriction) return result(
+    input.acquiredOn! >= '2022-04-01' && (!input.rentalUse || input.rentalUse === 'unknown')
+      ? 'missing-facts' : 'unsupported',
+    [smallRestriction],
+  )
   const missing: string[] = []
   if (input.taxpayer === 'unknown') missing.push('納税者区分')
   if (input.assetKind === 'unknown') missing.push('有形設備の区分')
