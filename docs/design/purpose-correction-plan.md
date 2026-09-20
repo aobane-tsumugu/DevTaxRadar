@@ -2,10 +2,10 @@
 
 策定日: 2026-09-19（日本時間）  
 親Issue: [#19](https://github.com/aobane-tsumugu/DevTaxRadar/issues/19)  
-実装確認基点: `e98c8167abb8a06ede1dfb7eca071b64e802fa2d` / [PR #18](https://github.com/aobane-tsumugu/DevTaxRadar/pull/18)  
+監査基点: `e98c8167abb8a06ede1dfb7eca071b64e802fa2d` / 候補HEAD: `0814b1410f12e3b87190f4b080eee722c546834c` / [PR #18](https://github.com/aobane-tsumugu/DevTaxRadar/pull/18)  
 main確認値: `271ef56352ab782ff71434769ed1edb78565c513`
 
-**状態: 計画登録。是正実装は未着手。** 文書同期・過去のpushは完了しているが、製品として残るのは最終試験だけではない。本書は[既存実装計画](implementation-plan.md)を達成するための監査後の実行補遺であり、W01〜W08の責務・8完了条件・31要件・21受入条件を置換しない。作業の進捗はIssue、現在地は[CURRENT](../evidence/v05-revision/CURRENT.md)、既存の完成形は[製品仕様](../../PRODUCT_SPEC.md)と[技術設計](../../TECHNICAL_DESIGN.md)を使う。別の管理台帳や承認基盤は作らない。
+**状態: C01〜C05の是正実装・push済み。C06は同一候補HEADの別環境最終受入へ引継ぎ。** 文書同期・過去のpushは完了しているが、製品として残るのは最終試験だけではない。本書は[既存実装計画](implementation-plan.md)を達成するための監査後の実行補遺であり、W01〜W08の責務・8完了条件・31要件・21受入条件を置換しない。作業の進捗はIssue、現在地は[CURRENT](../evidence/v05-revision/CURRENT.md)、既存の完成形は[製品仕様](../../PRODUCT_SPEC.md)と[技術設計](../../TECHNICAL_DESIGN.md)を使う。別の管理台帳や承認基盤は作らない。
 
 ## 1. 完成させる仕事
 
@@ -163,3 +163,8 @@ C06では、GitHub QRを未ログインで開く、配布対象commitとデモ�
 - [所得税基本通達・取得価額](https://www.nta.go.jp/law/tsutatsu/kihon/shotoku/08/06.htm)：49-8の2・49-8の3の製作原価・合理的継続的な配賦・算入しないことができる費用等。すべてのAI費用を機械的に資産化する根拠ではない。
 
 税法の全範囲を実装する計画ではないが、対応すると掲げた通常の個人開発シナリオを、確認項目と未算定表示だけで終わらせない。
+
+
+## 11. 2026-09-20 実装到達点
+
+C01〜C05は候補HEAD `0814b1410f12e3b87190f4b080eee722c546834c` に反映済み。C06のうち現環境で実装・固定資料・文書契約として確認できる部分まで接続し、Node24・実ブラウザ・Windows・公開配布導線は [別環境hand-off](../evidence/v05-revision/2026-09-20-purpose-correction-external-handoff.md) へ移した。詳細は [最終是正記録](../evidence/v05-revision/2026-09-20-purpose-correction-final.md) を参照する。
