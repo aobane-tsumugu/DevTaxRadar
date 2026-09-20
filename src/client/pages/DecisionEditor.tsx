@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DecisionRecord, TaxUnitRecord } from '../../planning/types'
 import type { ConsultationNavigation } from '../consultationNavigation'
 import {
@@ -104,6 +104,13 @@ export default function DecisionEditor({
     next.yearInputs.push({ id, raw: String(taxYear) })
     write(next)
   }
+  const savedHash = canonicalDecisionEditorValue(saved)
+  const editorHash = editor ? canonicalDecisionEditorValue(editor.decisions) : ''
+  useEffect(() => {
+    if (!editor || parentRevision <= recovery.parentRevision || savedHash !== editorHash) return
+    recovery.close()
+  }, [editorHash, parentRevision, recovery.parentRevision, savedHash])
+
   const conflicts = useMemo(() => {
     if (!editor) return [] as Array<{
       id: string
@@ -234,6 +241,19 @@ export default function DecisionEditor({
         判断記録を追加
       </button>
       {rows.map((row, index) => {
+        if (row.softwareAnnualBinding) return (
+          <article className="cost-source panel" key={row.id}
+            data-consultation-decision={row.taxUnitId + ':' + row.taxYear}>
+            <h5>ソフトウェア年額の本人確認</h5>
+            <p>
+              {row.taxYear}年 / {row.reason}
+            </p>
+            <p>
+              方法画面で確認して保存した判断です。ここでは内部候補名や確認元を手入力で変更せず、
+              方法・取得価額・根拠・供用・対象年が変わる場合は方法画面で再確認します。
+            </p>
+          </article>
+        )
         const rawYear = editor?.yearInputs.find((item) => item.id === row.id)?.raw ??
           volatileYears.find((item) => item.id === row.id)?.raw ??
           (Number.isFinite(row.taxYear) ? String(row.taxYear) : '')
