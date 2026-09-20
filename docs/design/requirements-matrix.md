@@ -1,7 +1,7 @@
 # DevTax v0.5 要件・実装・受入対応表
 
-更新日: 2026-09-19
-実装差分基点: `6f574c4606e5e069640df96065d72bd081a33414`。PR #18の作業ブランチ。保存・計算・画面・年度採用・出力への接続を含む基点を確認し、W08の要件表・設計図・検査を同期。mainの受入済み状態とは区別する。
+更新日: 2026-09-20
+実装差分基点: `1fe8eaca41391e3e4787a5d7dea83abaf53d62bd`。PR #18の是正ブランチ。複数年度のソフトウェア取得原価、適用可能な方法、選択した年額の残高・年度採用、少額設備、一括償却、共通事実の再利用と未送信入力復旧まで接続した候補HEAD。Node24・実ブラウザ・公開導線の最終受入は別環境で固定HEADを検証する。
 
 製品仕様v0.5の要求・既存の受入条件を維持する。以下は現在の接続範囲であり、各ACの総合受入済みを示さない。実機確認は別枠、正式環境の全体試験は未実施として区別する。
 
@@ -18,15 +18,15 @@
 | REQ-SOURCE-02 | 履歴粒度・重複 | 契約選択と履歴粒度の制約を計算へ渡す。同じnative IDと実ログ複製を区別し、精度不足時に月・契約別利用を推定しない。 [usageGranularity.ts](../../src/core/usageGranularity.ts) [contractUsage.ts](../../src/core/contractUsage.ts) | AC-SOURCE、AC-TIME |
 | REQ-EXPENSE-01 | 原額・期間・調整 | 全費用は共通費用源へ正規化。料金の優先順位はproviderと対象月。理由付きnullと0、返金と元費用訂正、残高減少への対応を保持する。 [workspaceCosts.ts](../../src/core/workspaceCosts.ts) [sourceAdjustments.ts](../../src/core/sourceAdjustments.ts) [adjustmentBalanceLinks.ts](../../src/core/adjustmentBalanceLinks.ts) | AC-EXPENSE |
 | REQ-EXPENSE-02 | 入力・取込・換算 | 手入力と返金・訂正の共通検証、明示した換算額・率・日付・出典を保存。全原始請求の統一取込UIを実装した意味ではない。 [sourceAdjustmentSchema.ts](../../src/planning/sourceAdjustmentSchema.ts) [SourceAdjustmentsEditor.tsx](../../src/client/pages/SourceAdjustmentsEditor.tsx) | AC-EXPENSE |
-| REQ-EXPENSE-03 | 設備・自宅・直接費 | 設備の年度別普通定額法、前年残高照合、自宅・直接費の根拠と複数配分を接続。私用転用・特殊償却等は未対応として保持。 [equipmentDepreciation.ts](../../src/core/equipmentDepreciation.ts) [workspaceCosts.ts](../../src/core/workspaceCosts.ts) | AC-BASIS |
-| REQ-COST-01 | 原額・基礎・寄与・処理・残高の分離 | 共通projectionの最終配分へ処理条件を結び、候補を付加。方法比較は資産全体額を用いる独立案で、各方法・原額・候補・採用残高を合算しない。 [costTreatments.ts](../../src/core/costTreatments.ts) [annualMethodComparison.ts](../../src/core/annualMethodComparison.ts) | AC-BASIS、AC-DECISION |
+| REQ-EXPENSE-03 | 設備・自宅・直接費 | 設備の普通定額法、10万円未満の供用年費用化、10万円以上20万円未満の3年一括償却を、設備全体額・年度条件・前年残高から共通費用基礎へ接続。自宅・直接費の根拠と複数配分も維持し、私用転用・特殊償却等の未対応条件を通常計算へ置き換えない。 [equipmentDepreciation.ts](../../src/core/equipmentDepreciation.ts) [equipmentPool.ts](../../src/core/equipmentPool.ts) [workspaceCosts.ts](../../src/core/workspaceCosts.ts) | AC-BASIS |
+| REQ-COST-01 | 原額・基礎・寄与・処理・残高の分離 | 共通projectionの最終配分と既存残高・原価追跡を使い、複数年度の同一ソフト製作原価を二重加算せず一つの取得価額へ振替。原額・費用基礎・寄与・取得価額・選択方法・実際の年額・採用残高を分離し、不明範囲は既知小計を全体額へ昇格させない。 [softwareAcquisition.ts](../../src/core/softwareAcquisition.ts) [softwareMethod.ts](../../src/core/softwareMethod.ts) [balanceLotTrace.ts](../../src/core/balanceLotTrace.ts) | AC-BASIS、AC-DECISION |
 | REQ-COST-02 | 直接対応・複数配分 | 設備・自宅・直接費の複数対象と未確認率を保存。私用・通常業務・未配分・捕捉外・端数を分離し、親寄与の二重使用を拒否する。 [businessAllocation.ts](../../src/core/businessAllocation.ts) [costProjection.ts](../../src/core/costProjection.ts) | AC-ALLOC |
 | REQ-COST-03 | 契約・期間別の捕捉外 | 契約の履歴選択・捕捉外状態を分母に適用。不明の全額を勝手に配分せず、既定率を本人確認済みと解釈しない。旧設定の互換は明示する。 [contractUsage.ts](../../src/core/contractUsage.ts) [ChargeUsageEditor.tsx](../../src/client/pages/ChargeUsageEditor.tsx) | AC-CAPTURE |
 | REQ-COST-04 | 方法・期間・時間帯 | 方法版・期間・時間帯・取得来歴を保存版へ保持。契約別の利用範囲が曖昧なら配分待ち。観測していない稼働時間は生成しない。 [captureProvenance.ts](../../src/core/captureProvenance.ts) [dashboard.ts](../../src/server/dashboard.ts) | AC-METHOD、AC-TIME |
 | REQ-COST-05 | 多段階原価・二重費用化 | 親原価・最終配分・増加・残額使用の既存上限照合を維持。候補からの増加案も既存の未使用原価補完を使用し、段階ごとに元額を再計上しない。 [balanceCostDraft.ts](../../src/core/balanceCostDraft.ts) [balanceLotTrace.ts](../../src/core/balanceLotTrace.ts) [costTreatmentDraft.ts](../../src/core/costTreatmentDraft.ts) | AC-GRAPH |
-| REQ-DECISION-01 | 事実から候補・判断・残高案 | 全費用の最終配分へ作業実態を結び、既存taxDecisionへ接続。条件付き候補から未確認判断案を保存し、本人確認後に原価上限付きの制作中・前払増加案へ。普通経費を架空の残高経由で計上しない。 [costTreatments.ts](../../src/core/costTreatments.ts) [costTreatmentDraft.ts](../../src/core/costTreatmentDraft.ts) [TreatmentHandoffPanel.tsx](../../src/client/pages/TreatmentHandoffPanel.tsx) | AC-DECISION |
+| REQ-DECISION-01 | 事実から候補・判断・残高案 | 全費用の最終配分へ作業実態を結び、通常費用・ソフト製作原価等の候補へ接続。複数年のソフト取得価額は既存残高へ一度だけ振替し、本人が確認した方法から年額を計算して既存の費用化・年度採用へ渡す。普通経費や取得価額を架空の別台帳へ二重記帳しない。 [costTreatments.ts](../../src/core/costTreatments.ts) [softwareAcquisition.ts](../../src/core/softwareAcquisition.ts) [softwareMethodDraft.ts](../../src/core/softwareMethodDraft.ts) [SoftwareMethodPanel.tsx](../../src/client/pages/SoftwareMethodPanel.tsx) | AC-DECISION |
 | REQ-DECISION-02 | 不足・矛盾・未対応 | 対象額・期間・出典・条件IDと状態を返す。根拠変更はstale、不明金額はnull。候補元不一致は年度採用の既存参照確認へ問題として返す。 [treatmentDecisionReferences.ts](../../src/core/treatmentDecisionReferences.ts) [reviewMaterials.ts](../../src/server/reviewMaterials.ts) | AC-DECISION、AC-FACT |
-| REQ-DECISION-03 | 方法別の年次比較 | 個人・業務専用・普通条件の全体原価について定額法、少額、一括、青色特例を条件付き比較。既存資産は保存された前年全体残高を必要とし過去実績を再構成しない。端数方法は比較上の明示仮定。特殊条件・制度期間外は未算定。 保存済み設備の取得額・供用日・耐用年数・転用・年度別業務割合・特殊調整と照合し、矛盾を比較条件で上書きしない。同額の前年資料参照変更も確認元変更として検出する。 [annualMethodComparison.ts](../../src/core/annualMethodComparison.ts) [costMethodConnection.ts](../../src/core/costMethodConnection.ts) [AnnualMethodFactsEditor.tsx](../../src/client/pages/AnnualMethodFactsEditor.tsx) | AC-METHOD |
+| REQ-DECISION-03 | 方法別の年次比較 | 個人・業務専用・通常条件の資産全体額について、普通定額法、10万円未満の供用年費用化、3年一括償却、確認済みの青色少額資産特例を同じ年次比較エンジンで評価。選択した方法・根拠・制度条件は資産へ保存し、年額は再入力せず残高・年度採用へ接続。試算の表示期間や未採用案は採用済み事実・過年度資料を無効化しない。 [annualMethodComparison.ts](../../src/core/annualMethodComparison.ts) [softwareMethod.ts](../../src/core/softwareMethod.ts) [softwareMethodDraft.ts](../../src/core/softwareMethodDraft.ts) [SoftwareMethodPanel.tsx](../../src/client/pages/SoftwareMethodPanel.tsx) | AC-METHOD |
 | REQ-DECISION-04 | 相談回答の反映 | 問いと事実・方法の回答、解消の判断、対象年、回答時点を保持。候補元が変わった解消も再確認へ戻す。個別フィールドの全自動反映は行わない。 [consultationResolution.ts](../../src/core/consultationResolution.ts) [treatmentDecisionReferences.ts](../../src/core/treatmentDecisionReferences.ts) | AC-CONSULT |
 | REQ-YEAR-01 | 種類別残高・単一振替 | 制作中・資産・前払の保存則、単一振替と原価使用案を維持。候補からの増加先は制作物と種類を確認し、残高画面の未保存draftへだけ追加。 [annualBalances.ts](../../src/core/annualBalances.ts) [TreatmentBalanceDraftPanel.tsx](../../src/client/pages/TreatmentBalanceDraftPanel.tsx) | AC-YEAR、AC-GRAPH |
 | REQ-YEAR-02 | 期首・繰越・未知 | 外部期首と既存の前年資料参照、原価繰越し、不明額を維持。候補や将来比較の額で翌期首を自動置換しない。 [externalOpening.ts](../../src/core/externalOpening.ts) [openingLotCarry.ts](../../src/core/openingLotCarry.ts) | AC-YEAR |
@@ -34,10 +34,10 @@
 | REQ-RECORD-02 | 更新・削除と保存版の分離 | 原本がなくても固定資料を読取可能。通常起動を経由しないdata:readも同じhash検証を使用。旧資料へ新計算を補完しない。 [storedReview.ts](../../src/server/storedReview.ts) [reviewArchive.ts](../../src/server/reviewArchive.ts) | AC-RECORD、AC-SOURCE |
 | REQ-RECORD-03 | 訂正・後年度差分 | 元版・訂正版・後年度を分離。実際に参照する当年・過年度の条件と証拠を比較し、無関係な将来入力を混ぜない。 [reviewHistory.ts](../../src/core/reviewHistory.ts) [reviewComparison.ts](../../src/core/reviewComparison.ts) | AC-CORRECTION |
 | REQ-UX-01 | 目的に沿う主導線 | 支払と配分、残高と繰越し、今年の概要、根拠、記録と相談の既存導線へ接続。条件から判断・残高案へ移動。製品仕様の生涯全体ビューは残る目標。 [App.tsx](../../src/App.tsx) [CostsPage.tsx](../../src/client/pages/CostsPage.tsx) | AC-UX |
-| REQ-UX-02 | 保存・競合・復旧 | 既存workspace版照合・要求控え・3版比較と残高draft復旧を利用。条件・判断候補元は記録単位で保持し、旧入力の省略で保存済み条件を削除しない。 [workspaceMerge.ts](../../src/core/workspaceMerge.ts) [planningRepository.ts](../../src/server/planningRepository.ts) | AC-SAVE |
+| REQ-UX-02 | 保存・競合・復旧 | workspaceの版照合・要求控え・3版比較、残高draft復旧を維持。費用処理条件とソフト方法の未送信入力はdataset・編集対象・元revisionを持つ別控えとして復旧し、自動送信しない。既存ウィザードの判断編集も保存元との比較を通す。容量不足・別dataset・競合では元入力を保持する。 [editorRecovery.ts](../../src/client/editorRecovery.ts) [useEditorRecovery.ts](../../src/client/useEditorRecovery.ts) [workspaceRecovery.ts](../../src/client/workspaceRecovery.ts) [workspaceMerge.ts](../../src/core/workspaceMerge.ts) | AC-SAVE |
 | REQ-UX-03 | local失敗とdemo | 明示demoと実データを分離し、local失敗時は再試行を表示。失敗した個人の数値を合成値へ置換しない。 [dashboard.ts](../../src/client/dashboard.ts) [App.tsx](../../src/App.tsx) | AC-MODE |
-| REQ-UX-04 | 変更だけの確認 | メモ保存と計算影響、年度採用を区別。方法比較の導入は全員一律の追加質問にせず、明示的に選んだ費用に限定。 [workspaceChange.ts](../../src/core/workspaceChange.ts) [workspaceImpact.ts](../../src/server/workspaceImpact.ts) | AC-UX |
-| REQ-EXPORT-01 | 同版の全資料出力 | 共通projectionと固定版から画面・JSON・Markdownへ出力。方法比較も同じ保存結果を描画し、旧版の欠落は埋めない。 [costTreatmentExport.ts](../../src/core/costTreatmentExport.ts) [reviewExport.ts](../../src/core/reviewExport.ts) | AC-EXPORT |
+| REQ-UX-04 | 変更だけの確認 | メモ保存・計算影響・年度採用を区別し、同じ制作物の作業目的・資産種類・直接対応・根拠を安全な範囲で再利用。支払・提供・年末状態や確認済み判断は流用しない。未採用の比較期間・方法案だけの変更は製作事実や採用済み年額を失効させない。 [treatmentFactsReuse.ts](../../src/core/treatmentFactsReuse.ts) [reviewHistory.ts](../../src/core/reviewHistory.ts) [CostTreatmentFactsEditor.tsx](../../src/client/pages/CostTreatmentFactsEditor.tsx) [workspaceImpact.ts](../../src/server/workspaceImpact.ts) | AC-UX |
+| REQ-EXPORT-01 | 同版の全資料出力 | 共通projectionと固定版から画面・JSON・Markdownへ出力。ソフトウェアは保存した取得価額・選択方法・根拠・実際に記録した年度額・元原価年を固定版から描画し、現在の計算規則で旧版を再計算しない。方法未収録の旧版へ新しい欄を補完しない。 [reviewExport.ts](../../src/core/reviewExport.ts) [softwareMethodExport.ts](../../src/core/softwareMethodExport.ts) [storedReview.ts](../../src/server/storedReview.ts) | AC-EXPORT |
 | REQ-EXPORT-02 | 相談資料の境界 | 専用localReferenceを構造上除外。自由記述・理由・相談回答は匿名化済みとせず共有前に確認。data:readの個人用backupと相談資料を区別。 [reviewArchiveCli.ts](../../src/server/reviewArchiveCli.ts) [READING-SAVED-REVIEWS.md](../../docs/READING-SAVED-REVIEWS.md) | AC-PRIVACY、AC-EXPORT |
 | REQ-RESTORE-01 | 全DBのbackup・復元 | 全DBとsaltの一貫snapshot、schema・hash・整合検査、新規復元先限定と再接続保留を維持。原本のない停止取得元を保持し変更cacheのみ失効。 [dataBundle.ts](../../src/server/dataBundle.ts) [restoreSources.ts](../../src/server/restoreSources.ts) | AC-RESTORE |
 | REQ-RESTORE-02 | 利用終了後の読取り | data:readは通常起動・復元・移行なしで保存資料v1を検証し、選択版を新規ファイルへ出力。将来の未知schemaの互換を保証せず、restore条件は緩めない。 [reviewArchive.ts](../../src/server/reviewArchive.ts) [read-review.ts](../../scripts/read-review.ts) | AC-RESTORE、AC-EXPORT |
@@ -84,12 +84,12 @@ N年末46,000＋翌年増加12,000−翌年費用化6,000＝N＋1年末52,000（
 
 ## 検証範囲と残る製品上の境界
 
-- 実装済み経路と製品全体の受入を分ける。全要件が完了したという判定ではない。
-- 方法比較の対象は個人・業務専用・通常条件を明示した資産。法人、私用転用、特殊償却、期間中断、原価全体が不明な場合は未算定。
-- ソフト原価比較は同じ対象年の最終配分をまとめる範囲。複数年の制作中残高を取得価額へ統合する全自動の方法選択は提供しない。既存の原価繰越・残額使用とは別。
-- 定額法・少額・一括・青色特例の表は代替案。端数は入力した比較上の仮定。税額・節税額・制度適用の認定ではない。
-- 新しい条件入力は保存前には画面内保持。通常の送信控えと残高draft復旧を使い、追加した全編集欄の未送信状態を永続復旧したとはしない。
-- 正式なNode24/lockfileの全体Vitest・型検査・build・lint・format・privacy・実API・Release検証は別に実行する。Windows・実ブラウザ等の実機確認はユーザーの別枠。
-- 手入力の全費用経路は既存。すべての外部請求形式の自動取込、全活動の共通事実モデル、生涯全体画面は既存の目標仕様として残る。
+- 実装済み経路と製品全体の受入を分ける。是正コードは候補HEADへ接続済みだが、Node24・実API/React・Windows・展示導線の最終受入は別環境で行う。
+- ソフトウェアの通常経路は個人・業務専用・通常条件を明示した資産を対象とする。私用転用、特殊調整、中断・終了後は通常計算へ置き換えず別処理へ引き渡す。
+- 複数年度の制作中原価は既存の原価追跡と単一振替で一つの取得価額へまとめる。既に繰越した同じ原価を再加算せず、不明・外部期首の未追跡範囲は明示して全体確定額にしない。
+- 普通定額、供用年全額費用、3年一括、確認済み青色少額資産特例は代替方法で、方法間の額を合算しない。制度条件・所得区分・供用・貸付用途等を方法ごとに確認し、税額・節税額の自動確定は行わない。
+- 未送信の費用条件・方法入力はローカル控えへ保持し、dataset・元revision・編集対象を照合して復旧する。控えの復旧だけでDB保存・確認済み判断・年度採用を実行しない。
+- 正式なNode24/lockfileの全体Vitest・型検査・build・lint・format・privacy・Release、HTTP/API・React代表操作、Windows・狭い画面等はC06の同一候補HEADで実施する。
+- すべての外部請求形式の自動取込、法人一般会計、私用転用・特殊償却の自動計算、クラウド同期、生涯全体画面は今回の通常個人開発経路の完成範囲外として明示する。
 
 この表と設計図は `current-design.json` と `acceptance-scenarios.md` から同時生成する。金額の保存則は実製品の試験で検査し、この文書検査に算術定数を再記述して合格を作らない。
