@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { BalanceSnapshot } from '../../accounting/types'
 import type { BalancePreview } from '../../accounting/balanceWorkspace'
-import type { PlanningSnapshot } from '../../planning/types'
+import type { DecisionRecord, PlanningSnapshot } from '../../planning/types'
 import type { SoftwareMethod } from '../../core/softwareMethod'
 import { canonicalSoftwareValue } from '../../core/softwareMethod'
 import { ANNUAL_METHOD_RULE } from '../../core/annualMethodComparison'
 import { chooseSoftwareMethod, draftSoftwareYearExpense, endSoftwareOrdinaryMethod } from '../../core/softwareMethodDraft'
-import { decisionIsConfirmed } from '../../core/decisionConfirmation'
+import {
+  confirmSoftwareAnnualDecision,
+  softwareAnnualDecisionProposal,
+  softwareAnnualMethodLabel,
+} from '../../core/softwareAnnualDecision'
 import { getBalanceDraft, getBalancePreview, getRuntime, getWorkspace } from '../api'
 import { readSoftwareMethodPreview } from '../softwareMethodRead'
 import { useEditorRecovery } from '../useEditorRecovery'
@@ -18,9 +22,10 @@ import { yen } from './shared'
 const labels = { 'straight-line': '通常の定額法', 'immediate-expense': '供用年の全額費用', 'three-year-pool': '3年一括償却', 'blue-special': '青色申告の少額資産特例' }
 type Context = { preview: BalancePreview; signature: string; accountId: string; year: number }
 const integer = (value: string): number | null => { if (!/^\\d+$/.test(value.trim())) return null; const parsed = Number(value.trim()); return Number.isSafeInteger(parsed) ? parsed : null }
-export default function SoftwareMethodPanel({ datasetId, snapshot, planning, busy, edit }: {
+export default function SoftwareMethodPanel({ datasetId, snapshot, planning, busy, edit, onReviewAnnualDecision }: {
   datasetId?: string; snapshot: BalanceSnapshot; planning: PlanningSnapshot; busy: boolean
   edit: (change: (snapshot: BalanceSnapshot) => void) => void
+  onReviewAnnualDecision?: (decision: DecisionRecord, expectedRevision: number) => Promise<boolean>
 }) {
   const [accountId, setAccountId] = useState('')
   const [year, setYear] = useState(String(planning.profile.taxYear))
@@ -49,7 +54,6 @@ export default function SoftwareMethodPanel({ datasetId, snapshot, planning, bus
       if (!account || account.kind !== 'asset') throw new Error('ソフトウェアの資産を選択してください。')
       const source = account.softwareMethod
       const incoming = snapshot.movements.filter((row) => row.kind === 'transfer' && row.toAccountId === account.id)
-      const decisions = preview.materials!.planning.decisions.filter((row) => row.taxUnitId === account.taxUnitId && row.taxYear === selectedYear && decisionIsConfirmed(row) && !row.treatmentBinding && row.selectedCandidate === 'ordinary-expense')
       const initial: SoftwareMethodForm = {
         accountId: account.id, acquisitionMovementId: source?.acquisitionMovementId ?? (incoming.length === 1 ? incoming[0]!.id : ''),
         method: source?.method ?? '', usedOn: source?.usedOn ?? '', life: source?.usefulLifeYears ? String(source.usefulLifeYears) : '',
@@ -57,7 +61,7 @@ export default function SoftwareMethodPanel({ datasetId, snapshot, planning, bus
         rounding: source?.roundingConfirmed ?? false, evidenceIds: [...(source?.evidenceIds ?? [])], reason: source?.reason ?? '',
         specialEligibility: source?.blueSpecial ? 'yes' : '', specialUsedJpy: source?.blueSpecial ? String(source.blueSpecial.annualSpecialUsedJpy) : '',
         businessMonths: source?.blueSpecial ? String(source.blueSpecial.businessMonths) : '', statementReady: source?.blueSpecial ? 'yes' : '',
-        year: String(selectedYear), decisionId: decisions.length === 1 ? decisions[0]!.id : '', ordinaryYear: false,
+        year: String(selectedYear), decisionId: '', ordinaryYear: false,
         endYear: source?.ordinaryThroughYear === undefined ? '' : String(source.ordinaryThroughYear), endReason: source?.terminationReason ?? '',
       }
       setContext({ preview, signature: canonicalSoftwareValue(snapshot), accountId: account.id, year: selectedYear })
@@ -96,6 +100,56 @@ export default function SoftwareMethodPanel({ datasetId, snapshot, planning, bus
       ...blueSpecial, allocationPolicy: 'proportional-largest-remainder', evidenceIds: form.evidenceIds, reason: form.reason, confirmedAt: new Date().toISOString(),
     })
   }
+  const annualAccount = snapshot.accounts.find((row) => row.id === form?.accountId)
+  const annualDecision = (() => {
+    if (!ready || !form || !sourcePlanning || !annualAccount?.softwareMethod)
+      return { proposal: null as ReturnType<typeof softwareAnnualDecisionProposal> | null, error: '' }
+    try {
+      return {
+        proposal: softwareAnnualDecisionProposal(snapshot, sourcePlanning, form.accountId, Number(form.year)),
+        error: '',
+      }
+    } catch (error) {
+      return {
+        proposal: null,
+        error: error instanceof Error ? error.message : '年額判断の確認元を読めません。',
+      }
+    }
+  })()
+  async function confirmAnnualDecision() {
+    const proposal = annualDecision.proposal
+    if (!ready || !context || !form || !proposal || proposal.expenseJpy <= 0 ||
+        proposal.existingDecisionId || !form.ordinaryYear || !onReviewAnnualDecision || busy || loading)
+      return
+    setLoading(true)
+    setMessage('')
+    try {
+      if ((await getRuntime()).datasetId !== datasetId ||
+          (await getWorkspace()).revision !== context.preview.materials!.workspaceRevision)
+        throw new Error('接続先かworkspaceの保存版が変わりました。同じ画面で再読取りしてください。')
+      const decision = confirmSoftwareAnnualDecision(
+        proposal,
+        crypto.randomUUID(),
+        new Date().toISOString(),
+      )
+      const saved = await onReviewAnnualDecision(
+        decision,
+        context.preview.materials!.workspaceRevision,
+      )
+      if (!saved) {
+        setMessage('年額判断は保存していません。方法の入力と確認内容は保持しています。')
+        return
+      }
+      change({ decisionId: decision.id, ordinaryYear: true })
+      setMessage('この年の年額判断をworkspaceへ保存しました。同じ画面で最新の保存版を再読取りします。')
+      setLoading(false)
+      await load(form.accountId, Number(form.year))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '年額判断を保存できませんでした。入力は保持しています。')
+    } finally {
+      setLoading(false)
+    }
+  }
   async function apply(kind: 'method' | 'expense' | 'end') {
     if (!ready || !context || !form || !sourcePlanning || busy || loading) return
     const token = ++sequence.current, signature = context.signature
@@ -109,11 +163,15 @@ export default function SoftwareMethodPanel({ datasetId, snapshot, planning, bus
       if (kind === 'method') next = selection()
       else if (kind === 'end') next = endSoftwareOrdinaryMethod(snapshot, form.accountId, Number(form.endYear), form.endReason)
       else {
-        const key = JSON.stringify([signature, form.accountId, form.year, form.decisionId])
+        const decisionId = annualDecision.proposal?.existingDecisionId ?? ''
+        const key = JSON.stringify([signature, form.accountId, form.year, decisionId])
         request.current = request.current?.key === key ? request.current : { key, id: crypto.randomUUID() }
         next = draftSoftwareYearExpense(snapshot, sourcePlanning, context.preview.materials!.costLinks!.costs, {
-          accountId: form.accountId, year: Number(form.year), decisionId: form.decisionId,
-          requestId: request.current.id, ordinaryYearConfirmed: form.ordinaryYear,
+          accountId: form.accountId,
+          year: Number(form.year),
+          decisionId,
+          requestId: request.current.id,
+          ordinaryYearConfirmed: Boolean(annualDecision.proposal?.existingDecisionId),
         })
       }
       if (canonicalSoftwareValue(next) === signature) { setMessage('変更や追加すべき年額はありません。0円だけの記録や同じ方法の再登録は行いません。'); return }
@@ -127,7 +185,6 @@ export default function SoftwareMethodPanel({ datasetId, snapshot, planning, bus
   }
   if (!datasetId || !snapshot.accounts.some((row) => row.kind === 'asset')) return null
   const account = snapshot.accounts.find((row) => row.id === form?.accountId)
-  const decisions = (sourcePlanning?.decisions ?? []).filter((row) => row.taxUnitId === account?.taxUnitId && row.taxYear === Number(form?.year) && decisionIsConfirmed(row) && !row.treatmentBinding && row.selectedCandidate === 'ordinary-expense')
   return <details className="panel" aria-label="ソフトウェアの方法と年額">
     <summary>取得原価から、方法を選んで年額を残高入力へつなぐ</summary>
     <p>原価は資産振替から読み、金額を転記しません。試算は保存済みの方法・年度資料を変更しません。特殊調整や対応外条件は通常計算に置き換えません。</p>
@@ -168,11 +225,68 @@ export default function SoftwareMethodPanel({ datasetId, snapshot, planning, bus
       {showComparison && <div className="table-scroll"><table><thead><tr><th>方法</th><th>年</th><th>費用</th><th>期末</th></tr></thead><tbody>{eligibility.alternatives.flatMap((alternative) => (alternative.years ?? []).map((row) => <tr key={alternative.method + row.year}><td>{labels[alternative.method as keyof typeof labels]}</td><td>{row.year}</td><td>{yen.format(row.expenseJpy)}</td><td>{yen.format(row.closingJpy)}</td></tr>))}</tbody></table></div>}
       <button type="button" disabled={!ready || selectedScenario?.status !== 'conditional'} onClick={() => void apply('method')}>選択方法を未保存の残高入力へ反映</button>
       {account?.softwareMethod && <>
-        <h4>保存済みの方法から当年額を作る</h4><p>上の試算ではなく、保存済みの方法を使います。金額0円の年には判断・0円の記録を要求しません。</p>
-        {!decisions.length && <p>設定の「判断記録」で、この制作物・対象年の「通常経費（ordinary-expense）」を確認して保存してください。取得原価の判断は流用しません。</p>}
-        <label>対象年の確認済み判断<select value={form.decisionId} onChange={(event) => change({ decisionId: event.target.value })}><option value="">判断を選択</option>{decisions.map((row) => <option key={row.id} value={row.id}>{row.reason}</option>)}</select></label>
-        <label><input type="checkbox" checked={form.ordinaryYear} onChange={(event) => change({ ordinaryYear: event.target.checked })} />この年も継続使用し、特殊調整がない</label>
-        <button type="button" disabled={!ready} onClick={() => void apply('expense')}>計算した年額を未保存入力へ追加</button>
+        <h4>保存済みの方法から当年額を作る</h4>
+        <p>
+          上の試算ではなく、保存済みの方法・取得価額・根拠を使います。内部の処理候補名を別画面で入力する必要はありません。
+        </p>
+        {annualDecision.error && <p role="alert">{annualDecision.error}</p>}
+        {annualDecision.proposal && <>
+          <p>
+            取得価額 {yen.format(annualDecision.proposal.acquisitionAmountJpy)} /{' '}
+            {softwareAnnualMethodLabel(annualDecision.proposal.method)} / 供用日{' '}
+            {annualDecision.proposal.usedOn} / {annualDecision.proposal.year}年の年額{' '}
+            {yen.format(annualDecision.proposal.expenseJpy)}
+          </p>
+          <p>方法を選択した理由：{annualDecision.proposal.methodReason}</p>
+          {annualDecision.proposal.staleDecisionIds.length > 0 && (
+            <p role="alert">
+              この年には現在の方法・取得価額・根拠と一致しない以前の判断があります。既存記録は上書きせず、新しい確認を別記録として残します。
+            </p>
+          )}
+          {annualDecision.proposal.expenseJpy === 0 ? (
+            <p>この年の計算額は0円です。不要な判断記録や0円movementは作りません。</p>
+          ) : annualDecision.proposal.existingDecisionId ? (
+            <p>
+              この年は同じ方法と確認元の本人確認済み判断を再利用できます。重複した判断は作りません。
+            </p>
+          ) : (
+            <>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={form.ordinaryYear}
+                  onChange={(event) => change({ ordinaryYear: event.target.checked })}
+                />
+                この年も継続使用し、転用・中止・特殊調整がないことを確認した
+              </label>
+              <p>
+                この確認から当年年額の判断元を構造化して保存します。税務判断を自動確定する操作ではなく、本人確認後に通常のworkspace保存を行います。
+              </p>
+              <button
+                type="button"
+                disabled={!ready || !form.ordinaryYear || !onReviewAnnualDecision}
+                onClick={() => void confirmAnnualDecision()}
+              >
+                この年の年額判断を確認して保存
+              </button>
+            </>
+          )}
+        </>}
+        <button
+          type="button"
+          disabled={
+            !ready ||
+            Boolean(annualDecision.error) ||
+            Boolean(
+              annualDecision.proposal &&
+              annualDecision.proposal.expenseJpy > 0 &&
+              !annualDecision.proposal.existingDecisionId
+            )
+          }
+          onClick={() => void apply('expense')}
+        >
+          計算した年額を未保存入力へ追加
+        </button>
         <details><summary>中止・転用等で通常計算を終了する</summary><label>通常計算の最終年<input value={form.endYear} onChange={(event) => change({ endYear: event.target.value })} /></label><label>以後の別処理の理由<textarea value={form.endReason} maxLength={1800} onChange={(event) => change({ endReason: event.target.value })} /></label><button type="button" disabled={!ready} onClick={() => void apply('end')}>終了条件を未保存入力へ反映</button></details>
       </>}
       <button type="button" onClick={recovery.exportCopy}>個人用の編集控えを保存</button>
