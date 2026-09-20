@@ -6,6 +6,7 @@ import { balanceUseSources, draftBalanceUse } from './balanceUseDraft.js'
 import { decisionIsConfirmed } from './decisionConfirmation.js'
 import { canonicalSoftwareValue, softwareAcquisitionBasis, softwareMethodSchedule,
   validateSoftwareMethod, softwareEvidenceBasis, softwareMethodPostingBasis, allocateSoftwareExpense, type SoftwareMethod } from './softwareMethod.js'
+import { inspectSoftwareAnnualDecision, softwareAnnualDecisionMatches } from './softwareAnnualDecision.js'
 
 /** Explicit confirmation once per asset; saving still uses the existing balance endpoint. */
 export function chooseSoftwareMethod(
@@ -86,6 +87,11 @@ export function draftSoftwareYearExpense(
   if (!decision || !decisionIsConfirmed(decision) || decision.taxYear !== input.year || decision.taxUnitId !== account.taxUnitId ||
       decision.treatmentBinding || decision.selectedCandidate !== 'ordinary-expense')
     throw new Error('対象年・ソフトウェアに対応する年額費用の確認済み判断を選択してください。取得原価への組入れ判断は転用しません。')
+  if (decision.softwareAnnualBinding) {
+    const context = inspectSoftwareAnnualDecision(snapshot, planning, account.id, input.year)
+    if (!softwareAnnualDecisionMatches(decision, context))
+      throw new Error('保存済みの年額判断は、現在の方法・取得価額・根拠・供用・対象年と一致しません。再確認してください。')
+  }
   const source = balanceUseSources(snapshot, costs, `${input.year}-12-31`).find((row) => row.sourceKind === 'movement' && row.sourceId === selection.acquisitionMovementId)
   if (!source || source.accountId !== account.id || source.amountJpy !== expected.openingJpy + expected.additionsJpy)
     throw new Error('保存した前年費用化と現在の原価残額が一致しません。後年度の使用予約も確認してください。')
