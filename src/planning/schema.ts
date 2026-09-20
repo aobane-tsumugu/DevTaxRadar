@@ -8,6 +8,7 @@ import { validIsoCalendarDate } from '../core/chargePeriods.js'
 import { costPresenceRecordsSchema } from './costPresence.js'
 import { equipmentMethodsSchema } from './equipmentMethods.js'
 import { decisionIsConfirmed, MANUAL_DECISION_VERSION } from '../core/decisionConfirmation.js'
+import { SOFTWARE_ANNUAL_DECISION_VERSION } from '../core/softwareAnnualDecision.js'
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)
@@ -214,6 +215,15 @@ const evidenceSchema = z.object({
   taxUnitId: identifier.optional(),
 })
 
+const softwareAnnualDecisionBindingSchema = z.object({
+  version: z.literal(1),
+  accountId: identifier,
+  year: z.number().int().min(2000).max(2100),
+  methodBasis: z.string().trim().min(1).max(600_000),
+  annualExpenseJpy: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  ordinaryYearConfirmed: z.literal(true),
+})
+
 const decisionSchema = z
   .object({
     id: identifier,
@@ -222,6 +232,7 @@ const decisionSchema = z
     engineVersion: z.string().trim().min(1).max(120),
     candidate: z.string().trim().min(1).max(160),
     treatmentBinding: treatmentDecisionBindingSchema.optional(),
+    softwareAnnualBinding: softwareAnnualDecisionBindingSchema.optional(),
     status: z.enum(['pending', 'confirmed', 'overridden']),
     selectedCandidate: z.string().trim().min(1).max(160).optional(),
     reason: z.string().trim().max(2_000).optional(),
@@ -229,18 +240,36 @@ const decisionSchema = z
     confirmedAt: z.string().datetime({ offset: true }).optional(),
   })
   .superRefine((decision, context) => {
-    if (decision.engineVersion !== MANUAL_DECISION_VERSION) return
-    if (
-      decision.status === 'pending'
-        ? decision.confirmedAt !== undefined
-        : !decisionIsConfirmed(decision)
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['status'],
-        message:
-          '確認した扱い・根拠・確認日時を揃えてください。未確認の記録には確認日時を付けられません。',
-      })
+    if (decision.engineVersion === MANUAL_DECISION_VERSION) {
+      if (
+        decision.status === 'pending'
+          ? decision.confirmedAt !== undefined
+          : !decisionIsConfirmed(decision)
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['status'],
+          message:
+            '確認した扱い・根拠・確認日時を揃えてください。未確認の記録には確認日時を付けられません。',
+        })
+    }
+    const generated = decision.softwareAnnualBinding
+    if (decision.engineVersion === SOFTWARE_ANNUAL_DECISION_VERSION || generated) {
+      if (
+        !generated ||
+        decision.engineVersion !== SOFTWARE_ANNUAL_DECISION_VERSION ||
+        decision.candidate !== 'ordinary-expense' ||
+        decision.selectedCandidate !== 'ordinary-expense' ||
+        decision.status !== 'confirmed' ||
+        !decisionIsConfirmed(decision) ||
+        decision.taxYear !== generated.year
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['softwareAnnualBinding'],
+          message: 'ソフトウェア年額の判断元と本人確認記録が一致しません。',
+        })
+    }
   })
 
 // Manual and imported adjustments use the same validator as persistence.
