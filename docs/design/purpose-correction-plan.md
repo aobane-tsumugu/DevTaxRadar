@@ -5,7 +5,7 @@
 監査基点: `e98c8167abb8a06ede1dfb7eca071b64e802fa2d` / 候補ブランチ: `work/w07-w08-acceptance-20260918`（固定SHAはIssue #25） / [PR #18](https://github.com/aobane-tsumugu/DevTaxRadar/pull/18)  
 main確認値: `271ef56352ab782ff71434769ed1edb78565c513`
 
-**状態: C01〜C03・C05は実装・push済み。C04は再監査で残件を確認し #23 を再open。C06はC04修正後の同一HEADで別環境最終受入を行う。** 完了判定を先に置かず、判断記録の未送信復旧と年額費用化時の重複確認を実装してからC06へ進む。本書は[既存実装計画](implementation-plan.md)を達成するための監査後の実行補遺であり、W01〜W08の責務・8完了条件・31要件・21受入条件を置換しない。作業の進捗はIssue、現在地は[CURRENT](../evidence/v05-revision/CURRENT.md)、既存の完成形は[製品仕様](../../PRODUCT_SPEC.md)と[技術設計](../../TECHNICAL_DESIGN.md)を使う。別の管理台帳や承認基盤は作らない。
+**状態: C01〜C05は是正実装を候補ブランチへ反映済み。C04は再監査で見つかった2残件を実装し、判断記録の未送信復旧と年額費用化時の重複手入力を解消した。C06は同一候補HEADをNode24・実HTTP/React・Windows・展示/配布環境で最終受入する。** 未実施の外部試験を成功扱いにはせず、C04の現環境確認とC06の外部受入を分離する。本書は[既存実装計画](implementation-plan.md)を達成するための監査後の実行補遺であり、W01〜W08の責務・8完了条件・31要件・21受入条件を置換しない。作業の進捗はIssue、現在地は[CURRENT](../evidence/v05-revision/CURRENT.md)、既存の完成形は[製品仕様](../../PRODUCT_SPEC.md)と[技術設計](../../TECHNICAL_DESIGN.md)を使う。別の管理台帳や承認基盤は作らない。
 
 ## 1. 完成させる仕事
 
@@ -167,4 +167,4 @@ C06では、GitHub QRを未ログインで開く、配布対象commitとデモ�
 
 ## 11. 2026-09-20 実装到達点
 
-C01〜C03・C05は候補ブランチへ反映済み。C04は、共通事実再利用・費用条件/方法入力の復旧までは接続済みだが、判断記録の未送信復旧と、年額費用化に別画面の自由入力判断を毎年要求する導線が残る。#23で是正後、固定SHAをIssue #25へ更新して [別環境hand-off](../evidence/v05-revision/2026-09-20-purpose-correction-external-handoff.md) を実施する。詳細は [最終是正記録](../evidence/v05-revision/2026-09-20-purpose-correction-final.md) を参照する。
+C01〜C05は候補ブランチへ反映済み。C04では `DecisionEditor` を既存 `editorRecovery` 境界へ接続し、dataset・元revision・競合・容量不足・未完成文字列を保持したまま本人操作で復旧できるようにした。また、保存済みSoftwareMethod＋取得価額＋根拠＋供用＋対象年の継続使用確認から、当年年額の `DecisionRecord` を同じ方法画面で構造化生成し、通常workspace保存へ渡す。内部候補名 `ordinary-expense` の自由入力と設定画面往復は撤去し、0円年は判断を作らず、同じ確認元は再利用、変更時はstaleとして別確認にする。固定SHAはIssue #25へ更新して [別環境hand-off](../evidence/v05-revision/2026-09-20-purpose-correction-external-handoff.md) を実施する。詳細は [最終是正記録](../evidence/v05-revision/2026-09-20-purpose-correction-final.md) を参照する。
