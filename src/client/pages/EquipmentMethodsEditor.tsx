@@ -1,4 +1,5 @@
 import { useId } from 'react'
+import EquipmentPoolConditions from './EquipmentPoolConditions'
 import PreviousEquipmentBalancePicker from './PreviousEquipmentBalancePicker'
 import EquipmentTargetsEditor from './EquipmentTargetsEditor'
 import type { PlanningSnapshot } from '../../planning/types'
@@ -31,7 +32,7 @@ export default function EquipmentMethodsEditor({
     <section className="panel" aria-label="設備の年度別計算条件">
       <h4>{validYear ? `${year}年` : '対象年'}の設備計算条件</h4>
       <p>
-        方法と事実、年度別の配分割合と根拠を記録します。設備全体の年額（普通償却または少額設備の供用年費用基礎）から、その年度の業務分・制作物分を算定します。適用条件の自動検証や税務上の費用の採用ではありません。
+        方法と事実、年度別の配分割合と根拠を記録します。設備全体の年額（普通償却・少額設備の供用年費用基礎・3年一括償却）から、その年度の業務分・制作物分を算定します。適用条件の自動検証や税務上の費用の採用ではありません。
       </p>
       {!validYear ? (
         <p>この方法の対象年は2007〜2100年です。</p>
@@ -278,6 +279,7 @@ export default function EquipmentMethodsEditor({
                           ['unknown', '未確認'],
                           ['straight-line', '普通定額法'],
                           ['immediate-expense', '10万円未満の設備：供用年に費用化'],
+                          ['three-year-pool', '10万円以上20万円未満の設備：3年一括償却'],
                           ['other', 'その他（未対応）'],
                         ],
                       ],
@@ -300,7 +302,7 @@ export default function EquipmentMethodsEditor({
                         ],
                       ],
                     ] as const
-                  ).filter(([key]) => row.method !== 'immediate-expense' || key !== 'useThroughYearEnd')
+                  ).filter(([key]) => !['immediate-expense', 'three-year-pool'].includes(row.method) || key !== 'useThroughYearEnd')
                   .map(([key, label, options]) => (
                     <label key={key} style={{ display: 'block', marginBlock: 12 }}>
                       {label}
@@ -318,7 +320,7 @@ export default function EquipmentMethodsEditor({
                       </select>
                     </label>
                   ))}
-                  {(row.method === 'immediate-expense' ||
+                  {(row.method === 'immediate-expense' || row.method === 'three-year-pool' ||
                     (row.method === 'straight-line' && equipment.acquisitionCostJpy !== null &&
                      equipment.acquisitionCostJpy < 100000)) && equipment.acquiredOn >= '2022-04-01' && (
                     <label style={{ display: 'block', marginBlock: 12 }}>
@@ -339,7 +341,8 @@ export default function EquipmentMethodsEditor({
                   {row.method === 'immediate-expense' && (
                     <p>供用年に一度だけ費用基礎へ入れます。耐用年数・月割りは使いません。以前の方法や入力は自動で消しません。</p>
                   )}
-                  {row.method !== 'immediate-expense' && <label style={{ display: 'block', marginBlock: 12 }}>
+                  {row.method === 'three-year-pool' && <EquipmentPoolConditions equipment={equipment} row={row} rows={rows} onChange={update} />}
+                  {!['immediate-expense', 'three-year-pool'].includes(row.method) && <label style={{ display: 'block', marginBlock: 12 }}>
                     この年度に確認した耐用年数
                     <input
                       aria-label={`${equipment.name}の年度別耐用年数`}

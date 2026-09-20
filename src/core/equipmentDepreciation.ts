@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { calculateEquipmentPool, type EquipmentPoolResult } from './equipmentPool.js'
 import {
   calculateEquipmentImmediateExpense,
   smallEquipmentStraightLineRestriction,
@@ -27,9 +28,14 @@ export const equipmentDepreciationInputSchema = z
     taxYear: z.number().int().min(2007).max(2100),
     taxpayer: z.enum(['individual', 'corporation', 'unknown']),
     assetKind: z.enum(['tangible-equipment', 'intangible', 'unknown']),
-    method: z.enum(['straight-line', 'immediate-expense', 'other', 'unknown']),
+    method: z.enum(['straight-line', 'immediate-expense', 'three-year-pool', 'other', 'unknown']),
     rentalUse: z.enum(['none', 'primary-business', 'other', 'unknown']).optional(),
     methodReason: z.string().max(2000),
+    poolElection: z.object({
+      serviceYear: z.number().int().min(2007).max(2100).nullable(),
+      reference: z.string().max(2000),
+      roundingConfirmed: z.boolean().nullable(),
+    }).strict().optional(),
     acquisitionCostJpy: money.nullable(),
     acquiredOn: date.nullable(),
     businessUseStartedOn: date.nullable(),
@@ -46,7 +52,7 @@ export const equipmentDepreciationInputSchema = z
   })
   .strict()
 export type EquipmentDepreciationInput = z.infer<typeof equipmentDepreciationInputSchema>
-export type EquipmentDepreciationResult = EquipmentImmediateExpenseResult | EquipmentStraightLineResult
+export type EquipmentDepreciationResult = EquipmentImmediateExpenseResult | EquipmentStraightLineResult | EquipmentPoolResult
 export type EquipmentStraightLineResult = {
   engineVersion: typeof EQUIPMENT_STRAIGHT_LINE_RULE.id
   equipmentId: string
@@ -74,6 +80,7 @@ export function calculateEquipmentDepreciation(
 ): EquipmentDepreciationResult {
   const input = equipmentDepreciationInputSchema.parse(value)
   if (input.method === 'immediate-expense') return calculateEquipmentImmediateExpense(input)
+  if (input.method === 'three-year-pool') return calculateEquipmentPool(input)
   const result = (
     status: EquipmentDepreciationResult['status'],
     reasons: string[],
