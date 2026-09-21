@@ -1,4 +1,4 @@
-import type { Diagnosis } from '../planning/types.js'
+import type { Diagnosis } from '../planning/types'
 
 export type TaskHubDestination = 'setup' | 'costs' | 'folders' | 'summary' | 'balances' | 'transfer'
 
