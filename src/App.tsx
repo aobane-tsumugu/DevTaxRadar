@@ -30,6 +30,9 @@ import BalancesPage from './client/pages/BalancesPage'
 import SummaryPage from './client/pages/SummaryPage'
 import EvidencePage from './client/pages/EvidencePage'
 import TaxGuidePage from './client/pages/TaxGuidePage'
+import TaskHubPage from './client/pages/TaskHubPage'
+import DataTransferPage from './client/pages/DataTransferPage'
+import type { TaskHubDestination } from './client/taskHub'
 import WorkspaceImpactPanel, { type WorkspaceImpactState } from './client/pages/WorkspaceImpactPanel'
 import WorkspaceConflictPanel, { type WorkspaceComparison } from './client/pages/WorkspaceConflictPanel'
 import { mergeWorkspaceDrafts, type WorkspaceContents } from './core/workspaceMerge'
@@ -38,13 +41,16 @@ import { incomeCategoryLabel, ruleId } from './client/pages/shared'
 import type { WorkspaceDraft, WorkspaceView, WorkspaceSave } from './planning/workspace'
 import './index.css'
 
-type Page = 'summary' | 'evidence' | 'folders' | 'guide' | 'costs' | 'balances'
+type Page = 'tasks' | 'summary' | 'evidence' | 'folders' | 'guide' | 'costs' | 'balances' | 'transfer'
 type Provider = 'すべて' | 'Claude Code' | 'Codex'
 const pageTitles: Record<Page, string> = {
+  tasks: '今回確認すること', transfer: 'PCとデータ',
   summary: '今年どうなる？', evidence: 'なぜそうなる？', folders: 'フォルダの割当',
   guide: '税務の言葉を知る', costs: '支払と配分', balances: '残高と繰越し',
 }
 const descriptions: Record<Page, string> = {
+  tasks: '変わったこと・未確認のことから、今年と翌年の説明に必要な作業へ進みます。',
+  transfer: '複数PCの履歴を集める方法と、DevTaxの保存データを別PCへ安全に引っ越す方法を分けて扱います。',
   summary: '対象年の全費用、計算できた範囲と未確定の扱いを確認します。',
   evidence: '実際の請求・配分基準・制作物・根拠のつながりを確認します。',
   folders: 'AI履歴の作業フォルダを、制作物と作業内容へ結び付けます。',
@@ -55,7 +61,7 @@ const descriptions: Record<Page, string> = {
 
 export default function App() {
   const [data, setData] = useState<DashboardData | null>(null)
-  const [page, setPage] = useState<Page>('summary')
+  const [page, setPage] = useState<Page>('tasks')
   const [balancesOpened, setBalancesOpened] = useState(false)
   const [balanceNavigation, setBalanceNavigation] = useState<{ year: number; request: number; datasetId?: string; contributionId?: string }>()
   const [provider, setProvider] = useState<Provider>('すべて')
@@ -438,17 +444,24 @@ export default function App() {
     setPage('balances')
   }
   function editAt(step: number) { setOnboardingStep(step); openOnboarding() }
+  function openTaskDestination(destination: TaskHubDestination) {
+    if (destination === 'setup') { editAt(0); return }
+    if (destination === 'balances') { openBalances(); return }
+    setPage(destination)
+  }
 
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="#top" aria-label="DevTax ホーム"><span className="radar-mark">D</span><span><strong>DevTax</strong><small>原価を、説明できる数字に。</small></span></a>
       <nav aria-label="メインナビゲーション">
         {([
+          ['tasks', '00', '今回確認すること', '変化・未確認から始める'],
           ['costs', '01', '支払と配分', '全費用の原額・期間・対応先'],
           ['balances', '02', '残高と繰越し', '期首・増減・期末の記録'],
           ['summary', '⌁', '今年どうなる？', '対象年の費用と確認事項'],
           ['evidence', '≡', 'なぜそうなる？', '配賦と根拠ログ'],
           ['folders', '▤', 'フォルダの割当', '履歴と制作物を結ぶ'],
+          ['transfer', 'PC', 'PCとデータ', '複数PC・引っ越し・復元'],
           ['guide', '?', '税務QA', '言葉と境界を知る'],
         ] as const).map(([target, icon, title, detail]) => <button key={target} className={page === target ? 'nav-item active' : 'nav-item'} onClick={() => {
           if (target === 'balances') setBalancesOpened(true)
@@ -472,7 +485,7 @@ export default function App() {
       <main className="content">
         {runtime?.datasetId && data.meta.source === 'local' && <WorkspaceAttemptPanel key={runtime.datasetId} datasetId={runtime.datasetId} disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onRetry={retryWorkspaceAttempt} />}
         {runtime?.restoreRequiresReconnect && <RestoreSourcesPanel onComplete={() => setRuntime((current) => current && { ...current, restoreRequiresReconnect: false })} />}
-        {relevantUnknown.length > 0 && <section className="panel" aria-label="未確認のAI請求額">
+        {relevantUnknown.length > 0 && page !== 'tasks' && <section className="panel" aria-label="未確認のAI請求額">
           <strong>対象年の請求額が未確認のAI契約が{relevantUnknown.length}件あります</strong>
           <p>未確認分の原額・期間・理由は「支払と配分」で確認できます。既知の小計へ0円として含めていません。</p>
           <ul>{relevantUnknown.map((charge) => <li key={charge.id}>{charge.provider === 'claude' ? 'Claude Code' : 'Codex'}：{charge.serviceStartedOn}～{charge.serviceEndedOn} / {charge.reason}</li>)}</ul>
@@ -515,6 +528,18 @@ export default function App() {
           /> : undefined}
         /></div>
         {page === 'balances' || page === 'costs' ? null
+          : page === 'tasks' ? <TaskHubPage
+              diagnosis={diagnosis} runtime={runtime}
+              unknownChargeCount={relevantUnknown.length}
+              unassignedFolderCount={unassignedFolderCount}
+              unavailableSourceCount={historySources.filter((source) => source.enabled && source.availability === 'unavailable').length}
+              taxUnitCount={planning.taxUnits.length}
+              onOpen={openTaskDestination}
+            />
+          : page === 'transfer' ? <DataTransferPage
+              local={data.meta.source === 'local'} runtime={runtime} historySources={historySources}
+              onManageSources={() => editAt(0)}
+            />
           : page === 'summary' ? <SummaryPage key={runtime?.datasetId} onOpenBalances={openBalances} data={data} planning={planning} diagnosis={diagnosis} months={filteredMonths} undatedMonths={annual.undatedMonths} onOpenCosts={() => setPage('costs')} totals={filteredTotals} onOpenOnboarding={() => editAt(0)} retention={runtime?.retention ?? null} />
             : page === 'evidence' ? <EvidencePage data={data} planning={planning} diagnosis={diagnosis} allocations={allocations} selected={selectedAllocation} onSelect={setSelectedAllocation} busy={rulesBusy} error={rulesError} onReclassify={reclassifyAllocation} />
               : page === 'folders' ? <FolderAssignmentPage folders={folders} planning={planning} busy={rulesBusy} error={rulesError} onSaveRules={storeRules} />
