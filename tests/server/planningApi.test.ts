@@ -216,7 +216,8 @@ describe('planning HTTP API', () => {
       expect(response.status).toBe(404)
       expect(await getJson('/api/workspace', config)).toEqual(before)
     }
-  })
+    // The first server spawn in this file pays the cold tsx compile; runtime() allows 10s.
+  }, 20_000)
 
   it('persists multiple home allocations and rejects missing or excessive targets atomically', async () => {
     const config = await startServer()
@@ -1201,7 +1202,9 @@ describe('planning HTTP API', () => {
         reason: '請求書確認待ち',
       },
     ])
-    expect(saved.dashboard.boundaries).toEqual([])
+    // Synthetic asset boundaries were retired; an unknown bill must not create them either.
+    expect(saved.dashboard).not.toHaveProperty('boundaries')
+    expect(saved.dashboard).not.toHaveProperty('assets')
     for (const year of [2025, 2026]) {
       const projection = (await getJson(
         '/api/projections?year=' + year,
@@ -2075,7 +2078,7 @@ describe('planning HTTP API', () => {
     )
     expect(response.status).toBe(400)
     const body = (await response.json()) as { message?: string }
-    expect(body.message).toContain('同じIDのルールが重複しています')
+    expect(body.message).toContain('planning.projectRules.1.id: IDが重複しています')
   }, 20_000)
 
   it('設定APIはmappingsを受け付けない', async () => {
