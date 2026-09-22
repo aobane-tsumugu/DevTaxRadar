@@ -323,7 +323,7 @@ export function allocateSoftwareExpense(amount: number, lots: readonly { costYea
     remainder: BigInt(amount) * BigInt(lot.remainingJpy!) % total,
   }))
   let rest = BigInt(amount) - allocated.reduce((sum, row) => sum + row.amount, 0n)
-  allocated.sort((a, b) => a.remainder === b.remainder ? a.key < b.key ? -1 : a.key > b.key ? 1 : a.remainder > b.remainder ? -1 : 1)
+  allocated.sort((a, b) => a.remainder === b.remainder ? a.key < b.key ? -1 : a.key > b.key ? 1 : 0 : a.remainder > b.remainder ? -1 : 1)
   for (const row of allocated) if (rest > 0n) { row.amount++; rest-- }
   if (rest !== 0n) throw new Error('原価への費用化配分が一致しません。')
   return allocated.filter((row) => row.amount > 0n).sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
