@@ -53,8 +53,9 @@ describe('local API integration through the versioned workspace', () => {
   }
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'devtax-api-'))
-    const claude = join(root, 'claude'), codex = join(root, 'codex')
-    mkdirSync(claude); mkdirSync(codex)
+    // The server reads the default history roots under the isolated home.
+    const claude = join(root, '.claude', 'projects'), codex = join(root, '.codex', 'sessions')
+    mkdirSync(claude, { recursive: true }); mkdirSync(codex, { recursive: true })
     const rows = ['2025-04-15T10:00:00Z', '2026-04-03T10:00:00Z', '2026-04-25T10:00:00Z'].flatMap((timestamp, index) => [
       { type: 'user', sessionId: index === 0 ? rawSession + '-old' : rawSession, timestamp, cwd: join(root, 'Product-A'), message: { role: 'user', content: prompt } },
       { type: 'assistant', sessionId: index === 0 ? rawSession + '-old' : rawSession, timestamp, cwd: join(root, 'Product-A'), message: { id: `message-${index}`, model: 'synthetic', usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } },
@@ -71,8 +72,8 @@ describe('local API integration through the versioned workspace', () => {
     child = spawn(process.execPath, ['--import', 'tsx', resolve('src/server/index.ts')], {
       cwd: resolve('.'), stdio: ['ignore', 'pipe', 'pipe'], env: {
         ...process.env, PORT: String(port), TZ: 'UTC', HOME: root, USERPROFILE: root,
-        DEVTAX_RADAR_DATA_DIR: join(root, 'data'), DEVTAX_RADAR_CLAUDE_ROOT: claude,
-        DEVTAX_RADAR_CODEX_ROOT: codex, DEVTAX_RADAR_CLAUDE_SETTINGS: join(root, 'settings.json'), DEVTAX_RADAR_AUTO_SCAN: '0',
+        DEVTAX_RADAR_DATA_DIR: join(root, 'data'),
+        DEVTAX_RADAR_CLAUDE_SETTINGS: join(root, 'settings.json'), DEVTAX_RADAR_AUTO_SCAN: '0',
       },
     })
     const collect = (buffer: Buffer) => { output = (output + buffer.toString()).slice(-8000) }
@@ -85,7 +86,9 @@ describe('local API integration through the versioned workspace', () => {
       catch { await new Promise((done) => setTimeout(done, 75)) }
     }
     if (!csrfToken) throw new Error('API startup failed: ' + output)
-    expect((await post('/api/scan', { providers: ['claude', 'codex'] })).status).toBe(200)
+    const scan = await post('/api/scan', { providers: ['claude', 'codex'] })
+    expect(scan.status).toBe(200)
+    expect(((await scan.json()) as { sources: Array<{ status: string }> }).sources.map((row) => row.status).sort()).toEqual(['complete', 'complete'])
     await setCosts(defaults())
     expect((await savePlanningFixture(emptyPlanningSnapshot(2026), connection())).status).toBe(200)
   }, 20_000)
