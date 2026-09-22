@@ -1,5 +1,5 @@
 import { readSourceAdjustments, writeSourceAdjustments } from './sourceAdjustmentsRepository.js'
-import { readDecisionTreatmentBindings, writeDecisionTreatmentBindings } from './decisionTreatmentBindingsRepository.js'
+import { readDecisionSoftwareAnnualBindings, readDecisionTreatmentBindings, writeDecisionSoftwareAnnualBindings, writeDecisionTreatmentBindings } from './decisionTreatmentBindingsRepository.js'
 import { readCostTreatmentFacts, writeCostTreatmentFacts } from './costTreatmentFactsRepository.js'
 import { planningSnapshotSchema, planningSaveSchema, PlanningValidationError } from '../planning/schema.js'
 export { planningSnapshotSchema, planningSaveSchema, projectRulesSchema, PlanningValidationError } from '../planning/schema.js'
@@ -25,6 +25,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     has_bookkeeping AS hasBookkeeping, notes FROM planning_profiles WHERE singleton_id = 1`).get() as Record<string, unknown> | undefined
   const sourceAdjustments = readSourceAdjustments(db)
   const decisionBindings = readDecisionTreatmentBindings(db)
+  const annualBindings = readDecisionSoftwareAnnualBindings(db)
   const costTreatmentFacts = readCostTreatmentFacts(db)
   if (!profile) return { ...emptyPlanningSnapshot(), ...(sourceAdjustments.length ? { sourceAdjustments } : {}), ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}) }
   const snapshot = {
@@ -73,7 +74,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     decisions: (db.prepare(`SELECT id, tax_unit_id AS taxUnitId, tax_year AS taxYear,
       engine_version AS engineVersion, candidate, status, selected_candidate AS selectedCandidate,
       reason, created_at AS createdAt, confirmed_at AS confirmedAt FROM planning_decisions ORDER BY rowid`).all() as Array<Record<string, unknown>>).map((row) => ({
-        ...row, ...(decisionBindings.has(String(row.id)) ? { treatmentBinding: decisionBindings.get(String(row.id)) } : {}), selectedCandidate: optional(row.selectedCandidate as string | null), reason: optional(row.reason as string | null), confirmedAt: optional(row.confirmedAt as string | null),
+        ...row, ...(decisionBindings.has(String(row.id)) ? { treatmentBinding: decisionBindings.get(String(row.id)) } : {}), ...(annualBindings.has(String(row.id)) ? { softwareAnnualBinding: annualBindings.get(String(row.id)) } : {}), selectedCandidate: optional(row.selectedCandidate as string | null), reason: optional(row.reason as string | null), confirmedAt: optional(row.confirmedAt as string | null),
       })),
   }
   const costPresence = readCostPresence(db), equipmentMethods = readEquipmentMethods(db)
@@ -90,6 +91,7 @@ export function savePlanningSnapshot(snapshot: PlanningSnapshot, db: DatabaseSyn
   try {
     writeSourceAdjustments(db, parsed.sourceAdjustments)
     writeDecisionTreatmentBindings(db, parsed.decisions)
+    writeDecisionSoftwareAnnualBindings(db, parsed.decisions)
     writeCostTreatmentFacts(db, parsed.costTreatmentFacts)
     writeCostPresence(db, parsed.costPresence ?? [])
     db.exec('DELETE FROM planning_equipment_methods')
