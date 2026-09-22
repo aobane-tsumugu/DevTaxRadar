@@ -6,6 +6,7 @@ import {
   verifyDataTransferBackup,
 } from '../api'
 import type { HistorySource, RuntimeData } from '../types'
+import { sourceNeedsAttention } from '../taskHub'
 
 type Result = { kind: 'ok' | 'error'; message: string }
 
@@ -26,7 +27,7 @@ export default function DataTransferPage({
   const [restoreDestination, setRestoreDestination] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
-  const unavailable = historySources.filter((source) => source.enabled && source.availability === 'unavailable')
+  const unavailable = historySources.filter(sourceNeedsAttention)
 
   async function token() {
     return (runtime ?? (await getRuntime())).csrfToken
@@ -60,7 +61,13 @@ export default function DataTransferPage({
             {historySources.map((source) => (
               <li key={source.id}>
                 {source.name} / {source.provider === 'claude' ? 'Claude Code' : 'Codex'} /{' '}
-                {source.enabled ? (source.availability === 'available' ? '読取可能' : '現在読めない') : '走査しない'}
+                {!source.enabled
+                  ? '走査しない'
+                  : source.availability === 'available'
+                    ? '読取可能'
+                    : sourceNeedsAttention(source)
+                      ? '現在読めない'
+                      : 'このPCでは未使用（フォルダなし）'}
               </li>
             ))}
           </ul>
