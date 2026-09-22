@@ -19,7 +19,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { PlanningSnapshot } from '../../src/planning/types.js'
 import { emptyPlanningSnapshot } from '../../src/planning/types.js'
 import type { AnnualCostProjection } from '../../src/accounting/costs.js'
-import { saveWorkspaceFixture, savePlanningFixture, saveRulesFixture } from './helpers/workspace-fixture.js'
+import {
+  saveWorkspaceFixture,
+  savePlanningFixture,
+  saveRulesFixture,
+} from './helpers/workspace-fixture.js'
 
 const children: ChildProcess[] = []
 const directories: string[] = []
@@ -198,7 +202,8 @@ afterEach(async () => {
   }
 })
 
-describe('planning HTTP API', () => {
+// Every case spawns a real server (some restart it); runtime() alone may wait 10s for startup.
+describe('planning HTTP API', { timeout: 20_000 }, () => {
   it('rejects all retired unversioned writers without changing the saved workspace', async () => {
     const config = await startServer()
     expect((await savePlanningFixture(snapshot(), config)).status).toBe(200)
@@ -210,7 +215,11 @@ describe('planning HTTP API', () => {
     ] as const) {
       const response = await fetch(`http://127.0.0.1:${config.port}${url}`, {
         method,
-        headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${config.port}`, 'x-devtax-csrf': config.csrfToken },
+        headers: {
+          'content-type': 'application/json',
+          origin: `http://127.0.0.1:${config.port}`,
+          'x-devtax-csrf': config.csrfToken,
+        },
         body: JSON.stringify(body),
       })
       expect(response.status).toBe(404)
@@ -1201,7 +1210,9 @@ describe('planning HTTP API', () => {
         reason: '請求書確認待ち',
       },
     ])
+    // Synthetic asset boundaries were retired; an unknown bill must not create them either.
     expect(saved.dashboard).not.toHaveProperty('boundaries')
+    expect(saved.dashboard).not.toHaveProperty('assets')
     for (const year of [2025, 2026]) {
       const projection = (await getJson(
         '/api/projections?year=' + year,
@@ -2075,7 +2086,7 @@ describe('planning HTTP API', () => {
     )
     expect(response.status).toBe(400)
     const body = (await response.json()) as { message?: string }
-    expect(body.message).toContain('同じIDのルールが重複しています')
+    expect(body.message).toContain('planning.projectRules.1.id: IDが重複しています')
   }, 20_000)
 
   it('設定APIはmappingsを受け付けない', async () => {
@@ -2097,23 +2108,26 @@ describe('planning HTTP API', () => {
     children.push(child)
     const { csrfToken } = await runtime(testPort)
 
-    const response = await saveWorkspaceFixture({ port: testPort, csrfToken }, {
-      configuration: {
-        charges: { claude: 30000, codex: 20000 },
-        monthlyCharges: [],
-        contracts: { claude: {}, codex: {} },
-        chargePeriods: [],
-        unobservedRatio: 0.1,
-        mappings: [
-          {
-            projectKey: 'project_should_be_rejected',
-            productName: 'x',
-            assetName: 'y',
-            classification: 'private',
-          },
-        ],
+    const response = await saveWorkspaceFixture(
+      { port: testPort, csrfToken },
+      {
+        configuration: {
+          charges: { claude: 30000, codex: 20000 },
+          monthlyCharges: [],
+          contracts: { claude: {}, codex: {} },
+          chargePeriods: [],
+          unobservedRatio: 0.1,
+          mappings: [
+            {
+              projectKey: 'project_should_be_rejected',
+              productName: 'x',
+              assetName: 'y',
+              classification: 'private',
+            },
+          ],
+        },
       },
-    })
+    )
     expect(response.status).toBe(400)
   }, 20_000)
 })

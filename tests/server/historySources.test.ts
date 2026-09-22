@@ -366,7 +366,12 @@ describe('configured filesystem history sources', () => {
     )
     const changed = await scanner.scanHistorySources(['codex'], [source.id])
     expect(changed.sources[0]?.diagnostics).toMatchObject({ filesRead: 1, filesReused: 0 })
-    expect(database.getUsageSessions()[0]?.inputTokens).toBe(1500)
+    // Codex input_tokens includes cached input; stored components are exclusive (1422 + 70 + 8).
+    expect(database.getUsageSessions()[0]).toMatchObject({
+      inputTokens: 1422,
+      cacheReadTokens: 70,
+      cacheWriteTokens: 8,
+    })
 
     rmSync(history)
     const deleted = await scanner.scanHistorySources(['codex'], [source.id])
