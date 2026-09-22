@@ -19,6 +19,10 @@ describe('save-path selection, not an authorization mechanism', () => {
     expect(workspaceChangeKind(before, before)).toBe('none')
     expect(workspaceChangeKind(before, after)).toBe('notes')
   })
+  it('does not report a saved base revision as a memo change', () => {
+    const before = input(), saved = { ...before, revision: 14 }
+    expect(workspaceChangeKind(saved, structuredClone(before))).toBe('none')
+  })
   it('does not suppress changes to methods, dates, references, or equal-valued destinations', () => {
     const before = input()
     for (const mutate of [
