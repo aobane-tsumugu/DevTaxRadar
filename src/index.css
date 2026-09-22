@@ -4204,3 +4204,9 @@ td > .empty-setup {
   margin: 8px 0;
   overflow-wrap: anywhere;
 }
+.render-failure {
+  max-width: 42rem;
+  margin: 4rem auto;
+  padding: 1rem;
+  line-height: 1.8;
+}
