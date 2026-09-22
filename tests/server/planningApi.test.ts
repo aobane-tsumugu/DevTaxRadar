@@ -19,7 +19,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { PlanningSnapshot } from '../../src/planning/types.js'
 import { emptyPlanningSnapshot } from '../../src/planning/types.js'
 import type { AnnualCostProjection } from '../../src/accounting/costs.js'
-import { saveWorkspaceFixture, savePlanningFixture, saveRulesFixture } from './helpers/workspace-fixture.js'
+import {
+  saveWorkspaceFixture,
+  savePlanningFixture,
+  saveRulesFixture,
+} from './helpers/workspace-fixture.js'
 
 const children: ChildProcess[] = []
 const directories: string[] = []
@@ -210,7 +214,11 @@ describe('planning HTTP API', () => {
     ] as const) {
       const response = await fetch(`http://127.0.0.1:${config.port}${url}`, {
         method,
-        headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${config.port}`, 'x-devtax-csrf': config.csrfToken },
+        headers: {
+          'content-type': 'application/json',
+          origin: `http://127.0.0.1:${config.port}`,
+          'x-devtax-csrf': config.csrfToken,
+        },
         body: JSON.stringify(body),
       })
       expect(response.status).toBe(404)
@@ -2100,23 +2108,26 @@ describe('planning HTTP API', () => {
     children.push(child)
     const { csrfToken } = await runtime(testPort)
 
-    const response = await saveWorkspaceFixture({ port: testPort, csrfToken }, {
-      configuration: {
-        charges: { claude: 30000, codex: 20000 },
-        monthlyCharges: [],
-        contracts: { claude: {}, codex: {} },
-        chargePeriods: [],
-        unobservedRatio: 0.1,
-        mappings: [
-          {
-            projectKey: 'project_should_be_rejected',
-            productName: 'x',
-            assetName: 'y',
-            classification: 'private',
-          },
-        ],
+    const response = await saveWorkspaceFixture(
+      { port: testPort, csrfToken },
+      {
+        configuration: {
+          charges: { claude: 30000, codex: 20000 },
+          monthlyCharges: [],
+          contracts: { claude: {}, codex: {} },
+          chargePeriods: [],
+          unobservedRatio: 0.1,
+          mappings: [
+            {
+              projectKey: 'project_should_be_rejected',
+              productName: 'x',
+              assetName: 'y',
+              classification: 'private',
+            },
+          ],
+        },
       },
-    })
+    )
     expect(response.status).toBe(400)
   }, 20_000)
 })

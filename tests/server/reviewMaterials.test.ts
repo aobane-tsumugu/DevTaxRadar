@@ -153,21 +153,42 @@ function fixture() {
 describe('source-bound balance reviews', () => {
   it('freezes contract explanations and requires reconfirmation without removing invoice amounts', () => {
     const data = fixture()
-    data.workspace.configuration.chargePeriods = ['a','b'].map((id) => {
-      const period = { id,provider:'claude' as const,planName:'合成請求',serviceStartedOn:'2026-01-01',serviceEndedOn:'2026-01-31',amountJpy:1000 }
-      return {...period,contractConfirmation:{reference:`契約${id}`,reason:'各契約の明細と照合',confirmedAt:'2026-09-09T00:00:00Z',basis:chargeContractBasis(period)}}
+    data.workspace.configuration.chargePeriods = ['a', 'b'].map((id) => {
+      const period = {
+        id,
+        provider: 'claude' as const,
+        planName: '合成請求',
+        serviceStartedOn: '2026-01-01',
+        serviceEndedOn: '2026-01-31',
+        amountJpy: 1000,
+      }
+      return {
+        ...period,
+        contractConfirmation: {
+          reference: `契約${id}`,
+          reason: '各契約の明細と照合',
+          confirmedAt: '2026-09-09T00:00:00Z',
+          basis: chargeContractBasis(period),
+        },
+      }
     })
-    const frozen = buildReviewMaterials(data.workspace,data.balances,2026,data.observation)
-    expect(frozen.costs.sources.filter((row) => row.kind === 'subscription').map((row) => row.originalAmountJpy)).toEqual([1000,1000])
+    const frozen = buildReviewMaterials(data.workspace, data.balances, 2026, data.observation)
+    expect(
+      frozen.costs.sources
+        .filter((row) => row.kind === 'subscription')
+        .map((row) => row.originalAmountJpy),
+    ).toEqual([1000, 1000])
     const markdown = costProjectionMarkdown(frozen.costs)
     expect(markdown).toContain('重なる請求を別契約として確認済みです。')
     expect(markdown).toContain('各契約の明細と照合')
     data.workspace.configuration.chargePeriods[0]!.amountJpy = 2000
-    const changed = buildReviewMaterials(data.workspace,data.balances,2026,data.observation)
+    const changed = buildReviewMaterials(data.workspace, data.balances, 2026, data.observation)
     expect(costProjectionMarkdown(changed.costs)).toContain('請求内容変更のため')
     expect(costProjectionMarkdown(changed.costs)).not.toContain('別契約として確認済み')
     expect(costProjectionMarkdown(frozen.costs)).toBe(markdown)
-    expect(historicalReviewMaterials(changed,data.balances)).not.toEqual(historicalReviewMaterials(frozen,data.balances))
+    expect(historicalReviewMaterials(changed, data.balances)).not.toEqual(
+      historicalReviewMaterials(frozen, data.balances),
+    )
   })
   it.each([1200, 0, null])(
     'preserves earlier monthly charges when a future invoice is added (%s)',
