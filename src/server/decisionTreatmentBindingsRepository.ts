@@ -44,7 +44,7 @@ export function readDecisionSoftwareAnnualBindings(db: DatabaseSync): Map<string
   if (!Array.isArray(parsed)) throw new Error('ソフトウェア年額の判断元を確認できません。')
   const result = new Map<string, SoftwareAnnualDecisionBinding>()
   for (const entry of parsed) {
-    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || !entry[0].trim() || result.has(entry[0]) ||
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || !entry[0].trim() || entry[0].length > 120 || result.has(entry[0]) ||
         !entry[1] || typeof entry[1] !== 'object' || Array.isArray(entry[1]))
       throw new Error('ソフトウェア年額の判断元IDを確認できません。')
     result.set(entry[0], entry[1] as SoftwareAnnualDecisionBinding)
