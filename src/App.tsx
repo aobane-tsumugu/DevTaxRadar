@@ -472,7 +472,7 @@ export default function App() {
         </div>
       </header>
       <main className="content">
-        {runtime?.datasetId && data.meta.source === 'local' && <WorkspaceAttemptPanel key={runtime.datasetId} datasetId={runtime.datasetId} disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onRetry={retryWorkspaceAttempt} />}
+        {runtime?.datasetId && data.meta.source === 'local' && <WorkspaceAttemptPanel key={`attempt:${runtime.datasetId}`} datasetId={runtime.datasetId} disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onRetry={retryWorkspaceAttempt} />}
         {runtime?.restoreRequiresReconnect && <RestoreSourcesPanel onComplete={() => setRuntime((current) => current && { ...current, restoreRequiresReconnect: false })} />}
         {relevantUnknown.length > 0 && <section className="panel" aria-label="未確認のAI請求額">
           <strong>対象年の請求額が未確認のAI契約が{relevantUnknown.length}件あります</strong>
@@ -499,7 +499,7 @@ export default function App() {
         /></div>}
         <div hidden={page !== 'costs'}><CostsPage
           initial={data.costProjection} evidence={planning.evidence} local={data.meta.source === 'local'} onEdit={() => editAt(3)}
-          treatmentEditor={runtime?.datasetId ? (projection) => <div key={runtime.datasetId}>
+          treatmentEditor={runtime?.datasetId ? (projection) => <div key={`treatment:${runtime.datasetId}`}>
             <CostTreatmentFactsEditor projection={projection} planning={planning}
               datasetId={runtime.datasetId!} parentRevision={workspaceBase.current?.revision ?? 0}
               disabled={!workspaceBase.current || onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onReview={reviewTreatment} />
@@ -511,13 +511,13 @@ export default function App() {
               }} />
           </div> : undefined}
           adjustmentsEditor={runtime?.datasetId ? (projection) => <SourceAdjustmentsEditor
-            key={runtime.datasetId} datasetId={runtime.datasetId!} projection={projection}
+            key={`adjustments:${runtime.datasetId}`} datasetId={runtime.datasetId!} projection={projection}
             records={planning.sourceAdjustments ?? []} evidence={planning.evidence}
             disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)} onReview={reviewAdjustment}
           /> : undefined}
         /></div>
         {page === 'balances' || page === 'costs' ? null
-          : page === 'summary' ? <SummaryPage key={runtime?.datasetId} onOpenBalances={openBalances} data={data} planning={planning} diagnosis={diagnosis} months={filteredMonths} undatedMonths={annual.undatedMonths} onOpenCosts={() => setPage('costs')} totals={filteredTotals} onOpenOnboarding={() => editAt(0)} retention={runtime?.retention ?? null} />
+          : page === 'summary' ? <SummaryPage key={`summary:${runtime?.datasetId}`} onOpenBalances={openBalances} data={data} planning={planning} diagnosis={diagnosis} months={filteredMonths} undatedMonths={annual.undatedMonths} onOpenCosts={() => setPage('costs')} totals={filteredTotals} onOpenOnboarding={() => editAt(0)} retention={runtime?.retention ?? null} />
             : page === 'evidence' ? <EvidencePage data={data} planning={planning} diagnosis={diagnosis} allocations={allocations} selected={selectedAllocation} onSelect={setSelectedAllocation} busy={rulesBusy} error={rulesError} onReclassify={reclassifyAllocation} />
               : page === 'folders' ? <FolderAssignmentPage folders={folders} planning={planning} busy={rulesBusy} error={rulesError} onSaveRules={storeRules} />
                 : <TaxGuidePage />}
