@@ -199,7 +199,7 @@ GitHubからソースまたはReleaseを取得し、各利用者のPCで使う�
 - [税務候補の決定木](./src/core/taxDecision.ts)
 - [資産金額境界](./src/core/assetThresholds.ts)
 - [現在地と次の行動の診断](./src/core/diagnosis.ts)
-- [設備・自宅費用・直接費の台帳計算](./src/core/planningLedger.ts)
+- [設備・自宅費用・直接費の共通費用計算](./src/core/workspaceCosts.ts)
 - [診断・台帳のSQLite保存](./src/server/planningRepository.ts)
 - [ローカルAPI](./src/server/index.ts)
 - [履歴の保持期間の検出と変更](./src/server/retention.ts)
@@ -256,7 +256,8 @@ Claude Codeは、`~/.claude/settings.json`の`cleanupPeriodDays`を過ぎた履�
 
 ### 税務の計算で確定しないこと
 
-- 税務候補の決定木（`src/core/taxDecision.ts`）と金額境界の案内（`src/core/assetThresholds.ts`）は関数として実装しテスト済みですが、**画面とAPIの経路からはまだ呼んでいません**。画面に出る税務候補は、配賦時の分類と資産の状態から組み立てています
+- 税務候補の決定木（`src/core/taxDecision.ts`）は、対象年の処理条件を登録した費用配分に限り、共通費用計算（`/api/projections`・`/api/dashboard`）から呼び、費用画面に条件付きの候補として出します。採用済みの費用・残高へ自動記帳はしません。それ以外の画面に出る税務候補は、配賦時の分類と資産の状態から組み立てています
+- 金額境界の案内（`src/core/assetThresholds.ts`）は関数として実装しテスト済みですが、**画面とAPIの経路からはまだ呼んでいません**
 - 設備は当年償却費の**候補額**を計算しますが、資本的支出、制作原価、前払費用、旧版残価移転の最終的な償却額は算定しません
 - 事業所得／雑所得の区分、税額、申告内容、税務上の資産単位を自動で確定しません
 - 交通費、通信契約の複数回線按分、暗号資産等との所得集計は扱いません
