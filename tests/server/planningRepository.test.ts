@@ -222,7 +222,8 @@ describe('planning repository', () => {
     process.env.DEVTAX_RADAR_DATA_DIR = directory
     const repository = await import('../../src/server/planningRepository.js')
     const database = await import('../../src/server/database.js')
-    const { confirmSoftwareAnnualDecision } = await import('../../src/core/softwareAnnualDecision.js')
+    const { confirmSoftwareAnnualDecision } =
+      await import('../../src/core/softwareAnnualDecision.js')
     const snapshot = samplePlanning()
     const annual = confirmSoftwareAnnualDecision(
       {
@@ -248,10 +249,15 @@ describe('planning repository', () => {
       expect(repository.getPlanningSnapshot().decisions.at(-1)).toEqual(annual)
       const { softwareAnnualBinding: _dropped, ...oldClient } = annual
       expect(() =>
-        repository.savePlanningSnapshot({ ...snapshot, decisions: [...snapshot.decisions.slice(0, -1), oldClient] }),
+        repository.savePlanningSnapshot({
+          ...snapshot,
+          decisions: [...snapshot.decisions.slice(0, -1), oldClient],
+        }),
       ).toThrow()
       repository.savePlanningSnapshot({ ...snapshot, decisions: snapshot.decisions.slice(0, -1) })
-      expect(repository.getPlanningSnapshot().decisions.some((row) => row.id === annual.id)).toBe(false)
+      expect(repository.getPlanningSnapshot().decisions.some((row) => row.id === annual.id)).toBe(
+        false,
+      )
     } finally {
       database.getDatabase().close()
     }
