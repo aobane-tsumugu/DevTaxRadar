@@ -3,7 +3,15 @@ import { extname, join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const textExtensions = new Set(['.css', '.html', '.json', '.md', '.ts', '.tsx', '.txt'])
-const ignoredDirectories = new Set(['.git', 'coverage', 'dist', 'node_modules'])
+// Local tool folders (agent worktrees, browser automation output) are not repository content.
+const ignoredDirectories = new Set([
+  '.claude',
+  '.git',
+  '.playwright-mcp',
+  'coverage',
+  'dist',
+  'node_modules',
+])
 
 function textFiles(root: string, path = root): string[] {
   const stats = statSync(path)
