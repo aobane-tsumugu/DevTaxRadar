@@ -138,6 +138,8 @@ export default function DataTransferPage({
                 onClick={() =>
                   void run(async () => {
                     const response = await verifyDataTransferBackup(await token(), verifyBundle.trim())
+                    // On the new PC the verified folder is the one to restore; do not ask for it twice.
+                    if (!restoreBundle.trim()) setRestoreBundle(response.bundle)
                     return {
                       kind: 'ok',
                       message: `バックアップのDB・salt・hash・schemaを確認しました: ${response.manifest.createdAt}`,
