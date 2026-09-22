@@ -153,6 +153,7 @@ function Onboarding({
   const [retentionBusy, setRetentionBusy] = useState(false)
   const [planningDraft, setPlanningDraft] = useState<PlanningSnapshot>(planning)
   const [candidateQuery, setCandidateQuery] = useState('')
+  const [bulkGroup, setBulkGroup] = useState('')
   const [showResultCosts, setShowResultCosts] = useState(false)
   const [candidateDestinations, setCandidateDestinations] = useState<CandidateDestinations>({})
   const [recoveryTouched, setRecoveryTouched] = useState(false)
@@ -563,8 +564,11 @@ function Onboarding({
           return destination?.kind === 'product' ? [destination.group] : []
         }),
       )
-      // Reuse the one number already given to a shown candidate; otherwise start a new group.
-      const group = groups.size === 1 ? [...groups][0]! : nextCandidateGroup
+      // A typed number joins an existing product; otherwise reuse the one number already given
+      // to a shown candidate, or start a new group.
+      const group =
+        normalizedProductGroup(bulkGroup) ??
+        (groups.size === 1 ? [...groups][0]! : nextCandidateGroup)
       const next = { ...current }
       for (const key of keys) {
         const existing = current[key]?.existingTaxUnitId
@@ -1370,13 +1374,28 @@ function Onboarding({
                   <input
                     type="search"
                     value={candidateQuery}
-                    onChange={(event) => setCandidateQuery(event.target.value)}
+                    onChange={(event) => {
+                      setCandidateQuery(event.target.value)
+                      setBulkGroup('')
+                    }}
                     placeholder="フォルダ名・候補名"
                   />
                 </label>
                 {candidateQuery.trim() && visibleCandidateProducts.length > 1 && (
                   <div className="candidate-bulk" role="group" aria-label="表示中の候補をまとめて設定">
                     <span>表示中の{visibleCandidateProducts.length}候補をまとめて</span>
+                    <label className="candidate-group-number">
+                      <span>番号（空欄は自動）</span>
+                      <input
+                        aria-label="まとめる制作物の番号"
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        value={bulkGroup}
+                        placeholder={nextCandidateGroup}
+                        onChange={(event) => setBulkGroup(event.target.value)}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="secondary-button"
@@ -2227,7 +2246,8 @@ function Onboarding({
                               convertedFromPrivate: false,
                               businessUseRatio: 1,
                               role: 'アプリ開発',
-                              taxUnitId: current.taxUnits[0]?.id,
+                              // A shared machine must not silently land on the first product.
+                              taxUnitId: undefined,
                               projectAllocationRatio: 1,
                               evidenceIds: [],
                             },
