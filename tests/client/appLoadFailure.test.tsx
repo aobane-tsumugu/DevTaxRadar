@@ -413,7 +413,8 @@ describe('local startup failure', () => {
     await click('確認した内容を保存')
     expect(api.saveWorkspace).toHaveBeenCalledTimes(savedCount + 1)
     expect(container.textContent).toContain('いまの整理結果です')
-  })
+    // The full App flow takes about 0.6s alone but can exceed the 5s default under a parallel run.
+  }, 20_000)
 
   it('shows an actionable failure without synthetic values, and retries the complete load', async () => {
     vi.mocked(dashboard.isLocalRuntime).mockReturnValue(true)
