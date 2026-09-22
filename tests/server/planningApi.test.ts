@@ -202,7 +202,8 @@ afterEach(async () => {
   }
 })
 
-describe('planning HTTP API', () => {
+// Every case spawns a real server (some restart it); runtime() alone may wait 10s for startup.
+describe('planning HTTP API', { timeout: 20_000 }, () => {
   it('rejects all retired unversioned writers without changing the saved workspace', async () => {
     const config = await startServer()
     expect((await savePlanningFixture(snapshot(), config)).status).toBe(200)
@@ -224,8 +225,7 @@ describe('planning HTTP API', () => {
       expect(response.status).toBe(404)
       expect(await getJson('/api/workspace', config)).toEqual(before)
     }
-    // The first server spawn in this file pays the cold tsx compile; runtime() allows 10s.
-  }, 20_000)
+  })
 
   it('persists multiple home allocations and rejects missing or excessive targets atomically', async () => {
     const config = await startServer()
