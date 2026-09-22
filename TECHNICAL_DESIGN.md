@@ -192,7 +192,7 @@ transferInとtransferOutは同額・同通貨・同一transfer ID
 
 ## 9. 画面への接続
 
-編集画面を開くとeditorBaseへ料金・計画・版を固定する。履歴再走査や背景再読込は表示用workspaceを更新するが、編集中の入力と保存元の版を置換しない。追加の履歴月だけ編集側の料金から補う。保存・previewは編集元の版を使い、自分の保存成功時に編集元を更新する。遅れて届く再読込は連番で照合し、新しい読取や保存結果を古い結果へ戻さない。画面閉鎖・ブラウザ再起動後のdraft復旧は未接続。
+編集画面を開くとeditorBaseへ料金・計画・版を固定する。履歴再走査や背景再読込は表示用workspaceを更新するが、編集中の入力と保存元の版を置換しない。追加の履歴月だけ編集側の料金から補う。保存・previewは編集元の版を使い、自分の保存成功時に編集元を更新する。遅れて届く再読込は連番で照合し、新しい読取や保存結果を古い結果へ戻さない。画面閉鎖・ブラウザ再起動後はdatasetId・保存元revision付きの編集控えを明示復旧でき、復旧だけではDB保存・preview・本人確認を行わない。
 
 Reactは現在のscope、draftの保存状態、projection token、採用revisionを持つ。費用・残高・税務候補は再計算せずサーバーの共通結果を表示する。入力の即時previewを行う場合も同じ純粋関数と同じ契約に限定し、採用計算はサーバーを正とする。
 
@@ -238,7 +238,7 @@ JSON exportはschemaVersion、engineVersion、対象範囲、revision、通貨�
 
 ### 現行年次概要の接続
 
-SummaryPageはplanning.profile.taxYearと一致する共通costProjectionをAnnualOverviewへ渡す。別年・欠損なら資料未取得を表示し、0円やAI額を代用しない。費用基礎・制作物・通常業務・未算定件数を表示し、当年費用と種類別繰越残高の未接続を未算定として区別する。概要の同額3申告区分カードは撤去した。これは適用条件に基づくMethodScenarioの実装完了を示さない。
+SummaryPageはplanning.profile.taxYearと一致する共通costProjectionをAnnualOverviewへ渡す。別年・欠損なら資料未取得を表示し、0円やAI額を代用しない。費用基礎・制作物・通常業務・未算定件数を表示する。対応済みのソフトウェア・設備方法は選択済み条件から年度額と残高へ接続するが、未対応・不明な処理まで概要で確定額へ昇格させない。概要の同額3申告区分カードは撤去した。
 
 AI dashboard APIは全期間を保持し、月ごとのmonthKeyを付ける。annualAiViewで概要の月とAllocationを対象年へ限定する。旧APIの年付き日本語ラベルは読めるが、年のない短い月名は当年と推定せず除外・件数表示する。合成demoの年はfixtureで明示する。AIサービス・制作物フィルターはAI内訳だけに適用し、全費用概要は不変。全期間のAI参考境界、根拠画面、初期設定結果、採用版を中心とする年次UXへの統一は未完了。
 ### 残高の製品DB・API接続
@@ -256,7 +256,7 @@ BalancesPageは初めて開いたときにGET draftを読み、専用版とsnaps
 
 制作中・資産・前払の期首は、制作物・記録開始年・既知の整数円または理由付き未知を入力する。増加・費用化・その他減少・振替は、日付・額・対象・根拠と判断を選んで記録する。振替はfrom/toを持つ単一レコード。参照される残高は削除不可。既存の未判断記録は保持・年次表示し、この画面では新規登録・解消操作をまだ提供しない。
 
-保存はCSRF取得後に専用版とsnapshotをPUTする。入力・保存中の二重編集を防ぎ、成功時は返された版を採用。失敗時は入力を残し、競合409では保存を止める。利用者は明示的に入力を破棄して保存済みを再読込できる。残高の3版比較、未保存draftのブラウザ終了後復旧、未保存入力の保存前後比較は未接続。年度資料の採用・訂正は確認画面へ接続。
+保存はCSRF取得後に専用版とsnapshotをPUTする。入力・保存中の二重編集を防ぎ、成功時は返された版を採用。失敗時は入力を残し、競合409では保存を止める。利用者は明示的に入力を破棄して保存済みを再読込できる。残高は変更前・この画面・最新の3版比較と、datasetId・保存元revision付きの未保存draft復旧を接続済み。復旧・競合選択だけでは書き込まず、年度資料の採用・訂正も確認画面で別操作とする。
 
 判断の選択肢は既存のconfirmed/overridden記録。根拠は登録された費用・証拠の候補から選ぶ。外部参照の整合・適用条件を自動確認したことを意味しない。確認済み判断がない場合は不足を表示し、月次確認の費用画面にある判断記録の登録へ案内する。架空の判断IDを生成して増減保存を通さない。会計上の確定額として概要へ昇格させる経路もまだない。
 ### 本人による処理判断の記録
@@ -292,7 +292,7 @@ GET /api/balances/reviews/:id/export はUUIDとformat（markdown/json、既定ma
 
 reviewExportJsonはexportVersion=1、kind=stored-year-reviewと保存したreview全体を返す。reviewExportMarkdownは資料ID・前年度/訂正元・記録理由、既知/未知の残高、増減・判断・証拠・費用基礎を説明し、同じ全JSONを添付する。JSON内の任意のバッククォート連続より長いコードフェンスを使い、説明の自由記述はMarkdownとしてエスケープする。古い残高のみの資料を最新の費用で補完しない。
 
-BalancesPageの資料一覧は利用者の操作で取得し、読込時の現行版・過去版・前年の変更未反映を表示する。失敗を空一覧として表示せず再読込できる。ダウンロードは資料IDに固定する。この出力はその年度資料を省略しないが、他年度・未保存draft・原本・秘密設定を含む全プロジェクトbackupではなく、復元APIも未接続。
+BalancesPageの資料一覧は利用者の操作で取得し、読込時の現行版・過去版・前年の変更未反映を表示する。失敗を空一覧として表示せず再読込できる。ダウンロードは資料IDに固定する。この出力はその年度資料を省略しないが、他年度・未保存draft・原本・秘密設定を含む全プロジェクトbackupとは別物。DB全体のbackup/verify/restoreはdataBundleを単一実装とし、CLIに加えてローカルのPC移行画面から同じ処理を呼ぶ。
 ### 保存版と現在の内容の比較
 
 GET /api/balances/reviews/:id/compare は旧版をhash検証し、同じ読取snapshotで現在の残高・料金・計画・観測と対象年のprojectionを組み立てる。compareReviewは旧版の計算をやり直さず、全期間の固定入力と同じ対象年の結果を比較する。副作用はなく、現在のdraft・保存版を変更しない。
@@ -338,7 +338,7 @@ balance_draft_receiptsは要求ID・正規化した入力とexpectedRevisionのh
 
 同じ要求ID・同じhashで、現行revisionが保存後revisionと一致する場合は、現在の保存済みdraftを返して版を増加させない。同じIDで内容変更は400。保存成功後に別の更新があれば409で以前の保存は成功済みと明示し、現行データを戻さない。成功記録は再起動後も残り、過去のID再利用を認識する。入力本体の複製はreceiptへ保存しない。
 
-旧呼出しとの互換のためrequestIdはAPI上任意。IDなしの呼出しは従来の版照合を行い再送認識は提供しない。製品の残高入力画面はIDを送る。ブラウザ終了後の入力・要求ID復旧と残高の3版比較は別の未完了責務。
+旧呼出しとの互換のためrequestIdはAPI上任意。IDなしの呼出しは従来の版照合を行い再送認識は提供しない。製品の残高入力画面はIDを送り、送信前控え・ブラウザ再読込後の明示再送・未保存入力復旧・残高の3版比較を接続済み。これらの控えは同じbrowser origin内だけにあり、別PCへの移行資料には含めない。
 ### 残高競合の比較と入力の統合
 
 BalancesPageは読込・保存成功時のBalanceDraftを編集の基準として保持する。409時も基準とローカル入力を残し、「入力を保持して最新と比較」でGET draftを取得する。読取失敗や比較取消で元入力を破棄しない。
@@ -347,7 +347,7 @@ mergeBalanceDraftsはaccounts・movements・pendingDecisionsをIDで対応付け
 
 BalanceConflictPanelは変更前・この画面・最新の内容を3列で省略せず表示する。不明と0、記録なしを分離して表示する。全競合の選択後、最新revisionを基準とする未保存入力へ戻す。選択の組合せによる参照切れ・負残高等は検証結果を示し、編集画面で修正してから保存する。選択操作自体では書き込まない。
 
-選択後の保存で再競合した場合、前回取得した最新を新しい基準として再比較する。通常の保存要求IDによる再送識別を維持する。比較中のローカル編集は古い比較を閉じ、再取得・再比較を必要とする。ブラウザ終了後の未保存入力復旧は未接続。
+選択後の保存で再競合した場合、前回取得した最新を新しい基準として再比較する。通常の保存要求IDによる再送識別を維持する。比較中のローカル編集は古い比較を閉じ、再取得・再比較を必要とする。ブラウザ終了後の未保存入力は保存元revisionとdatasetIdを保持して明示復旧し、最新保存内容との差があれば再baseまで上書きしない。
 ### DB全体と識別子のバックアップ基盤
 
 createDataBundleは読取専用の製品DBからVACUUM INTOでWALを含む一貫したDBを生成し、既存identifier-saltを同梱する。salt欠損は新規生成で補わない。取得前後でsaltが同一であることを確認する。stageでファイルSHA-256・サイズ、PRAGMA integrity_check/foreign_key_check、全ユーザーschemaとuser_version/application_idのhashを検査してから新規フォルダへ公開する。既存保存先は拒否する。
@@ -378,6 +378,12 @@ GET /api/restore/sourcesは復元保留中の全source ID/root/enabledと確認h
 RestoreSourcesPanelは復元保留中に表示し、利用者の操作で接続先を取得する。root/enabled編集時は確認チェックを解除。入力全体を確認して保存し、成功後は走査保留の表示状態を更新する。保存だけでは走査しない。通信失敗時は同じ計画を保持し、409は再確認が必要。読取失敗で入力を置換しない。最新を再取得できた場合は元入力を控えに保存して、新しい接続先とhashを表示する。
 
 source rootは再接続の目的で表示し、通常集計や採用snapshotへ追加しない。CLIと画面はいずれも同じ保存・照合処理を使う。配布版はnpm run data:backup / data:reconnectで同じCLIを実行する。
+### タスクホームとPC移行画面
+
+Appの初期画面は「今回確認すること」とし、復元再接続、請求額不明、未割当履歴、利用不能source、diagnosisの即時確認を優先度付きで既存作業へ案内する。ここで表示件数が0でも税務上の確認完了・年度採用済みとは扱わず、今年の結果と残高確認は別の作業として常に残す。
+
+「PCとデータ」は、(1) 別PCのClaude Code/Codex履歴を1台のDevTaxへsourceとして集約すること、(2) DevTaxの保存DB自体を別PCへ引っ越すこと、を分離する。クラウド同期・同時編集は導入しない。POST /api/data-transfer/backup, /verify, /restore はloopback/Origin/CSRF保護下で既存のcreateDataBundle / verifyDataBundle / restoreDataBundleを呼び、現在のデータフォルダ内へのbackup、既存データフォルダへのrestore、bundle内へのrestoreを拒否する。restoreは新規フォルダを作るだけで現在プロセスのDBを切り替えず、復元先で起動した後は既存のrestore-reconnect-requiredとRestoreSourcesPanelへ接続する。ブラウザlocalStorageの未送信控え、元ログ、証拠原本、外部アプリ設定はbundleへ含めない。
+
 ### 配布物の復元経路と実行検証
 
 package-release.tsはserver/index、tools/data-backup、tools/restore-sourcesを独立したNode ESM bundleにし、tsxやnode_modulesなしで配布する。START-HEREとREADMEにbackup・verify・restore、新保存先の環境変数、再接続画面への手順を記載。Cloudflare専用の_headers/_redirectsはローカル配布から除き、サーバーの既存routing/security headerを使う。

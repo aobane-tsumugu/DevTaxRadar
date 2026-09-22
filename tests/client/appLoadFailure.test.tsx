@@ -144,6 +144,12 @@ describe('local startup failure', () => {
       root!.render(<App />)
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
+    // The task list is the first page; the annual summary is one navigation away.
+    await act(async () => {
+      Array.from(container!.querySelectorAll<HTMLButtonElement>('.nav-item'))
+        .find((button) => button.textContent?.includes('今年どうなる？'))!
+        .click()
+    })
     const ai = container.querySelector('[aria-label="対象年のAI分類内訳"]')!
     expect(ai.textContent).toContain('￥3,100')
     expect(ai.textContent).not.toContain('999,999')
