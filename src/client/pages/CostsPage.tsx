@@ -101,24 +101,36 @@ export default function CostsPage({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const request = useRef({ generation: 0 })
+  // The year the user chose to look at. A save refreshes `initial` for the plan year; without
+  // this the page jumped back there after every edit made while viewing another year.
+  const viewedYear = useRef<number | undefined>(undefined)
   useEffect(() => {
     const sequence = request.current
     sequence.generation++
-    setProjection(initial)
-    setYear(String(initial?.year ?? new Date().getFullYear()))
-    setBusy(false)
     setError(null)
+    if (local && initial && viewedYear.current !== undefined && viewedYear.current !== initial.year)
+      void loadYear(String(viewedYear.current))
+    else {
+      setProjection(initial)
+      setYear(String(initial?.year ?? new Date().getFullYear()))
+      setBusy(false)
+    }
     return () => {
       sequence.generation++
     }
+    // loadYear only reads refs and setters; re-running on its identity would refetch forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial])
-  async function loadYear() {
+  async function loadYear(target = year) {
     const id = ++request.current.generation
     setBusy(true)
     setError(null)
     try {
-      const next = await getCostProjection(Number(year))
-      if (id === request.current.generation) setProjection(next)
+      const next = await getCostProjection(Number(target))
+      if (id === request.current.generation) {
+        viewedYear.current = next.year
+        setProjection(next)
+      }
     } catch (cause) {
       if (id === request.current.generation)
         setError(cause instanceof Error ? cause.message : '費用資料の読込に失敗しました。')
