@@ -170,7 +170,13 @@ export function restoreDataTransferBackup(
   csrfToken: string,
   bundle: string,
   destination: string,
-): Promise<{ restored: true; destination: string; bundleCreatedAt: string; requiresRestart: true; message: string }> {
+): Promise<{
+  restored: true
+  destination: string
+  bundleCreatedAt: string
+  requiresRestart: true
+  message: string
+}> {
   return requestJson('/api/data-transfer/restore', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-DevTax-CSRF': csrfToken },

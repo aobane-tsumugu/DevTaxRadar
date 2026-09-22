@@ -42,11 +42,18 @@ export default function TaskHubPage({
           <ol className="action-list">
             {urgent.map((item) => (
               <li key={item.id}>
-                <span className={`priority-dot ${item.priority === 'high' ? 'high' : 'medium'}`} aria-hidden="true" />
+                <span
+                  className={`priority-dot ${item.priority === 'high' ? 'high' : 'medium'}`}
+                  aria-hidden="true"
+                />
                 <div>
                   <strong>{item.title}</strong>
                   <p>{item.reason}</p>
-                  <button type="button" className="text-button" onClick={() => onOpen(item.destination)}>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => onOpen(item.destination)}
+                  >
                     {item.actionLabel} →
                   </button>
                 </div>
@@ -65,7 +72,11 @@ export default function TaskHubPage({
           <article className="panel" key={item.id}>
             <h2>{item.title}</h2>
             <p>{item.reason}</p>
-            <button type="button" className="primary-button" onClick={() => onOpen(item.destination)}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => onOpen(item.destination)}
+            >
               {item.actionLabel}
             </button>
           </article>
@@ -75,7 +86,8 @@ export default function TaskHubPage({
       <section className="panel" aria-label="複数PCの使い分け">
         <h2>複数PCを使うとき</h2>
         <p>
-          Claude Code / Codexの履歴を複数PCから集めることと、DevTaxの保存データ自体を別PCへ引っ越すことは別です。
+          Claude Code /
+          Codexの履歴を複数PCから集めることと、DevTaxの保存データ自体を別PCへ引っ越すことは別です。
           DevTaxはクラウド同期や同時編集を行いません。
         </p>
         <button type="button" className="text-button" onClick={() => onOpen('transfer')}>

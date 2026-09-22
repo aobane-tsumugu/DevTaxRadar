@@ -39,7 +39,10 @@ export default function DataTransferPage({
     try {
       setResult(await action())
     } catch (error) {
-      setResult({ kind: 'error', message: error instanceof Error ? error.message : '処理できませんでした。' })
+      setResult({
+        kind: 'error',
+        message: error instanceof Error ? error.message : '処理できませんでした。',
+      })
     } finally {
       setBusy(false)
     }
@@ -50,12 +53,11 @@ export default function DataTransferPage({
       <section className="panel">
         <h2>複数PCの履歴を1つのDevTaxへ集める</h2>
         <p>
-          DevTaxを動かすPCから、別PCのClaude Code / Codex履歴フォルダをSMB・Samba等で読めるようにして、
+          DevTaxを動かすPCから、別PCのClaude Code /
+          Codex履歴フォルダをSMB・Samba等で読めるようにして、
           読み取り元として追加します。各PCへDevTaxを入れる必要はありません。
         </p>
-        <p>
-          これは履歴の集約です。DevTaxのSQLiteを複数PCで同時編集・同期する機能ではありません。
-        </p>
+        <p>これは履歴の集約です。DevTaxのSQLiteを複数PCで同時編集・同期する機能ではありません。</p>
         {historySources.length > 0 && (
           <ul>
             {historySources.map((source) => (
@@ -73,7 +75,10 @@ export default function DataTransferPage({
           </ul>
         )}
         {unavailable.length > 0 && (
-          <p role="status">有効な読み取り元のうち{unavailable.length}件が現在読めません。前回の正常な集計は保持します。</p>
+          <p role="status">
+            有効な読み取り元のうち{unavailable.length}
+            件が現在読めません。前回の正常な集計は保持します。
+          </p>
         )}
         <button type="button" className="primary-button" onClick={onManageSources}>
           履歴のPC・共有元を確認
@@ -110,7 +115,10 @@ export default function DataTransferPage({
                 disabled={!backupDestination.trim()}
                 onClick={() =>
                   void run(async () => {
-                    const response = await createDataTransferBackup(await token(), backupDestination.trim())
+                    const response = await createDataTransferBackup(
+                      await token(),
+                      backupDestination.trim(),
+                    )
                     return {
                       kind: 'ok',
                       message: `検証済みバックアップを作成しました: ${response.destination} / ${response.manifest.createdAt}`,
@@ -137,7 +145,10 @@ export default function DataTransferPage({
                 disabled={!verifyBundle.trim()}
                 onClick={() =>
                   void run(async () => {
-                    const response = await verifyDataTransferBackup(await token(), verifyBundle.trim())
+                    const response = await verifyDataTransferBackup(
+                      await token(),
+                      verifyBundle.trim(),
+                    )
                     // On the new PC the verified folder is the one to restore; do not ask for it twice.
                     if (!restoreBundle.trim()) setRestoreBundle(response.bundle)
                     return {
