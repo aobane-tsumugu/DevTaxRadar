@@ -148,7 +148,7 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
     )
     assert.ok(
       overlapping.some((row) =>
-        row.warnings.some((warning) => warning.includes('異なる契約として確認済み')),
+        row.warnings.some((warning) => warning.includes('別契約として確認済み')),
       ),
     )
   }
