@@ -8,6 +8,7 @@ import {
 } from '../../core/decisionConfirmation'
 import { EDITOR_FILE_LIMIT, restoreEditorCopy } from '../editorRecovery'
 import { useEditorRecovery } from '../useEditorRecovery'
+import { treatmentCandidateLabels } from '../../core/costTreatmentFacts'
 import {
   canonicalDecisionEditorValue,
   validDecisionEditorValue,
@@ -15,6 +16,11 @@ import {
 } from '../decisionEditorValue'
 
 const RECOVERY_EDITOR = 'decision-records'
+const CANDIDATE_OPTIONS = 'decision-candidate-options'
+// The calculations recognise stored codes such as software-acquisition-cost; offer them by their
+// Japanese names so nobody has to know the code, while still accepting other wording.
+const candidateName = (value: string | undefined) =>
+  value ? (treatmentCandidateLabels as Record<string, string>)[value] : undefined
 
 export default function DecisionEditor({
   value,
@@ -240,6 +246,13 @@ export default function DecisionEditor({
       <button type="button" className="secondary-button" onClick={() => addDecision('', year)}>
         判断記録を追加
       </button>
+      <datalist id={CANDIDATE_OPTIONS}>
+        {Object.entries(treatmentCandidateLabels)
+          .filter(([value]) => value !== 'unclassified')
+          .map(([value, name]) => (
+            <option key={value} value={value} label={name} />
+          ))}
+      </datalist>
       {rows.map((row, index) => {
         if (row.softwareAnnualBinding) return (
           <article className="cost-source panel" key={row.id}
@@ -289,14 +302,23 @@ export default function DecisionEditor({
               </label>
               <label>
                 検討した扱い{' '}
-                <input value={row.candidate} onChange={(e) => edit(index, { candidate: e.target.value })} />
+                <input
+                  list={CANDIDATE_OPTIONS}
+                  value={row.candidate}
+                  onChange={(e) => edit(index, { candidate: e.target.value })}
+                />
+                {candidateName(row.candidate) && <small>＝{candidateName(row.candidate)}</small>}
               </label>
               <label>
                 確認した扱い{' '}
                 <input
+                  list={CANDIDATE_OPTIONS}
                   value={row.selectedCandidate ?? ''}
                   onChange={(e) => edit(index, { selectedCandidate: e.target.value || undefined })}
                 />
+                {candidateName(row.selectedCandidate) && (
+                  <small>＝{candidateName(row.selectedCandidate)}</small>
+                )}
               </label>
               <label>
                 判断の根拠・確認先{' '}

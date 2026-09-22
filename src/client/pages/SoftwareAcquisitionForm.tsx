@@ -154,7 +154,7 @@ export default function SoftwareAcquisitionPanel({ datasetId, snapshot, planning
           <option value="">対象年の確認済み判断を選択</option>
           {choices.map((row) => <option key={row.id} value={row.id}>{row.taxYear}年 / {row.reason}</option>)}
         </select></label>
-        {!choices.length && <p>対象年・同じソフトウェアの取得または改良を、既存の判断記録で確認してください。配分1件の判断は全体の判断へ自動転用しません。</p>}
+        {!choices.length && <p>対象年・同じソフトウェアの取得または改良を、既存の判断記録で確認してください。配分1件の判断は全体の判断へ自動転用しません。「＋ 月次確認」の「扱いを判断した記録」で、この制作物と振替日の年を選び、確認した扱いに「ソフトウエア製作原価の候補」（改良なら「資本的支出の候補」）を選んで確認済みにしてください。</p>}
         {decision && <p>記録済みの理由：{decision.reason}</p>}
         <label>補足理由（空欄なら上の判断理由を使用）<textarea value={reason} maxLength={1800} onChange={(event) => setReason(event.target.value)} /></label>
         <details><summary>追加の根拠（必要な場合のみ）</summary>
