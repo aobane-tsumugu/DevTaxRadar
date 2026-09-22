@@ -3151,6 +3151,17 @@ td > .empty-setup {
   background: #fff;
   font-size: 16px;
 }
+.candidate-bulk {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 16px;
+}
+.candidate-bulk > span {
+  font-weight: 700;
+}
 .history-grouping-list {
   max-height: 440px;
   margin-top: 13px;

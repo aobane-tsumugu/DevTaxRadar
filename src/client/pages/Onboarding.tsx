@@ -47,7 +47,7 @@ import {
 } from '../candidateGrouping'
 import { invertedContractMessage, providerWithInvertedContract } from '../chargeGuard'
 import { createFocusTrap } from '../focusTrap.js'
-import { providerHasEnabledSource } from '../historySources'
+import { providerHasEnabledSource, recentScanTime } from '../historySources'
 import { displayMonth } from '../monthLabel.js'
 import HistorySourceManager from './HistorySourceManager'
 import { categoryLabel, lifecycleLabel, monthKeyFromLabel, usageModeLabel } from './shared'
@@ -551,6 +551,32 @@ function Onboarding({
     setCandidateDestinations((current) => ({ ...current, [projectKey]: destination }))
   }
 
+  /** Applies one treatment to every candidate the search currently shows. */
+  function applyToVisibleCandidates(kind: CandidateDestination['kind']) {
+    const keys = visibleCandidateProducts.flatMap(({ product }) =>
+      product.projectKey ? [product.projectKey] : [],
+    )
+    setCandidateDestinations((current) => {
+      const groups = new Set(
+        keys.flatMap((key) => {
+          const destination = current[key]
+          return destination?.kind === 'product' ? [destination.group] : []
+        }),
+      )
+      // Reuse the one number already given to a shown candidate; otherwise start a new group.
+      const group = groups.size === 1 ? [...groups][0]! : nextCandidateGroup
+      const next = { ...current }
+      for (const key of keys) {
+        const existing = current[key]?.existingTaxUnitId
+        next[key] = {
+          ...(kind === 'product' ? { kind, group } : { kind }),
+          ...(existing ? { existingTaxUnitId: existing } : {}),
+        }
+      }
+      return next
+    })
+  }
+
   function materializeCandidateGroups(): PlanningSnapshot {
     const next = applyCandidateDestinations(
       planningDraft,
@@ -703,6 +729,17 @@ function Onboarding({
           kind: 'error',
           message: `${labels}で有効な読み取り元がありません。読み取り元を追加するか、停止中の設定を有効にしてください。`,
         })
+        return
+      }
+      const recent = recentScanTime(historySources, selectedProviders, scanMode)
+      if (recent) {
+        // The startup scan usually finished moments ago; reading every file again only makes
+        // the user wait. A full rescan stays available through the scan-mode choice.
+        setNotice({
+          kind: 'info',
+          message: `${recent.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}に完了した走査結果を使います。読み直す場合は「完全再走査」を選んでください。`,
+        })
+        onStep(1)
         return
       }
       setBusy(true)
@@ -1337,6 +1374,39 @@ function Onboarding({
                     placeholder="フォルダ名・候補名"
                   />
                 </label>
+                {candidateQuery.trim() && visibleCandidateProducts.length > 1 && (
+                  <div className="candidate-bulk" role="group" aria-label="表示中の候補をまとめて設定">
+                    <span>表示中の{visibleCandidateProducts.length}候補をまとめて</span>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => applyToVisibleCandidates('product')}
+                    >
+                      同じ制作物にする
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => applyToVisibleCandidates('private')}
+                    >
+                      趣味・私用
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => applyToVisibleCandidates('learning')}
+                    >
+                      一般的な学習
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => applyToVisibleCandidates('later')}
+                    >
+                      あとで確認
+                    </button>
+                  </div>
+                )}
                 {rankedProducts.length === 0 ? (
                   <div className="setup-insight">
                     <span>ⓘ</span>

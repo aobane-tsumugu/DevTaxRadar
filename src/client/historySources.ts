@@ -6,6 +6,32 @@ export function providerHasEnabledSource(sources: HistorySource[], provider: Pro
   return sources.some((source) => source.provider === provider && source.enabled)
 }
 
+/**
+ * The completion time of the oldest scan when every enabled source of the chosen providers
+ * finished an incremental-eligible scan within `withinMs`; otherwise undefined.
+ */
+export function recentScanTime(
+  sources: HistorySource[],
+  providers: ProviderKey[],
+  mode: 'incremental' | 'full',
+  now = Date.now(),
+  withinMs = 10 * 60 * 1000,
+): Date | undefined {
+  if (mode !== 'incremental') return undefined
+  const relevant = sources.filter((source) => source.enabled && providers.includes(source.provider))
+  if (!relevant.length) return undefined
+  let oldest = Infinity
+  for (const source of relevant) {
+    const completed = Date.parse(source.lastScan.completedAt ?? '')
+    if (source.lastScan.status !== 'complete' || source.availability !== 'available')
+      return undefined
+    if (!Number.isFinite(completed) || completed > now || now - completed > withinMs)
+      return undefined
+    oldest = Math.min(oldest, completed)
+  }
+  return new Date(oldest)
+}
+
 export function sourceAvailabilityCopy(
   source: Pick<HistorySource, 'enabled' | 'availability' | 'lastScan'>,
 ): {

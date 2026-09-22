@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   providerHasEnabledSource,
+  recentScanTime,
   sourceAvailabilityCopy,
   sourceTestCopy,
 } from '../../src/client/historySources.ts'
@@ -20,6 +21,35 @@ const source = (patch: Partial<HistorySource> = {}): HistorySource => ({
 })
 
 describe('history source UI decisions', () => {
+  it('reuses a scan only when every chosen enabled source completed it moments ago', () => {
+    const now = Date.parse('2026-09-23T04:20:00Z')
+    const done = (at: string, patch: Partial<HistorySource> = {}) =>
+      source({ lastScan: { status: 'complete', completedAt: at }, ...patch })
+    const fresh = [
+      done('2026-09-23T04:16:00Z'),
+      done('2026-09-23T04:18:00Z', { id: 'x', provider: 'codex' }),
+    ]
+    expect(recentScanTime(fresh, ['claude', 'codex'], 'incremental', now)?.toISOString()).toBe(
+      '2026-09-23T04:16:00.000Z',
+    )
+    expect(recentScanTime(fresh, ['claude', 'codex'], 'full', now)).toBeUndefined()
+    expect(
+      recentScanTime([done('2026-09-23T04:00:00Z')], ['claude'], 'incremental', now),
+    ).toBeUndefined()
+    expect(recentScanTime([source()], ['claude'], 'incremental', now)).toBeUndefined()
+    expect(
+      recentScanTime(
+        [done('2026-09-23T04:16:00Z', { availability: 'unavailable' })],
+        ['claude'],
+        'incremental',
+        now,
+      ),
+    ).toBeUndefined()
+    expect(
+      recentScanTime([done('2026-09-23T04:16:00Z')], ['codex'], 'incremental', now),
+    ).toBeUndefined()
+  })
+
   it('permits retrying an enabled source even when its last visibility probe failed', () => {
     expect(providerHasEnabledSource([source()], 'claude')).toBe(true)
     expect(providerHasEnabledSource([source({ enabled: false })], 'claude')).toBe(false)
