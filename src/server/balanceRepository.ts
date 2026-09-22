@@ -289,7 +289,7 @@ export function previewBalanceReview(
   db: DatabaseSync,
   year: number,
   readMaterials?: ReviewMaterialsReader,
-): BalancePreview {
+): BalancePreview & { snapshot: BalanceSnapshot } {
   const draft = getBalanceDraft(db)
   const projection = buildAnnualBalances(draft.snapshot, year)
   const previousReviewId = head(db, year - 1)
@@ -566,7 +566,11 @@ export function adoptBalanceReview(
     db.prepare(
       'INSERT INTO balance_review_heads(year, review_id) VALUES (?, ?) ON CONFLICT(year) DO UPDATE SET review_id = excluded.review_id',
     ).run(review.year, review.id)
-    return review
+    // Return the stored form, as a replay does, so every export of this
+    // version (now or after reading it back) has the same bytes.
+    const stored = getBalanceReview(db, review.id)
+    if (!stored) throw new Error('採用した資料を保存内容から読み戻せませんでした。')
+    return stored
   })
 }
 
