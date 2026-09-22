@@ -160,12 +160,12 @@ describe('source-bound balance reviews', () => {
     const frozen = buildReviewMaterials(data.workspace,data.balances,2026,data.observation)
     expect(frozen.costs.sources.filter((row) => row.kind === 'subscription').map((row) => row.originalAmountJpy)).toEqual([1000,1000])
     const markdown = costProjectionMarkdown(frozen.costs)
-    expect(markdown).toContain('異なる契約として確認済み')
+    expect(markdown).toContain('重なる請求を別契約として確認済みです。')
     expect(markdown).toContain('各契約の明細と照合')
     data.workspace.configuration.chargePeriods[0]!.amountJpy = 2000
     const changed = buildReviewMaterials(data.workspace,data.balances,2026,data.observation)
     expect(costProjectionMarkdown(changed.costs)).toContain('請求内容変更のため')
-    expect(costProjectionMarkdown(changed.costs)).not.toContain('異なる契約として確認済み')
+    expect(costProjectionMarkdown(changed.costs)).not.toContain('別契約として確認済み')
     expect(costProjectionMarkdown(frozen.costs)).toBe(markdown)
     expect(historicalReviewMaterials(changed,data.balances)).not.toEqual(historicalReviewMaterials(frozen,data.balances))
   })
@@ -284,14 +284,14 @@ describe('source-bound balance reviews', () => {
     const bases = material.costs.bases.filter((row) => row.sourceId?.startsWith('ai:charge:'))
     expect(bases).toHaveLength(3)
     expect(
-      bases.every((row) => row.warnings.some((text) => text.includes('利用期間が重なる'))),
+      bases.every((row) => row.warnings.some((text) => text.includes('請求期間が重なっています'))),
     ).toBe(true)
     expect(
       material.costs.sources.find((row) => row.id === 'ai:charge:b')?.originalAmountJpy,
     ).toBeNull()
-    expect(costProjectionMarkdown(material.costs, 'recorded')).toContain(
-      '原額は自動除外せず、不明額は未算定として保持します。',
-    )
+    const recorded = costProjectionMarkdown(material.costs, 'recorded')
+    expect(recorded).toContain('原額を自動除外していません。')
+    expect(recorded).toContain('未算定の理由: 精算待ち')
   })
   it('keeps duplicate invoice candidates and their full amounts in frozen explanations', () => {
     const data = fixture()
@@ -315,8 +315,10 @@ describe('source-bound balance reviews', () => {
         .filter((row) => row.sourceId?.startsWith('ai:charge:'))
         .every((row) => row.warnings.some((text) => text.includes('重複候補'))),
     ).toBe(true)
+    // Both invoices stay in the known basis (1,000 + 1,000 + the 100 direct cost).
+    expect(material.costs.totals.knownBasisJpy).toBe(2100)
     expect(costProjectionMarkdown(material.costs, 'recorded')).toContain(
-      '各請求を合計に含めており、自動で除外していません。',
+      '重複候補ですが原額を自動除外していません。',
     )
     data.workspace.configuration.chargePeriods.pop()
     const current = buildReviewMaterials(data.workspace, data.balances, 2026, data.observation)
