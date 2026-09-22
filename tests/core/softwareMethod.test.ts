@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { buildAnnualBalances, validateBalanceSnapshot } from '../../src/core/annualBalances.js'
 import { traceBalanceLots } from '../../src/core/balanceLotTrace.js'
-import { chooseSoftwareMethod, draftSoftwareYearExpense, allocateSoftwareExpense } from '../../src/core/softwareMethodDraft.js'
+import { draftSoftwareYearExpense, allocateSoftwareExpense } from '../../src/core/softwareMethodDraft.js'
 import { canonicalSoftwareValue, softwareMethodAdoptionIssues, softwareMethodSchedule, validateSoftwareMethod, validateSoftwareExpense } from '../../src/core/softwareMethod.js'
 import { methodFixture, expenseInput } from './helpers/softwareMethodFixture.js'
 

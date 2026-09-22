@@ -88,7 +88,7 @@ describe('common cost projection', () => {
     expect(markdown).toContain('confirmed-charge / 原額 3,000円')
 
     data.bases[0].amount = { status: 'known', amountJpy: 0 }
-    expect(() => projectAnnualCosts(data, 2026)).toThrow('原額が不明')
+    expect(() => projectAnnualCosts(data, 2026)).toThrow('原額または訂正後の基礎が不明')
   })
   it('rejects missing or empty unknown-original reasons and reasons attached to a known original', () => {
     const data = snapshot()

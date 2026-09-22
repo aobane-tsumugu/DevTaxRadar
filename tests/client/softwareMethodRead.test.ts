@@ -43,7 +43,7 @@ describe('atomic-preview inputs for method selection and posting', () => {
     for (const kind of ['revision','contents']) {
       const { f, preview } = fixture()
       if (kind === 'revision') preview.draftRevision++
-      else preview.snapshot.accounts[0]!.name += ' changed'
+      else preview.snapshot!.accounts[0]!.name += ' changed'
       await assert.rejects(readSoftwareMethodPreview('dataset',2,f.snapshot,2026,
         async () => ({datasetId:'dataset'}),async()=>preview),/保存版/)
     }

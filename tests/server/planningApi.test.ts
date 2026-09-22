@@ -1201,7 +1201,7 @@ describe('planning HTTP API', () => {
         reason: '請求書確認待ち',
       },
     ])
-    expect(saved.dashboard.boundaries).toEqual([])
+    expect(saved.dashboard).not.toHaveProperty('boundaries')
     for (const year of [2025, 2026]) {
       const projection = (await getJson(
         '/api/projections?year=' + year,

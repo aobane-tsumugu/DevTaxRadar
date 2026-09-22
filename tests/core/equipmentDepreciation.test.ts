@@ -69,7 +69,7 @@ describe('ordinary straight-line equipment scenario', () => {
     input.businessUseStartedOn = '2026-07-31'
     expect(calculateEquipmentDepreciation(input).calculation?.depreciationJpy).toBe(16701)
     input.usefulLifeYears = 6
-    expect(calculateEquipmentDepreciation(input).calculation?.rateNumerator).toBe(167)
+    expect(calculateEquipmentDepreciation(input).calculation).toMatchObject({ rateNumerator: 167 })
   })
   it('does not invent cost, start date, method, continuing use, or the prior closing balance', () => {
     const input = fixture()
