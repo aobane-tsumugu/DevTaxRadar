@@ -19,7 +19,7 @@ import { costProjectionMarkdown } from '../core/costExport.js'
 import { readWorkspace, saveWorkspace, workspaceSaveSchema, WorkspaceConflict, WorkspaceRequestReuse } from './workspaceRepository.js'
 import type { WorkspaceDraft } from '../planning/workspace.js'
 import { previewWorkspace, workspacePreviewSchema, verifyWorkspacePreview, WorkspacePreviewChanged, WorkspacePreviewRangeError } from './workspaceImpact.js'
-import { getClaudeSettingsPath, getAppDataDirectory, getDefaultHistoryPaths, normalizeHistoryRoot, restoreRequiresReconnect } from './paths.js'
+import { getClaudeSettingsPath, getAppDataDirectory, getDefaultHistoryPaths, getIdentifierSalt, normalizeHistoryRoot, restoreRequiresReconnect } from './paths.js'
 import { forecastNextLoss, readCleanupPeriod, readHistoryAgeCached, writeCleanupPeriod } from './retention.js'
 import { readScanProgress } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
@@ -141,6 +141,8 @@ app.post('/api/data-transfer/backup', async (request, reply) => {
   if (insideOrSame(dataDirectory, parsed.data.destination))
     return reply.code(400).send({ error: 'invalid_destination', message: '現在のDevTaxデータフォルダの外に、新しいバックアップ先を指定してください。' })
   try {
+    // The salt is otherwise created by the first history scan; a PC that never scanned can still move.
+    getIdentifierSalt()
     const manifest = createDataBundle(dataDirectory, parsed.data.destination)
     return {
       created: true as const,
