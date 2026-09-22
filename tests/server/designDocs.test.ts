@@ -10,7 +10,12 @@ const { verifyGeneratedBlueprint, verifyDocs } = createRequire(import.meta.url)(
   '../../scripts/design/verify-docs.cjs',
 ) as {
   verifyGeneratedBlueprint: (root: string) => { bytes: number; sha256: string; passes: number }
-  verifyDocs: (root: string) => { apiRoutes: number; requirements: number }
+  verifyDocs: (root: string) => {
+    apiRoutes: number
+    requirements: number
+    currentInputs?: { apiRoutes: number }
+    regeneration: { passes: number }
+  }
 }
 const output = 'docs/design/workflow-blueprint.html'
 const expected = '<!doctype html><html lang="ja"><body>合成設計図</body></html>\n'
@@ -21,6 +26,11 @@ function fixture(generator: string, action: (root: string) => void): void {
     for (const directory of ['scripts/design', 'docs/design', 'src', '.github/workflows'])
       mkdirSync(join(root, directory), { recursive: true })
     writeFileSync(join(root, output), expected)
+    // Every declared generator input must exist; the synthetic generator ignores them.
+    writeFileSync(join(root, 'scripts/design/render-current-design.cjs'), '// synthetic renderer\n')
+    writeFileSync(join(root, 'docs/design/current-design.json'), '{}')
+    writeFileSync(join(root, 'docs/design/acceptance-scenarios.md'), 'synthetic\n')
+    writeFileSync(join(root, 'docs/design/requirements-matrix.md'), 'synthetic\n')
     writeFileSync(
       join(root, 'scripts/design/build-workflow-blueprint.cjs'),
       "const fs = require('node:fs'); const path = require('node:path');\n" +
@@ -69,20 +79,19 @@ describe('blueprint regeneration verification', () => {
 
   it('does not reuse a copied artifact when the generator writes nothing', () => {
     fixture('// intentionally no generated file', (root) => {
-      assert.throws(() => verifyGeneratedBlueprint(root), /ENOENT/)
+      assert.throws(() => verifyGeneratedBlueprint(root), /ENOENT.*workflow-blueprint\.html/)
       assert.equal(readFileSync(join(root, output), 'utf8'), expected)
     })
   })
 
-  it('uses current source and workflow references instead of placeholder files', () => {
+  it('uses the current declared inputs instead of placeholder files', () => {
     fixture(
-      "fs.readFileSync(path.join(root, '.github/workflows/ci.yml'));" +
-        "fs.writeFileSync(output, fs.readFileSync(path.join(root, 'src/current.txt')));",
+      "fs.writeFileSync(output, fs.readFileSync(path.join(root, 'docs/design/acceptance-scenarios.md')));",
       (root) => {
-        writeFileSync(join(root, '.github/workflows/ci.yml'), 'name: fixture\n')
-        writeFileSync(join(root, 'src/current.txt'), expected)
+        const input = join(root, 'docs/design/acceptance-scenarios.md')
+        writeFileSync(input, expected)
         verifyGeneratedBlueprint(root)
-        writeFileSync(join(root, 'src/current.txt'), 'changed source')
+        writeFileSync(input, 'changed source')
         assert.throws(() => verifyGeneratedBlueprint(root), /is stale/)
       },
     )
@@ -109,35 +118,61 @@ describe('blueprint regeneration verification', () => {
   })
 })
 
+const completeHtml =
+  '<section id="api">GET /api/health<br>GET /api/observations</section>' +
+  '<section id="security">合成境界</section>'
+const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
+
 function completeFixture(action: (root: string) => void): void {
-  fixture(
-    "fs.writeFileSync(output, fs.readFileSync(path.join(root, 'docs/design/source.html')));",
-    (root) => {
-      for (const name of [
-        'README.md',
-        'TECHNICAL_DESIGN.md',
-        'docs/design/README.md',
-        'docs/design/implementation-plan.md',
-        'docs/design/purpose-led-redesign.md',
-      ])
-        writeFileSync(join(root, name), '# 合成文書\n')
-      writeFileSync(join(root, 'PRODUCT_SPEC.md'), 'REQ-TEST-1: 合成要件\n')
-      writeFileSync(
-        join(root, 'docs/design/requirements-matrix.md'),
-        '| REQ-TEST-1 | AC-TEST |\n| AC-TEST | 合成受入 |\n',
-      )
-      mkdirSync(join(root, 'src/server'), { recursive: true })
-      writeFileSync(join(root, 'src/server/index.ts'), "app.get(\n  '/api/health', () => ({}))")
-      writeFileSync(join(root, 'src/server/balanceRoutes.ts'), '')
-      writeFileSync(join(root, 'src/server/observationRoutes.ts'), "app.get('/api/observations', f)")
-      const html =
-        '<section id="api">GET /api/health<br>GET /api/observations</section>' +
-        '<section id="security">合成境界</section>'
-      writeFileSync(join(root, output), html)
-      writeFileSync(join(root, 'docs/design/source.html'), html)
-      action(root)
-    },
-  )
+  // The generator is not copied with the page it produces, so it embeds its own output.
+  fixture(`fs.writeFileSync(output, ${JSON.stringify(completeHtml)});`, (root) => {
+    for (const name of [
+      'README.md',
+      'TECHNICAL_DESIGN.md',
+      'docs/design/README.md',
+      'docs/design/purpose-led-redesign.md',
+    ])
+      writeFileSync(join(root, name), '# 合成文書\n')
+    const conditions =
+      Array.from({ length: 8 }, (_, i) => '完了条件: 合成 W0' + (i + 1)).join('\n') + '\n'
+    writeFileSync(join(root, 'docs/design/implementation-plan.md'), '# 合成文書\n\n' + conditions)
+    writeFileSync(join(root, 'PRODUCT_SPEC.md'), 'REQ-TEST-1: 合成要件\n')
+    const acceptance = '| AC-TEST | 合成受入 |\n'
+    writeFileSync(join(root, 'docs/design/acceptance-scenarios.md'), acceptance)
+    writeFileSync(
+      join(root, 'docs/design/requirements-matrix.md'),
+      '| REQ-TEST-1 | AC-TEST |\n' + acceptance,
+    )
+    mkdirSync(join(root, 'src/server'), { recursive: true })
+    writeFileSync(join(root, 'src/server/index.ts'), "app.get(\n  '/api/health', () => ({}))")
+    writeFileSync(join(root, 'src/server/balanceRoutes.ts'), '')
+    writeFileSync(join(root, 'src/server/observationRoutes.ts'), "app.get('/api/observations', f)")
+    const sources = [
+      'src/server/index.ts',
+      'src/server/balanceRoutes.ts',
+      'src/server/observationRoutes.ts',
+    ]
+    // verifyDocs also checks the checkout contracts once the declared model exists.
+    const model = {
+      version: 1,
+      baseline: 'a'.repeat(40),
+      updatedOn: '2026-09-23',
+      requirements: [{ id: 'REQ-TEST-1', refs: [sources[0]], acceptance: ['AC-TEST'] }],
+      works: Array.from({ length: 8 }, (_, i) => ({ id: 'W0' + (i + 1), source: sources[0] })),
+      api: [
+        { method: 'GET', path: '/api/health', source: sources[0] },
+        { method: 'GET', path: '/api/observations', source: sources[2] },
+      ],
+      sourceBlobs: Object.fromEntries(sources.map((source) => [source, 'synthetic'])),
+      contracts: {
+        acceptanceRowsSha256: sha256(acceptance),
+        completionLinesSha256: sha256(conditions),
+      },
+    }
+    writeFileSync(join(root, 'docs/design/current-design.json'), JSON.stringify(model))
+    writeFileSync(join(root, output), completeHtml)
+    action(root)
+  })
 }
 
 describe('document verification entry point', () => {
@@ -146,6 +181,8 @@ describe('document verification entry point', () => {
       const result = verifyDocs(root)
       assert.equal(result.apiRoutes, 2)
       assert.equal(result.requirements, 1)
+      assert.equal(result.currentInputs?.apiRoutes, 2)
+      assert.equal(result.regeneration.passes, 2)
     })
   })
 
@@ -179,7 +216,10 @@ describe('document verification entry point', () => {
         '<section id="api">POST /api/config<br>',
       )
       writeFileSync(join(root, output), html)
-      assert.throws(() => verifyDocs(root), /documented route is not registered: POST \/api\/config/)
+      assert.throws(
+        () => verifyDocs(root),
+        /documented route is not registered: POST \/api\/config/,
+      )
     })
   })
 
