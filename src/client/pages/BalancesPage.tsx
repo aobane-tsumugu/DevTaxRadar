@@ -362,15 +362,17 @@ export default function BalancesPage({
     <section className="cost-page" aria-label="残高の入力と年次確認">
       {datasetId && (
         <section aria-label="ブラウザに控えた残高入力の復旧">
-          <h2>前回の編集中入力を復旧</h2>
+          {/* Outcomes and warnings stay visible even while the rarely used panel is folded. */}
+          {recoveryNotice && <p role="status">{recoveryNotice}</p>}
+          {recoveryError && <p role="alert">{recoveryError}</p>}
+          <details open={recoveries.length > 0 || undefined}>
+          <summary>前回の編集中入力を復旧（このブラウザの控え）</summary>
           <p>
             入力の控えは、このブラウザの同じ接続先に保存します。ブラウザのデータ削除や別PCへの移行では引き継がれず、DBバックアップにも含まれません。
           </p>
           <button type="button" disabled={busy} onClick={inspectRecoveries}>
             復旧できる入力を確認
           </button>
-          {recoveryNotice && <p role="status">{recoveryNotice}</p>}
-          {recoveryError && <p role="alert">{recoveryError}</p>}
           {recoveries.map((record) => (
             <article key={record.editorId}>
               <p>
@@ -417,6 +419,7 @@ export default function BalancesPage({
           {dirty && recoveries.length > 0 && (
             <p>現在の入力を保存するか、保存済みを読み直してから別の控えを復旧できます。</p>
           )}
+          </details>
         </section>
       )}
       <p>
