@@ -315,7 +315,9 @@ export default function App() {
   }
   async function reviewWorkspace(nextConfiguration: LocalConfiguration, nextPlanning: PlanningSnapshot): Promise<boolean> {
     const base = editorBaseRef.current ?? workspaceBase.current
-    if (base && workspaceChangeKind(base, { configuration: nextConfiguration, planning: nextPlanning }) !== 'calculation') {
+    // Only a notes-only edit skips the impact review. An unchanged draft must not
+    // send a confirmation-free save that writes a new revision with identical content.
+    if (base && workspaceChangeKind(base, { configuration: nextConfiguration, planning: nextPlanning }) === 'notes') {
       await storeWorkspace(nextConfiguration, nextPlanning)
       return true
     }

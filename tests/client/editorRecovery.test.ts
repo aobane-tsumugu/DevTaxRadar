@@ -89,7 +89,8 @@ describe('unsent editor recovery', () => {
   })
   it('preserves incomplete method date/year controls as strings', () => {
     const value = { accountId: 'asset', acquisitionMovementId: 'move', method: '', usedOn: '2026-', life: '',
-      rental: '', business: false, ordinary: false, rounding: false, evidenceIds: [], reason: '', year: '202',
+      rental: '', business: false, ordinary: false, rounding: false, evidenceIds: [],
+      specialEligibility: '', specialUsedJpy: '1e', businessMonths: '-', statementReady: '', reason: '', year: '202',
       decisionId: '', ordinaryYear: false, endYear: '', endReason: '' }
     assert.ok(validSoftwareMethodForm(value))
     const c = { ...copy(), editor: 'software-method', value }

@@ -23,9 +23,14 @@ function withoutNotes(input: Contents): Contents {
   return { configuration: input.configuration, planning }
 }
 
+/** Only the saved contents; a caller's WorkspaceDraft revision is not a content change. */
+function contents(input: Contents): Contents {
+  return { configuration: input.configuration, planning: input.planning }
+}
+
 /** This selects a UI path, never authorizes a save or replaces revision/hash checks. */
 export function workspaceChangeKind(before: Contents, after: Contents): 'none' | 'notes' | 'calculation' {
-  if (stable(before) === stable(after)) return 'none'
+  if (stable(contents(before)) === stable(contents(after))) return 'none'
   return stable(withoutNotes(before)) === stable(withoutNotes(after)) ? 'notes' : 'calculation'
 }
 

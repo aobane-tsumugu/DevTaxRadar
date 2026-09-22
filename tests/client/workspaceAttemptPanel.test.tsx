@@ -96,7 +96,11 @@ it('explains retained changes without sending them and removes only the selected
     expect(container.querySelector('img')).toBeNull()
     expect(onRetry).not.toHaveBeenCalled()
     await act(async () => button('この送信控えだけを削除').click())
-    expect(container.textContent).toContain('未確認の保存要求はありません')
+    expect(container.textContent).toContain(
+      'ブラウザの控えと一覧から取り除きました。端末上のファイル控えは削除していません。',
+    )
+    expect(container.querySelector('article')).toBeNull()
+    expect(localStorage.length).toBe(1)
     expect(localStorage.getItem('unrelated')).toBe('keep')
     expect(onRetry).not.toHaveBeenCalled()
   } finally {
