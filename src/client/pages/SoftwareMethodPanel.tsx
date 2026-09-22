@@ -22,13 +22,16 @@ import { yen } from './shared'
 const labels = { 'straight-line': '通常の定額法', 'immediate-expense': '供用年の全額費用', 'three-year-pool': '3年一括償却', 'blue-special': '青色申告の少額資産特例' }
 type Context = { preview: BalancePreview; signature: string; accountId: string; year: number }
 const integer = (value: string): number | null => { if (!/^\\d+$/.test(value.trim())) return null; const parsed = Number(value.trim()); return Number.isSafeInteger(parsed) ? parsed : null }
-export default function SoftwareMethodPanel({ datasetId, snapshot, planning, busy, edit, onReviewAnnualDecision }: {
+export default function SoftwareMethodPanel({ datasetId, snapshot, planning, busy, edit, onReviewAnnualDecision, viewedYear }: {
   datasetId?: string; snapshot: BalanceSnapshot; planning: PlanningSnapshot; busy: boolean
+  /** The balances year on screen; the panel starts from it until an asset is read. */
+  viewedYear?: string
   edit: (change: (snapshot: BalanceSnapshot) => void) => void
   onReviewAnnualDecision?: (decision: DecisionRecord, expectedRevision: number) => Promise<boolean>
 }) {
   const [accountId, setAccountId] = useState('')
-  const [year, setYear] = useState(String(planning.profile.taxYear))
+  const [year, setYear] = useState(viewedYear ?? String(planning.profile.taxYear))
+  useEffect(() => { if (viewedYear !== undefined) setYear(viewedYear) }, [viewedYear])
   const [context, setContext] = useState<Context>()
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')

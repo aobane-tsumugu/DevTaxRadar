@@ -4010,8 +4010,12 @@ td > .empty-setup {
 
 .cost-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   font-size: 16px;
+}
+.cost-page select {
+  max-width: 100%;
 }
 .cost-toolbar {
   display: flex;

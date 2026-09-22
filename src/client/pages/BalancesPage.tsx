@@ -18,7 +18,7 @@ import type { LocalConfiguration } from '../types'
 import { balanceSnapshotSchema } from '../../accounting/balanceSchema'
 import { buildAnnualBalances } from '../../core/annualBalances'
 import { ApiRequestError, getBalanceDraft, getRuntime, saveBalanceDraft } from '../api'
-import { yen } from './shared'
+import { decisionOptionLabel, yen } from './shared'
 import {
   listRecoveries,
   balanceSaveFingerprint,
@@ -470,7 +470,7 @@ export default function BalancesPage({
             </button>
           </div>
           {local && <SoftwareAcquisitionPanel datasetId={datasetId} snapshot={draft.snapshot}
-            planning={planning} busy={busy || conflict} edit={edit}
+            planning={planning} busy={busy || conflict} edit={edit} viewedYear={year}
             onReviewAnnualDecision={onReviewSoftwareAnnualDecision} />}
           {local && navigation?.contributionId && <TreatmentBalanceDraftPanel
             request={{ ...navigation, contributionId: navigation.contributionId }} datasetId={datasetId}
@@ -922,7 +922,7 @@ export default function BalancesPage({
                         .filter((d) => decisionIsConfirmed(d))
                         .map((d) => (
                           <option key={d.id} value={d.id}>
-                            {d.taxYear}年 / {d.selectedCandidate ?? d.candidate} / {d.reason}
+                            {decisionOptionLabel(d)}
                           </option>
                         ))}
                       {movement.decisionId &&

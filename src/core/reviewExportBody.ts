@@ -3,6 +3,7 @@ import type { BalanceReview } from '../accounting/balanceWorkspace.js'
 import type { AmountState } from '../accounting/types.js'
 import { costProjectionMarkdown } from './costExport.js'
 import { costLotLabel, describeCostLots } from './costLotLabel.js'
+import { treatmentCandidateName } from './costTreatmentFacts.js'
 
 const text = (value: string) => value.replace(/[\r\n\t]/g, ' ').replace(/([\\`*_[\]<>#|])/g, '\\$1')
 const amount = (value: AmountState) =>
@@ -474,9 +475,9 @@ export function reviewExportMarkdown(review: BalanceReview): string {
       lines.push(
         '- ' + text(row.id) + ' / ' + row.taxYear + '年 / 制作物ID: ' + text(row.taxUnitId),
         '  - 検討した扱い: ' +
-          text(row.candidate) +
+          text(treatmentCandidateName(row.candidate)) +
           ' / 確認した扱い: ' +
-          text(row.selectedCandidate ?? '未登録'),
+          text(row.selectedCandidate ? treatmentCandidateName(row.selectedCandidate) : '未登録'),
         '  - 状態: ' + text(row.status) + ' / 確認日時: ' + text(row.confirmedAt ?? '未確認'),
         '  - 根拠・確認先: ' + text(row.reason ?? '未登録'),
       )

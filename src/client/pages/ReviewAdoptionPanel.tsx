@@ -7,6 +7,7 @@ import DirectAllocationPanel from './DirectAllocationPanel'
 import EquipmentCalculationsPanel from './EquipmentCalculationsPanel'
 import EquipmentAllocationPanel from './EquipmentAllocationPanel'
 import { useEffect, useRef, useState } from 'react'
+import { treatmentCandidateName } from '../../core/costTreatmentFacts'
 import type { BalancePreview, BalanceReview } from '../../accounting/balanceWorkspace'
 import { ApiRequestError, adoptReview, getBalancePreview, getRuntime } from '../api'
 import CostsPage from './CostsPage'
@@ -397,7 +398,8 @@ export default function ReviewAdoptionPanel({
               <ul>
                 {preview.materials.planning.decisions.map((decision) => (
                   <li key={decision.id}>
-                    {decision.taxYear}年 / {decision.selectedCandidate ?? decision.candidate} /{' '}
+                    {decision.taxYear}年 /{' '}
+                    {treatmentCandidateName(decision.selectedCandidate ?? decision.candidate)} /{' '}
                     {decision.reason ?? '根拠未登録'}
                   </li>
                 ))}
