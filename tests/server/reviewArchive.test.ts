@@ -109,9 +109,9 @@ describe('stored review integrity shared by API and archive reader', () => {
   it('accepts legacy payloads with different key order and whitespace', () => {
     fixture((f) => {
       edit(f, (db) =>
-        db.prepare('UPDATE balance_reviews SET payload=?').run(
-          JSON.stringify(Object.fromEntries(Object.entries(golden).reverse()), null, 2),
-        ),
+        db
+          .prepare('UPDATE balance_reviews SET payload=?')
+          .run(JSON.stringify(Object.fromEntries(Object.entries(golden).reverse()), null, 2)),
       )
       assert.deepEqual(readArchiveReview(f.directory, golden.id), golden)
     })
@@ -123,7 +123,8 @@ describe('stored review integrity shared by API and archive reader', () => {
     [
       'content without matching hash',
       (db: DatabaseSync) =>
-        db.prepare('UPDATE balance_reviews SET payload=?')
+        db
+          .prepare('UPDATE balance_reviews SET payload=?')
           .run(JSON.stringify({ ...golden, reason: 'changed' })),
     ],
     [
@@ -152,7 +153,8 @@ describe('stored review integrity shared by API and archive reader', () => {
       (db: DatabaseSync) => {
         const value = { ...golden, schemaVersion: 2 }
         db.prepare('UPDATE balance_reviews SET payload=?, content_hash=?').run(
-          JSON.stringify(value), reviewContentHash(value),
+          JSON.stringify(value),
+          reviewContentHash(value),
         )
       },
     ],
@@ -161,7 +163,8 @@ describe('stored review integrity shared by API and archive reader', () => {
       (db: DatabaseSync) => {
         const value = { ...golden, id: 'other-review' }
         db.prepare('UPDATE balance_reviews SET payload=?, content_hash=?').run(
-          JSON.stringify(value), reviewContentHash(value),
+          JSON.stringify(value),
+          reviewContentHash(value),
         )
       },
     ],
@@ -460,9 +463,7 @@ describe('archive CLI and existing export functions', () => {
   it('does not publish a file when validation or rendering fails', () => {
     fixture((f) => {
       const output = join(f.root, 'rejected.json')
-      edit(f, (db) =>
-        db.prepare('UPDATE balance_reviews SET content_hash=?').run('0'.repeat(64)),
-      )
+      edit(f, (db) => db.prepare('UPDATE balance_reviews SET content_hash=?').run('0'.repeat(64)))
       assert.throws(() => runReviewArchiveCli(['export', f.directory, golden.id, 'json', output]))
       assert.equal(existsSync(output), false)
     })

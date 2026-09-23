@@ -49,6 +49,7 @@ export function runReviewArchiveCli(args: string[]): string {
   const content = format === 'json' ? reviewExportJson(review) : reviewExportMarkdown(review)
   writeNewExport(output, content)
   return (
-    JSON.stringify({ exported: true, reviewId: review.id, year: review.year, format, output }) + '\n'
+    JSON.stringify({ exported: true, reviewId: review.id, year: review.year, format, output }) +
+    '\n'
   )
 }

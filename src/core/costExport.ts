@@ -67,13 +67,24 @@ export function costProjectionMarkdown(
     if (source.billedOn) lines.push(`  - 請求日: ${source.billedOn}`)
     if (source.paidOn) lines.push(`  - 支払日: ${source.paidOn}`)
     for (const adjustment of source.adjustments ?? []) {
-      const effect = { 'restate-original-cost': '元費用の対象期間を訂正', 'balance-reduction': '残高減少へ対応', undetermined: '扱い未判断' }[adjustment.effect]
-      lines.push(`  - ${adjustment.kind === 'refund' ? '返金' : '訂正'} ${amount(adjustment.amountJpy)} / ${adjustment.occurredOn} / ${effect} / 記録ID ${text(adjustment.id)}`)
-      lines.push(`    - 対象・理由: ${text(adjustment.reason)} / 証拠: ${adjustment.evidenceIds.map(text).join('、')}`)
-      if (adjustment.balanceMovementId) lines.push(`    - 対応する残高減少: ${text(adjustment.balanceMovementId)}`)
+      const effect = {
+        'restate-original-cost': '元費用の対象期間を訂正',
+        'balance-reduction': '残高減少へ対応',
+        undetermined: '扱い未判断',
+      }[adjustment.effect]
+      lines.push(
+        `  - ${adjustment.kind === 'refund' ? '返金' : '訂正'} ${amount(adjustment.amountJpy)} / ${adjustment.occurredOn} / ${effect} / 記録ID ${text(adjustment.id)}`,
+      )
+      lines.push(
+        `    - 対象・理由: ${text(adjustment.reason)} / 証拠: ${adjustment.evidenceIds.map(text).join('、')}`,
+      )
+      if (adjustment.balanceMovementId)
+        lines.push(`    - 対応する残高減少: ${text(adjustment.balanceMovementId)}`)
       if (adjustment.conversion) {
         const conversion = adjustment.conversion
-        lines.push(`    - 換算: ${text(conversion.currency)} ${text(conversion.foreignAmount)} × ${text(conversion.jpyPerUnit)}円 / ${conversion.rounding} / ${conversion.convertedOn} / ${text(conversion.reference)}`)
+        lines.push(
+          `    - 換算: ${text(conversion.currency)} ${text(conversion.foreignAmount)} × ${text(conversion.jpyPerUnit)}円 / ${conversion.rounding} / ${conversion.convertedOn} / ${text(conversion.reference)}`,
+        )
       }
       lines.push('    - 原額は保持しています。受領年の税務処理や過去の採用資料を自動変更しません。')
     }

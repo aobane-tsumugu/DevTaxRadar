@@ -138,7 +138,9 @@ export function projectAnnualCosts(input: CostSnapshot, year: number): AnnualCos
       ? evaluateSourceAdjustments(source, source.adjustments).costAmountJpy
       : source.originalAmountJpy
     if (costLimit === null && known.length)
-      fail(`費用源 ${source.id} の原額または訂正後の基礎が不明なため、数値の費用基礎を生成できません。`)
+      fail(
+        `費用源 ${source.id} の原額または訂正後の基礎が不明なため、数値の費用基礎を生成できません。`,
+      )
     if (costLimit !== null && sum(known) > costLimit)
       fail(`費用源 ${source.id} の原額を重複して組み入れています。`)
   }

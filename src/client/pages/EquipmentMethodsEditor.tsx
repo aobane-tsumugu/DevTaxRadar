@@ -302,63 +302,86 @@ export default function EquipmentMethodsEditor({
                         ],
                       ],
                     ] as const
-                  ).filter(([key]) => !['immediate-expense', 'three-year-pool'].includes(row.method) || key !== 'useThroughYearEnd')
-                  .map(([key, label, options]) => (
-                    <label key={key} style={{ display: 'block', marginBlock: 12 }}>
-                      {label}
-                      <select
-                        aria-label={`${equipment.name}の${label}`}
-                        value={row[key]}
-                        style={{ display: 'block', fontSize: 16, minHeight: 44, width: '100%' }}
-                        onChange={(event) => update({ [key]: event.target.value })}
-                      >
-                        {options.map(([value, text]) => (
-                          <option key={value} value={value}>
-                            {text}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
-                  {(row.method === 'immediate-expense' || row.method === 'three-year-pool' ||
-                    (row.method === 'straight-line' && equipment.acquisitionCostJpy !== null &&
-                     equipment.acquisitionCostJpy < 100000)) && equipment.acquiredOn >= '2022-04-01' && (
-                    <label style={{ display: 'block', marginBlock: 12 }}>
-                      貸付用途（取得価額は設備全体で判定）
-                      <select
-                        aria-label={`${equipment.name}の貸付用途`}
-                        value={row.rentalUse ?? 'unknown'}
-                        onChange={(event) => update({ rentalUse: event.target.value as EquipmentAnnualMethod['rentalUse'] })}
-                        style={{ display: 'block', fontSize: 16, minHeight: 44, width: '100%' }}
-                      >
-                        <option value="unknown">未確認</option>
-                        <option value="none">貸付用ではない</option>
-                        <option value="primary-business">主要業務としての貸付</option>
-                        <option value="other">主要業務以外の貸付</option>
-                      </select>
-                    </label>
-                  )}
+                  )
+                    .filter(
+                      ([key]) =>
+                        !['immediate-expense', 'three-year-pool'].includes(row.method) ||
+                        key !== 'useThroughYearEnd',
+                    )
+                    .map(([key, label, options]) => (
+                      <label key={key} style={{ display: 'block', marginBlock: 12 }}>
+                        {label}
+                        <select
+                          aria-label={`${equipment.name}の${label}`}
+                          value={row[key]}
+                          style={{ display: 'block', fontSize: 16, minHeight: 44, width: '100%' }}
+                          onChange={(event) => update({ [key]: event.target.value })}
+                        >
+                          {options.map(([value, text]) => (
+                            <option key={value} value={value}>
+                              {text}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  {(row.method === 'immediate-expense' ||
+                    row.method === 'three-year-pool' ||
+                    (row.method === 'straight-line' &&
+                      equipment.acquisitionCostJpy !== null &&
+                      equipment.acquisitionCostJpy < 100000)) &&
+                    equipment.acquiredOn >= '2022-04-01' && (
+                      <label style={{ display: 'block', marginBlock: 12 }}>
+                        貸付用途（取得価額は設備全体で判定）
+                        <select
+                          aria-label={`${equipment.name}の貸付用途`}
+                          value={row.rentalUse ?? 'unknown'}
+                          onChange={(event) =>
+                            update({
+                              rentalUse: event.target.value as EquipmentAnnualMethod['rentalUse'],
+                            })
+                          }
+                          style={{ display: 'block', fontSize: 16, minHeight: 44, width: '100%' }}
+                        >
+                          <option value="unknown">未確認</option>
+                          <option value="none">貸付用ではない</option>
+                          <option value="primary-business">主要業務としての貸付</option>
+                          <option value="other">主要業務以外の貸付</option>
+                        </select>
+                      </label>
+                    )}
                   {row.method === 'immediate-expense' && (
-                    <p>供用年に一度だけ費用基礎へ入れます。耐用年数・月割りは使いません。以前の方法や入力は自動で消しません。</p>
+                    <p>
+                      供用年に一度だけ費用基礎へ入れます。耐用年数・月割りは使いません。以前の方法や入力は自動で消しません。
+                    </p>
                   )}
-                  {row.method === 'three-year-pool' && <EquipmentPoolConditions equipment={equipment} row={row} rows={rows} onChange={update} />}
-                  {!['immediate-expense', 'three-year-pool'].includes(row.method) && <label style={{ display: 'block', marginBlock: 12 }}>
-                    この年度に確認した耐用年数
-                    <input
-                      aria-label={`${equipment.name}の年度別耐用年数`}
-                      type="number"
-                      min={2}
-                      max={50}
-                      value={row.usefulLifeYears ?? ''}
-                      onChange={(event) =>
-                        update({
-                          usefulLifeYears:
-                            event.target.value === '' ? null : event.target.valueAsNumber,
-                        })
-                      }
-                      style={{ fontSize: 16, minHeight: 44, width: '100%' }}
+                  {row.method === 'three-year-pool' && (
+                    <EquipmentPoolConditions
+                      equipment={equipment}
+                      row={row}
+                      rows={rows}
+                      onChange={update}
                     />
-                  </label>}
+                  )}
+                  {!['immediate-expense', 'three-year-pool'].includes(row.method) && (
+                    <label style={{ display: 'block', marginBlock: 12 }}>
+                      この年度に確認した耐用年数
+                      <input
+                        aria-label={`${equipment.name}の年度別耐用年数`}
+                        type="number"
+                        min={2}
+                        max={50}
+                        value={row.usefulLifeYears ?? ''}
+                        onChange={(event) =>
+                          update({
+                            usefulLifeYears:
+                              event.target.value === '' ? null : event.target.valueAsNumber,
+                          })
+                        }
+                        style={{ fontSize: 16, minHeight: 44, width: '100%' }}
+                      />
+                    </label>
+                  )}
                   <label htmlFor={`${prefix}-${equipment.id}-reason`} style={{ display: 'block' }}>
                     選んだ処理と適用条件の根拠・確認先
                   </label>

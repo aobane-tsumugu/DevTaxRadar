@@ -8,19 +8,30 @@ import { draftTreatmentDecision } from '../../src/core/costTreatmentDraft.js'
 import { treatmentDecisionBindingMatches } from '../../src/core/treatmentDecisionBinding.js'
 
 function prepared(legacy = false) {
-  const f = fixture(); const fact = addFacts(f)
+  const f = fixture()
+  const fact = addFacts(f)
   fact.methodComparison = newAnnualMethodFacts(2026, 'part')
-  const decision = draftTreatmentDecision(f.costs, f.planning, 'part', 'decision', '2026-09-19T00:00:00Z')
-  if (legacy) decision.treatmentBinding!.basis = canonicalTreatmentValue({
-    version: 1, item: projectCostTreatments(f.costs, f.planning).items[0], fact,
-  })
+  const decision = draftTreatmentDecision(
+    f.costs,
+    f.planning,
+    'part',
+    'decision',
+    '2026-09-19T00:00:00Z',
+  )
+  if (legacy)
+    decision.treatmentBinding!.basis = canonicalTreatmentValue({
+      version: 1,
+      item: projectCostTreatments(f.costs, f.planning).items[0],
+      fact,
+    })
   return { ...f, fact, decision }
 }
 
 describe('production facts and unadopted comparisons are separate', () => {
   for (const legacy of [false, true]) {
     it(`keeps ${legacy ? 'existing v1' : 'new v2'} judgment when only display horizon changes`, () => {
-      const f = prepared(legacy); const original = structuredClone(f.decision)
+      const f = prepared(legacy)
+      const original = structuredClone(f.decision)
       f.fact.methodComparison!.throughYear++
       f.fact.recordedAt = '2026-09-19T02:00:00Z'
       assert.equal(treatmentDecisionBindingMatches(f.decision, f.costs, f.planning), true)
@@ -49,19 +60,31 @@ describe('production facts and unadopted comparisons are separate', () => {
   }
   it('does not ignore identity or selection mismatches', () => {
     const f = prepared()
-    for (const patch of [{ taxYear: 2025 }, { taxUnitId: 'other' }, { selectedCandidate: 'ordinary-expense' }])
-      assert.equal(treatmentDecisionBindingMatches({ ...f.decision, ...patch }, f.costs, f.planning), false)
+    for (const patch of [
+      { taxYear: 2025 },
+      { taxUnitId: 'other' },
+      { selectedCandidate: 'ordinary-expense' },
+    ])
+      assert.equal(
+        treatmentDecisionBindingMatches({ ...f.decision, ...patch }, f.costs, f.planning),
+        false,
+      )
   })
   it('rejects unknown binding versions and extra root fields', () => {
     const f = prepared()
     const saved = JSON.parse(f.decision.treatmentBinding!.basis)
-    for (const value of [{ ...saved, version: 3 }, { ...saved, ignored: true }, { version: 2, fact: saved.fact }]) {
+    for (const value of [
+      { ...saved, version: 3 },
+      { ...saved, ignored: true },
+      { version: 2, fact: saved.fact },
+    ]) {
       f.decision.treatmentBinding!.basis = canonicalTreatmentValue(value)
       assert.equal(treatmentDecisionBindingMatches(f.decision, f.costs, f.planning), false)
     }
   })
   it('new records never contain a comparison horizon in their production binding', () => {
-    const f = prepared(); const basis = JSON.parse(f.decision.treatmentBinding!.basis)
+    const f = prepared()
+    const basis = JSON.parse(f.decision.treatmentBinding!.basis)
     assert.equal(basis.version, 2)
     assert.equal(basis.fact.methodComparison, undefined)
     assert.equal(basis.fact.recordedAt, undefined)

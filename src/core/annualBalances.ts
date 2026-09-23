@@ -273,8 +273,13 @@ export function validateBalanceSnapshot(snapshot: BalanceSnapshot): void {
         fail('before-opening', '未判断の対象年が期首より前です。')
     }
   }
-  try { validateSoftwareMethodHistory(snapshot) } catch (error) {
-    throw new BalanceValidationError('invalid-input', error instanceof Error ? error.message : 'ソフトウェアの方法記録を確認してください。')
+  try {
+    validateSoftwareMethodHistory(snapshot)
+  } catch (error) {
+    throw new BalanceValidationError(
+      'invalid-input',
+      error instanceof Error ? error.message : 'ソフトウェアの方法記録を確認してください。',
+    )
   }
 }
 

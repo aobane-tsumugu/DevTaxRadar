@@ -114,7 +114,16 @@ it('isolates datasets, retains unknown formats and removes only the selected imm
 
 it('retains incomplete contract correspondence and the original confirmation snapshot', () => {
   const record = fixture()
-  const period = { id:'a',provider:'claude' as const,planName:'合成',serviceStartedOn:'2026-01-01',serviceEndedOn:'2026-01-31',amountJpy:1000 }
-  record.input.chargePeriods = [{...period,contractConfirmation:{reference:'  入力途中  ',reason:'',basis:period}}]
+  const period = {
+    id: 'a',
+    provider: 'claude' as const,
+    planName: '合成',
+    serviceStartedOn: '2026-01-01',
+    serviceEndedOn: '2026-01-31',
+    amountJpy: 1000,
+  }
+  record.input.chargePeriods = [
+    { ...period, contractConfirmation: { reference: '  入力途中  ', reason: '', basis: period } },
+  ]
   expect(decodeWorkspaceRecovery(encodeWorkspaceRecovery(record))).toEqual(record)
 })

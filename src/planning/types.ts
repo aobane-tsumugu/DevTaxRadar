@@ -18,9 +18,26 @@ export type PlanningProfile = {
   notes?: string
 }
 export type UsageMode = 'internal' | 'external' | 'mixed' | 'undecided'
-export type RevenueModel = 'sales' | 'subscription' | 'advertising' | 'affiliate' | 'efficiency' | 'oss' | 'other' | 'undecided'
+export type RevenueModel =
+  | 'sales'
+  | 'subscription'
+  | 'advertising'
+  | 'affiliate'
+  | 'efficiency'
+  | 'oss'
+  | 'other'
+  | 'undecided'
 export type TaxUnitType = 'new-software' | 'improvement-plan' | 'sales-production'
-export type LifecycleStatus = 'idea' | 'prototype' | 'developing' | 'evaluating' | 'in-use' | 'maintaining' | 'improving' | 'retired' | 'abandoned'
+export type LifecycleStatus =
+  | 'idea'
+  | 'prototype'
+  | 'developing'
+  | 'evaluating'
+  | 'in-use'
+  | 'maintaining'
+  | 'improving'
+  | 'retired'
+  | 'abandoned'
 export type TaxUnitRecord = {
   id: string
   name: string
@@ -35,7 +52,13 @@ export type TaxUnitRecord = {
   sameAsExternalVersion?: 'yes' | 'no' | 'undecided'
   notes?: string
 }
-export type ProjectClassification = 'new-development' | 'maintenance' | 'feature-addition' | 'general-learning' | 'private' | 'unclassified'
+export type ProjectClassification =
+  | 'new-development'
+  | 'maintenance'
+  | 'feature-addition'
+  | 'general-learning'
+  | 'private'
+  | 'unclassified'
 export type ProjectRuleRecord = {
   id: string
   projectKey: string
@@ -46,7 +69,15 @@ export type ProjectRuleRecord = {
   classification: ProjectClassification
   reason?: string
 }
-export type LifecycleEventType = 'development-started' | 'evaluation-started' | 'internal-use-started' | 'external-released' | 'first-sale' | 'improvement-started' | 'retired' | 'abandoned'
+export type LifecycleEventType =
+  | 'development-started'
+  | 'evaluation-started'
+  | 'internal-use-started'
+  | 'external-released'
+  | 'first-sale'
+  | 'improvement-started'
+  | 'retired'
+  | 'abandoned'
 export type LifecycleEventRecord = {
   id: string
   taxUnitId: string
@@ -77,7 +108,8 @@ export type EquipmentRecord = {
   evidenceIds: string[]
 }
 export type HomeCostCategory = 'rent' | 'electricity' | 'internet'
-export type HomeCostMethod = 'area' | 'area-time' | 'meter' | 'watt-hour' | 'usage-time' | 'fixed-ratio'
+export type HomeCostMethod =
+  'area' | 'area-time' | 'meter' | 'watt-hour' | 'usage-time' | 'fixed-ratio'
 export type CostTreatment = 'direct' | 'shared' | 'general'
 export type HomeCostRecord = {
   id: string
@@ -95,7 +127,8 @@ export type HomeCostRecord = {
   treatment: CostTreatment
   evidenceIds: string[]
 }
-export type DirectCostType = 'outsource' | 'material' | 'cloud' | 'domain' | 'license' | 'old-version-balance' | 'other'
+export type DirectCostType =
+  'outsource' | 'material' | 'cloud' | 'domain' | 'license' | 'old-version-balance' | 'other'
 export type DirectCostRecord = {
   id: string
   targets?: AllocationTarget[]
@@ -110,7 +143,18 @@ export type DirectCostRecord = {
   evidenceIds: string[]
 }
 export type EvidenceStrength = 'automatic' | 'external' | 'self-recorded'
-export type EvidenceType = 'deployment' | 'sale-page' | 'store-release' | 'first-use' | 'file' | 'screenshot' | 'receipt' | 'card-statement' | 'memo' | 'ai-session' | 'other'
+export type EvidenceType =
+  | 'deployment'
+  | 'sale-page'
+  | 'store-release'
+  | 'first-use'
+  | 'file'
+  | 'screenshot'
+  | 'receipt'
+  | 'card-statement'
+  | 'memo'
+  | 'ai-session'
+  | 'other'
 export type EvidenceRecord = {
   id: string
   evidenceType: EvidenceType
@@ -168,7 +212,21 @@ export type Diagnosis = {
 export function emptyPlanningSnapshot(taxYear = new Date().getFullYear()): PlanningSnapshot {
   return {
     version: 1,
-    profile: { taxYear, journeyMode: 'early', incomeCategory: 'undecided', filingType: 'undecided', monetizationStatus: 'planned', hasBookkeeping: false },
-    taxUnits: [], projectRules: [], lifecycleEvents: [], equipment: [], homeCosts: [], directCosts: [], evidence: [], decisions: [],
+    profile: {
+      taxYear,
+      journeyMode: 'early',
+      incomeCategory: 'undecided',
+      filingType: 'undecided',
+      monetizationStatus: 'planned',
+      hasBookkeeping: false,
+    },
+    taxUnits: [],
+    projectRules: [],
+    lifecycleEvents: [],
+    equipment: [],
+    homeCosts: [],
+    directCosts: [],
+    evidence: [],
+    decisions: [],
   }
 }

@@ -32,13 +32,28 @@ function initial(): WorkspaceContents {
 describe('workspace three-way record comparison', () => {
   it('keeps invoice amounts and contract confirmations together during conflicts', () => {
     const base = initial()
-    const period = { id:'a',provider:'claude' as const,planName:'合成',serviceStartedOn:'2026-01-01',serviceEndedOn:'2026-01-31',amountJpy:1000 }
+    const period = {
+      id: 'a',
+      provider: 'claude' as const,
+      planName: '合成',
+      serviceStartedOn: '2026-01-01',
+      serviceEndedOn: '2026-01-31',
+      amountJpy: 1000,
+    }
     base.configuration.chargePeriods = [period]
-    const local = structuredClone(base), latest = structuredClone(base)
-    local.configuration.chargePeriods![0]!.contractConfirmation = {reference:'契約A',reason:'明細照合',confirmedAt:'2026-09-09T00:00:00Z',basis:chargeContractBasis(period)}
+    const local = structuredClone(base),
+      latest = structuredClone(base)
+    local.configuration.chargePeriods![0]!.contractConfirmation = {
+      reference: '契約A',
+      reason: '明細照合',
+      confirmedAt: '2026-09-09T00:00:00Z',
+      basis: chargeContractBasis(period),
+    }
     latest.configuration.chargePeriods![0]!.amountJpy = 2000
-    expect(mergeWorkspaceDrafts(base,local,latest).contents).toBeNull()
-    const selected = mergeWorkspaceDrafts(base,local,latest,{[JSON.stringify(['chargePeriods','a'])]:'local'}).contents!
+    expect(mergeWorkspaceDrafts(base, local, latest).contents).toBeNull()
+    const selected = mergeWorkspaceDrafts(base, local, latest, {
+      [JSON.stringify(['chargePeriods', 'a'])]: 'local',
+    }).contents!
     expect(selected.configuration.chargePeriods).toEqual(local.configuration.chargePeriods)
   })
   it('chooses the default charge amount and its unknown reason together', () => {

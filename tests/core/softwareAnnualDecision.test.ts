@@ -92,11 +92,7 @@ describe('C04 structured annual software decision', () => {
     assert.equal(p2026.acquisitionAmountJpy, 120000)
     assert.equal(p2026.expenseJpy, 24000)
     assert.equal(p2026.existingDecisionId, undefined)
-    const d2026 = confirmSoftwareAnnualDecision(
-      p2026,
-      'annual-2026',
-      '2026-12-31T10:00:00Z',
-    )
+    const d2026 = confirmSoftwareAnnualDecision(p2026, 'annual-2026', '2026-12-31T10:00:00Z')
     assert.equal(decisionIsConfirmed(d2026), true)
     f.planning.decisions.push(d2026)
     assert.equal(
@@ -112,26 +108,27 @@ describe('C04 structured annual software decision', () => {
       decisionId: d2026.id,
       ordinaryYearConfirmed: true,
     })
-    let annual = buildAnnualBalances(f.snapshot, 2026).accounts
-      .find((row) => row.accountId === 'asset')!
+    let annual = buildAnnualBalances(f.snapshot, 2026).accounts.find(
+      (row) => row.accountId === 'asset',
+    )!
     assert.equal(annual.expensesJpy, 24000)
     assert.equal(annual.closing.amountJpy, 96000)
 
-    assert.throws(() => draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, {
-      accountId: 'asset',
-      year: 2027,
-      requestId: '33333333-3333-4333-8333-000000002027',
-      decisionId: d2026.id,
-      ordinaryYearConfirmed: true,
-    }), /対象年/)
+    assert.throws(
+      () =>
+        draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, {
+          accountId: 'asset',
+          year: 2027,
+          requestId: '33333333-3333-4333-8333-000000002027',
+          decisionId: d2026.id,
+          ordinaryYearConfirmed: true,
+        }),
+      /対象年/,
+    )
 
     const p2027 = softwareAnnualDecisionProposal(f.snapshot, f.planning, 'asset', 2027)
     assert.equal(p2027.expenseJpy, 24000)
-    const d2027 = confirmSoftwareAnnualDecision(
-      p2027,
-      'annual-2027',
-      '2027-12-31T10:00:00Z',
-    )
+    const d2027 = confirmSoftwareAnnualDecision(p2027, 'annual-2027', '2027-12-31T10:00:00Z')
     f.planning.decisions.push(d2027)
     f.snapshot = draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, {
       accountId: 'asset',
@@ -140,19 +137,26 @@ describe('C04 structured annual software decision', () => {
       decisionId: d2027.id,
       ordinaryYearConfirmed: true,
     })
-    annual = buildAnnualBalances(f.snapshot, 2027).accounts
-      .find((row) => row.accountId === 'asset')!
+    annual = buildAnnualBalances(f.snapshot, 2027).accounts.find(
+      (row) => row.accountId === 'asset',
+    )!
     assert.equal(annual.opening.amountJpy, 96000)
     assert.equal(annual.expensesJpy, 24000)
     assert.equal(annual.closing.amountJpy, 72000)
 
     const movements = f.snapshot.movements.filter((row) => row.softwareExpense)
-    assert.deepEqual(movements.map((row) => row.decisionId), [d2026.id, d2027.id])
+    assert.deepEqual(
+      movements.map((row) => row.decisionId),
+      [d2026.id, d2027.id],
+    )
     const ids = new Set(movements.map((row) => row.id))
     assert.deepEqual(
-      checkBalanceReferences(f.snapshot, f.planning, [], f.costs.flatMap((row) => row.sources))
-        .issues
-        .filter((row) => ids.has(row.recordId)),
+      checkBalanceReferences(
+        f.snapshot,
+        f.planning,
+        [],
+        f.costs.flatMap((row) => row.sources),
+      ).issues.filter((row) => ids.has(row.recordId)),
       [],
     )
   })
@@ -177,27 +181,31 @@ describe('C04 structured annual software decision', () => {
       'annual-new',
       '2026-12-31T12:00:00Z',
     )
-    assert.equal(f.planning.decisions.find((row) => row.id === old.id), old)
+    assert.equal(
+      f.planning.decisions.find((row) => row.id === old.id),
+      old,
+    )
     assert.notEqual(replacement.id, old.id)
-    assert.throws(() => draftSoftwareYearExpense(changed, f.planning, f.costs, {
-      accountId: 'asset',
-      year: 2026,
-      requestId: '22222222-2222-4222-8222-000000002026',
-      decisionId: old.id,
-      ordinaryYearConfirmed: true,
-    }), /一致しません/)
+    assert.throws(
+      () =>
+        draftSoftwareYearExpense(changed, f.planning, f.costs, {
+          accountId: 'asset',
+          year: 2026,
+          requestId: '22222222-2222-4222-8222-000000002026',
+          decisionId: old.id,
+          ordinaryYearConfirmed: true,
+        }),
+      /一致しません/,
+    )
   })
 
   it('does not create a decision for a zero annual amount', () => {
     const f = methodFixture('immediate-expense', 80000)
-    f.planning.decisions = f.planning.decisions
-      .filter((row) => row.selectedCandidate !== 'ordinary-expense')
-    const p2026 = softwareAnnualDecisionProposal(f.snapshot, f.planning, 'asset', 2026)
-    const d2026 = confirmSoftwareAnnualDecision(
-      p2026,
-      'annual-immediate',
-      '2026-12-31T10:00:00Z',
+    f.planning.decisions = f.planning.decisions.filter(
+      (row) => row.selectedCandidate !== 'ordinary-expense',
     )
+    const p2026 = softwareAnnualDecisionProposal(f.snapshot, f.planning, 'asset', 2026)
+    const d2026 = confirmSoftwareAnnualDecision(p2026, 'annual-immediate', '2026-12-31T10:00:00Z')
     f.planning.decisions.push(d2026)
     const first = draftSoftwareYearExpense(f.snapshot, f.planning, f.costs, {
       accountId: 'asset',
@@ -213,12 +221,15 @@ describe('C04 structured annual software decision', () => {
       () => confirmSoftwareAnnualDecision(p2027, 'unused', '2027-01-01T00:00:00Z'),
       /0円/,
     )
-    assert.deepEqual(draftSoftwareYearExpense(first, f.planning, f.costs, {
-      accountId: 'asset',
-      year: 2027,
-      requestId: '22222222-2222-4222-8222-000000002027',
-      decisionId: '',
-      ordinaryYearConfirmed: false,
-    }), first)
+    assert.deepEqual(
+      draftSoftwareYearExpense(first, f.planning, f.costs, {
+        accountId: 'asset',
+        year: 2027,
+        requestId: '22222222-2222-4222-8222-000000002027',
+        decisionId: '',
+        ordinaryYearConfirmed: false,
+      }),
+      first,
+    )
   })
 })

@@ -32,7 +32,11 @@ import type {
   PlanningSnapshot,
   TaxUnitRecord,
 } from '../../planning/types'
-import { chargeContractBasis, chargePeriodIsValid, type ProviderChargePeriod } from '../../core/chargePeriods'
+import {
+  chargeContractBasis,
+  chargePeriodIsValid,
+  type ProviderChargePeriod,
+} from '../../core/chargePeriods'
 import { diagnosePlanning } from '../../core/diagnosis'
 import AnnualOverview from './AnnualOverview'
 import CostsPage from './CostsPage'
@@ -509,11 +513,17 @@ function Onboarding({
   function updateChargePeriod(index: number, patch: Partial<ProviderChargePeriod>) {
     setChargePeriods((current) =>
       current.map((period, periodIndex) =>
-                periodIndex === index ? (() => {
-          const updated = { ...period, ...patch }
-          if (updated.contractConfirmation && !updated.contractConfirmation.confirmedAt) updated.contractConfirmation = { ...updated.contractConfirmation, basis: chargeContractBasis(updated) }
-          return updated
-        })() : period,
+        periodIndex === index
+          ? (() => {
+              const updated = { ...period, ...patch }
+              if (updated.contractConfirmation && !updated.contractConfirmation.confirmedAt)
+                updated.contractConfirmation = {
+                  ...updated.contractConfirmation,
+                  basis: chargeContractBasis(updated),
+                }
+              return updated
+            })()
+          : period,
       ),
     )
   }
@@ -1382,7 +1392,11 @@ function Onboarding({
                   />
                 </label>
                 {candidateQuery.trim() && visibleCandidateProducts.length > 1 && (
-                  <div className="candidate-bulk" role="group" aria-label="表示中の候補をまとめて設定">
+                  <div
+                    className="candidate-bulk"
+                    role="group"
+                    aria-label="表示中の候補をまとめて設定"
+                  >
                     <span>表示中の{visibleCandidateProducts.length}候補をまとめて</span>
                     <label className="candidate-group-number">
                       <span>番号（空欄は自動）</span>
@@ -1873,7 +1887,14 @@ function Onboarding({
                       ＋ 請求を追加
                     </button>
                   </div>
-                  <DuplicateChargesPanel periods={chargePeriods} onChange={(updated) => setChargePeriods((current) => current.map((period) => period.id === updated.id ? updated : period))} />
+                  <DuplicateChargesPanel
+                    periods={chargePeriods}
+                    onChange={(updated) =>
+                      setChargePeriods((current) =>
+                        current.map((period) => (period.id === updated.id ? updated : period)),
+                      )
+                    }
+                  />
                   {chargePeriods.length === 0 ? (
                     <p className="charge-period-empty">
                       請求履歴が未登録です。正確な期間が分かる場合は追加してください。分からない場合だけ、下の月額概算を利用できます。

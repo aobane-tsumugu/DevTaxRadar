@@ -5,11 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type {
-  WorkspaceImpact,
-  WorkspaceSave,
-  WorkspaceView,
-} from '../../src/planning/workspace.js'
+import type { WorkspaceImpact, WorkspaceSave, WorkspaceView } from '../../src/planning/workspace.js'
 import { WORKSPACE_BODY_LIMIT } from '../../src/server/workspaceHttp.js'
 
 // Exercise the actual server/parser, not a second implementation of the size check.
@@ -197,12 +193,7 @@ describe('workspace request capacity', () => {
     const before = await readWorkspace()
     const malformed = await send('/api/workspace', 'PUT', '{')
     expect(malformed.status).toBe(400)
-    const noCsrf = await send(
-      '/api/workspace',
-      'PUT',
-      JSON.stringify(requestFor(before)),
-      false,
-    )
+    const noCsrf = await send('/api/workspace', 'PUT', JSON.stringify(requestFor(before)), false)
     expect(noCsrf.status).toBe(403)
     expect((await readWorkspace()).revision).toBe(before.revision)
   })
