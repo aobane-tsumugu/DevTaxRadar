@@ -22,6 +22,61 @@ function targetName(target: CostTarget, projection: AnnualCostProjection): strin
   }[target.kind]
 }
 
+type Contribution = AnnualCostProjection['contributions'][number]
+
+/**
+ * One line per destination, summed. A real month splits into dozens of session-level
+ * contributions whose individual lines stay available below, unchanged.
+ */
+function ContributionList({
+  items,
+  name,
+}: {
+  items: Contribution[]
+  name: (item: Contribution) => string
+}) {
+  if (!items.length) return null
+  const totals = new Map<string, { amountJpy: number; count: number; consumed: boolean }>()
+  for (const item of items) {
+    // Contributions already folded into another basis stay apart so the sum is not read twice.
+    const key = name(item) + (item.consumedByBasisId ? '\u0000consumed' : '')
+    const row = totals.get(key) ?? {
+      amountJpy: 0,
+      count: 0,
+      consumed: Boolean(item.consumedByBasisId),
+    }
+    row.amountJpy += item.amountJpy
+    row.count++
+    totals.set(key, row)
+  }
+  return (
+    <>
+      <ul className="cost-contributions">
+        {[...totals].map(([key, row]) => (
+          <li key={key}>
+            <span>{key.split('\u0000')[0]}</span>
+            <strong>{yen.format(row.amountJpy)}</strong>
+            {row.count > 1 && <small>（{row.count}件の合計）</small>}
+            {row.consumed && <p>別の費用基礎へ組入れ済み。上の対応先合計へ二重加算しません。</p>}
+          </li>
+        ))}
+      </ul>
+      <details>
+        <summary>配分の明細 {items.length}件</summary>
+        <ul className="cost-contributions">
+          {items.map((item) => (
+            <li key={item.id}>
+              <span>{name(item)}</span>
+              <strong>{yen.format(item.amountJpy)}</strong>
+              <p>{item.reason}</p>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </>
+  )
+}
+
 export default function CostsPage({
   initial,
   onEdit,
@@ -46,24 +101,36 @@ export default function CostsPage({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const request = useRef({ generation: 0 })
+  // The year the user chose to look at. A save refreshes `initial` for the plan year; without
+  // this the page jumped back there after every edit made while viewing another year.
+  const viewedYear = useRef<number | undefined>(undefined)
   useEffect(() => {
     const sequence = request.current
     sequence.generation++
-    setProjection(initial)
-    setYear(String(initial?.year ?? new Date().getFullYear()))
-    setBusy(false)
     setError(null)
+    if (local && initial && viewedYear.current !== undefined && viewedYear.current !== initial.year)
+      void loadYear(String(viewedYear.current))
+    else {
+      setProjection(initial)
+      setYear(String(initial?.year ?? new Date().getFullYear()))
+      setBusy(false)
+    }
     return () => {
       sequence.generation++
     }
+    // loadYear only reads refs and setters; re-running on its identity would refetch forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial])
-  async function loadYear() {
+  async function loadYear(target = year) {
     const id = ++request.current.generation
     setBusy(true)
     setError(null)
     try {
-      const next = await getCostProjection(Number(year))
-      if (id === request.current.generation) setProjection(next)
+      const next = await getCostProjection(Number(target))
+      if (id === request.current.generation) {
+        viewedYear.current = next.year
+        setProjection(next)
+      }
     } catch (cause) {
       if (id === request.current.generation)
         setError(cause instanceof Error ? cause.message : '費用資料の読込に失敗しました。')
@@ -103,7 +170,6 @@ export default function CostsPage({
         </div>
       )}
       {error && <p role="alert">{error}。表示中の資料は更新されていません。</p>}
-      {!readOnly && local && projection && adjustmentsEditor?.(projection)}
       {!readOnly && local && projection && treatmentEditor?.(projection)}
       {busy ? (
         <p role="status">費用資料を読み込んでいます。</p>
@@ -239,20 +305,10 @@ export default function CostsPage({
                         ))}
                       </ul>
                     )}
-                    <ul className="cost-contributions">
-                      {projection.contributions
-                        .filter((item) => item.basisId === basis.id)
-                        .map((item) => (
-                          <li key={item.id}>
-                            <span>{targetName(item.target, projection)}</span>
-                            <strong>{yen.format(item.amountJpy)}</strong>
-                            <p>{item.reason}</p>
-                            {item.consumedByBasisId && (
-                              <p>別の費用基礎へ組入れ済み。上の対応先合計へ二重加算しません。</p>
-                            )}
-                          </li>
-                        ))}
-                    </ul>
+                    <ContributionList
+                      items={projection.contributions.filter((item) => item.basisId === basis.id)}
+                      name={(item) => targetName(item.target, projection)}
+                    />
                     <details>
                       <summary>計算の参照情報</summary>
                       <p>費用源: {source.id}</p>
@@ -296,6 +352,8 @@ export default function CostsPage({
             ))}
         </>
       )}
+      {/* Refunds and corrections are occasional; they follow the figures they adjust. */}
+      {!readOnly && local && projection && adjustmentsEditor?.(projection)}
     </section>
   )
 }

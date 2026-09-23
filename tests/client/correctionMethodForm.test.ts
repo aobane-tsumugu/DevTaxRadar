@@ -31,12 +31,15 @@ describe('C03 user-facing alternatives reuse the actual C02 method engine', () =
       assert.equal(results.find((row) => row.method === 'three-year-pool')!.status === 'conditional', pool)
     })
   it('supports a 350000 post-April-2026 blue-special alternative only with its own explicit conditions', () => {
-    const eligible = softwareMethodAlternatives(form({ method: 'blue-special', specialEligibility: 'yes', specialUsedJpy: '0', businessMonths: '12', statementReady: 'yes', rounding: false }), 350000, '2026-04-01', profile)
+    // Used on or after the 2026-04-01 acquisition; an earlier use date fails the date-order check instead.
+    const eligible = softwareMethodAlternatives(form({ method: 'blue-special', usedOn: '2026-04-01', specialEligibility: 'yes', specialUsedJpy: '0', businessMonths: '12', statementReady: 'yes', rounding: false }), 350000, '2026-04-01', profile)
       .find((row) => row.method === 'blue-special')!
     assert.equal(eligible.status, 'conditional'); assert.equal(eligible.years![0]!.expenseJpy, 350000)
-    const missing = softwareMethodAlternatives(form({ method: 'blue-special', rounding: false }), 350000, '2026-04-01', profile)
+    const missing = softwareMethodAlternatives(form({ method: 'blue-special', usedOn: '2026-04-01', rounding: false }), 350000, '2026-04-01', profile)
       .find((row) => row.method === 'blue-special')!
     assert.equal(missing.status, 'missing-facts')
+    assert.ok(missing.reasons.includes('取得時期の事業者要件を確認してください。'))
+    assert.ok(missing.reasons.includes('供用年の事業月数・他資産の特例使用額・明細の準備を確認してください。'))
   })
   it('does not treat an unknown or non-primary rental as no rental', () => {
     assert.equal(softwareMethodAlternatives(form({ rental: '' }), 80000, '2026-01-01', profile).find((row) => row.method === 'immediate-expense')!.status, 'missing-facts')

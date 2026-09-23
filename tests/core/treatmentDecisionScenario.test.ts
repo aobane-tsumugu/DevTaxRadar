@@ -40,7 +40,7 @@ describe('production facts and unadopted comparisons are separate', () => {
         const f = prepared(legacy)
         if (change === 'reason') f.fact.reason += '根拠の変更'
         if (change === 'proof') f.planning.evidence[0]!.note += '証拠の変更'
-        if (change === 'amount') f.costs.sources[0]!.originalAmountJpy++
+        if (change === 'amount') f.costs.sources[0]!.originalAmountJpy!++
         if (change === 'purpose') f.fact.workPurpose = 'maintenance'
         if (change === 'directness') f.fact.directlyAttributable = false
         assert.equal(treatmentDecisionBindingMatches(f.decision, f.costs, f.planning), false)

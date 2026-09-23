@@ -648,7 +648,10 @@ describe('onboarding result refresh', () => {
         expect(container.textContent).not.toContain('￥18,000')
         expect(container.textContent).not.toContain('￥655')
         expect(container.querySelector('[aria-label="申告区分ごとの結果"]')).toBeNull()
-        expect(container.textContent).toContain('税務上の当年費用未算定')
+        expect(container.textContent).toContain(
+          '費用基礎は、採用済みの当年費用・資産残高とは別です',
+        )
+        expect(container.textContent).toContain('原額や費用基礎をそのまま将来残高へ写しません')
         const details = [...container.querySelectorAll('button')].find(
           (button) => button.textContent === '原額・配分・未算定理由を見る',
         )!

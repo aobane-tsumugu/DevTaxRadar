@@ -138,6 +138,52 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+export type DataTransferManifestSummary = {
+  createdAt: string
+  schemaHash: string
+  files: Record<string, { bytes: number; sha256: string }>
+}
+
+export function createDataTransferBackup(
+  csrfToken: string,
+  destination: string,
+): Promise<{ created: true; destination: string; manifest: DataTransferManifestSummary }> {
+  return requestJson('/api/data-transfer/backup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-DevTax-CSRF': csrfToken },
+    body: JSON.stringify({ destination }),
+  })
+}
+
+export function verifyDataTransferBackup(
+  csrfToken: string,
+  bundle: string,
+): Promise<{ valid: true; bundle: string; manifest: DataTransferManifestSummary }> {
+  return requestJson('/api/data-transfer/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-DevTax-CSRF': csrfToken },
+    body: JSON.stringify({ bundle }),
+  })
+}
+
+export function restoreDataTransferBackup(
+  csrfToken: string,
+  bundle: string,
+  destination: string,
+): Promise<{
+  restored: true
+  destination: string
+  bundleCreatedAt: string
+  requiresRestart: true
+  message: string
+}> {
+  return requestJson('/api/data-transfer/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-DevTax-CSRF': csrfToken },
+    body: JSON.stringify({ bundle, destination }),
+  })
+}
+
 export function getRuntime(): Promise<RuntimeData> {
   return requestJson('/api/runtime')
 }

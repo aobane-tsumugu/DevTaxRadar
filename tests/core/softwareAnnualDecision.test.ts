@@ -150,7 +150,8 @@ describe('C04 structured annual software decision', () => {
     assert.deepEqual(movements.map((row) => row.decisionId), [d2026.id, d2027.id])
     const ids = new Set(movements.map((row) => row.id))
     assert.deepEqual(
-      checkBalanceReferences(f.snapshot, f.planning, []).issues
+      checkBalanceReferences(f.snapshot, f.planning, [], f.costs.flatMap((row) => row.sources))
+        .issues
         .filter((row) => ids.has(row.recordId)),
       [],
     )

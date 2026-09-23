@@ -31,9 +31,12 @@ export { safeLocalLabel } from './dashboardPresentation.js'
 
 export function buildDashboard(year?: number): DashboardData {
   const db = getDatabase()
+  // Read (or reuse) the observations before opening the savepoint: the reuse check needs a
+  // connection outside a transaction, and nothing can write in between on this sync path.
+  const observation = readDashboardObservation(db)
   db.exec('SAVEPOINT devtax_dashboard_read')
   try {
-    const result = buildDashboardFromSnapshot(year)
+    const result = buildDashboardFromSnapshot(year, undefined, observation)
     db.exec('RELEASE devtax_dashboard_read')
     return result
   } catch (error) {
@@ -42,17 +45,47 @@ export function buildDashboard(year?: number): DashboardData {
   }
 }
 
-export function readDashboardObservation(db: DatabaseSync = getDatabase()): {
+type DashboardObservation = {
   sessions: UsageObservation[]
   overview: ReturnType<typeof getUsageOverview>
   lastScanTimeZones: Record<string, string>
   sourceCaptures?: SourceCaptureContext[]
-} {
+}
+
+const observationCache = new WeakMap<DatabaseSync, { key: string; value: DashboardObservation }>()
+
+/**
+ * Identifies the committed database state: `data_version` moves when another connection
+ * commits and `total_changes()` when this one writes anything. Unknown inside a transaction,
+ * where uncommitted rows could still roll back.
+ */
+function observationCacheKey(db: DatabaseSync): string | undefined {
+  if (db.isTransaction) return undefined
+  const version = db.prepare('PRAGMA data_version').get() as { data_version: number }
+  const changes = db.prepare('SELECT total_changes() AS n').get() as { n: number }
+  return `${version.data_version}:${changes.n}`
+}
+
+/**
+ * Expanding every dated usage row costs seconds on a real history, so an unchanged database
+ * returns the previous, frozen result. Any write — scan, save or restore — recomputes.
+ */
+export function readDashboardObservation(db: DatabaseSync = getDatabase()): DashboardObservation {
+  const key = observationCacheKey(db)
+  const cached = observationCache.get(db)
+  if (key && cached?.key === key) return cached.value
   const sessions = readUsageObservations(db, getUsageSessions(db))
-  return {
+  const value: DashboardObservation = {
     sessions, sourceCaptures: readSourceCaptureContext(db, sessions),
     overview: getUsageOverview(db), lastScanTimeZones: getLastScanTimeZones(db),
   }
+  if (!key) return value
+  for (const row of sessions) Object.freeze(row)
+  Object.freeze(sessions)
+  if (value.sourceCaptures) Object.freeze(value.sourceCaptures)
+  Object.freeze(value)
+  observationCache.set(db, { key, value })
+  return value
 }
 
 export function projectWorkspaceYears(

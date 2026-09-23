@@ -3,11 +3,13 @@ import type { BalanceReview } from '../accounting/balanceWorkspace.js'
 import type { AmountState } from '../accounting/types.js'
 import { costProjectionMarkdown } from './costExport.js'
 import { costLotLabel, describeCostLots } from './costLotLabel.js'
+import { treatmentCandidateName } from './costTreatmentFacts.js'
 
 const text = (value: string) => value.replace(/[\r\n\t]/g, ' ').replace(/([\\`*_[\]<>#|])/g, '\\$1')
+const yen = (value: number) => value.toLocaleString('ja-JP') + '円'
 const amount = (value: AmountState) =>
   value.status === 'known'
-    ? value.amountJpy.toLocaleString('ja-JP') + '円'
+    ? yen(value.amountJpy)
     : '不明（' + value.reasons.map(text).join(' / ') + '）'
 
 /** Export only the stored record. Never fetch, merge or recalculate current workspace inputs. */
@@ -84,13 +86,12 @@ export function reviewExportMarkdown(review: BalanceReview): string {
         kinds[row.kind],
       '- 期首: ' + amount(row.opening),
       '- 増加: ' +
-        row.additionsJpy +
-        '円 / 振替受入: ' +
-        row.transfersInJpy +
-        '円 / 振替払出: ' +
-        row.transfersOutJpy +
-        '円',
-      '- 費用化: ' + row.expensesJpy + '円 / その他減少: ' + row.reductionsJpy + '円',
+        yen(row.additionsJpy) +
+        ' / 振替受入: ' +
+        yen(row.transfersInJpy) +
+        ' / 振替払出: ' +
+        yen(row.transfersOutJpy),
+      '- 費用化: ' + yen(row.expensesJpy) + ' / その他減少: ' + yen(row.reductionsJpy),
       '- 期末: ' + amount(row.closing),
       '',
     )
@@ -474,9 +475,9 @@ export function reviewExportMarkdown(review: BalanceReview): string {
       lines.push(
         '- ' + text(row.id) + ' / ' + row.taxYear + '年 / 制作物ID: ' + text(row.taxUnitId),
         '  - 検討した扱い: ' +
-          text(row.candidate) +
+          text(treatmentCandidateName(row.candidate)) +
           ' / 確認した扱い: ' +
-          text(row.selectedCandidate ?? '未登録'),
+          text(row.selectedCandidate ? treatmentCandidateName(row.selectedCandidate) : '未登録'),
         '  - 状態: ' + text(row.status) + ' / 確認日時: ' + text(row.confirmedAt ?? '未確認'),
         '  - 根拠・確認先: ' + text(row.reason ?? '未登録'),
       )

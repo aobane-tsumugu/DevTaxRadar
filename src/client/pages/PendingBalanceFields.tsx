@@ -2,6 +2,7 @@ import type { BalanceSnapshot, PendingBalanceDecision } from '../../accounting/t
 import type { PlanningSnapshot } from '../../planning/types'
 import type { ConsultationNavigation } from '../consultationNavigation'
 import { decisionIsConfirmed } from '../../core/decisionConfirmation'
+import { decisionOptionLabel } from './shared'
 import ConsultationAnswersEditor from './ConsultationAnswersEditor'
 import {
   consultationAnswersForYear,
@@ -250,7 +251,7 @@ export default function PendingBalanceEditor({
                     )
                     .map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.taxYear}年 / {d.selectedCandidate ?? d.candidate} / {d.reason}
+                        {decisionOptionLabel(d)}
                       </option>
                     ))}
                   {row.resolution.decisionId &&

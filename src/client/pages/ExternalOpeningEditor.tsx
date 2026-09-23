@@ -44,7 +44,7 @@ export default function ExternalOpeningEditor(props: Props) {
 
 function OpeningForm({ snapshot, planning, busy, edit, account }: Props & { account: BalanceAccount }) {
   // An imported duplicate is shown as a repair issue, not silently overwritten.
-  let existing: ReturnType<typeof externalOpeningRecord>
+  let existing: ReturnType<typeof externalOpeningRecord> | undefined
   let readError = ''
   try { existing = externalOpeningRecord(snapshot, account.id) }
   catch (error) { readError = error instanceof Error ? error.message : '期首の確認を読み取れません。' }

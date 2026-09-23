@@ -128,3 +128,8 @@ export const treatmentCandidateLabels: Record<TaxCandidate, string> = {
   'private-use': '私用・対象外',
   unclassified: '未判断',
 }
+
+/** Shows a stored candidate code by its Japanese name; other wording is shown as entered. */
+export function treatmentCandidateName(value: string): string {
+  return (treatmentCandidateLabels as Record<string, string>)[value] ?? value
+}

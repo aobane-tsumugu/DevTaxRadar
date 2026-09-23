@@ -39,8 +39,10 @@ describe('C06 purpose journey through the real balance repository and export ent
       assert.equal(second.previousReviewId, first.id)
       assert.deepEqual(b.opening, { status: 'known', amountJpy: 96000 }); assert.equal(b.expensesJpy, 24000)
       assert.deepEqual(b.closing, { status: 'known', amountJpy: 72000 })
-      assert.equal(reviewExportJson(getBalanceReview(db, first.id)), frozenJson)
-      assert.equal(reviewExportMarkdown(getBalanceReview(db, first.id)), frozenMd)
+      const stored = getBalanceReview(db, first.id)
+      assert.ok(stored)
+      assert.equal(reviewExportJson(stored), frozenJson)
+      assert.equal(reviewExportMarkdown(stored), frozenMd)
     } finally { db.close() }
   })
   it('does not invalidate real posted amounts when the same method is reconfirmed at another time', () => {

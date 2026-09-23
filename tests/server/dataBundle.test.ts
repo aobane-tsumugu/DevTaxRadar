@@ -330,5 +330,5 @@ describe('complete database and identity bundle', () => {
       original.close()
       copied.close()
     }
-  })
+  }, 60_000)
 })

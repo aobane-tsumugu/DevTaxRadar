@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import type { TaxGroup } from '../types'
+import { treatmentCandidateName } from '../../core/costTreatmentFacts'
 import type {
+  DecisionRecord,
   HomeCostRecord,
   PlanningSnapshot,
   ProjectClassification,
@@ -12,6 +14,14 @@ export const yen = new Intl.NumberFormat('ja-JP', {
   currency: 'JPY',
   maximumFractionDigits: 0,
 })
+
+/** A select option cannot wrap, so a long reason is cut here and stays whole in the decision list. */
+export function decisionOptionLabel(decision: DecisionRecord): string {
+  const reason = decision.reason ?? ''
+  return `${decision.taxYear}年 / ${treatmentCandidateName(decision.selectedCandidate ?? decision.candidate)} / ${
+    reason.length > 60 ? `${reason.slice(0, 60)}…` : reason
+  }`
+}
 
 export const GROUP_LABELS: Record<TaxGroup, string> = {
   current: '今年の必要経費',

@@ -216,6 +216,53 @@ describe('planning repository', () => {
     }
   })
 
+  it('keeps the source of a confirmed software annual decision across a reload', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'devtax-planning-annual-'))
+    directories.push(directory)
+    process.env.DEVTAX_RADAR_DATA_DIR = directory
+    const repository = await import('../../src/server/planningRepository.js')
+    const database = await import('../../src/server/database.js')
+    const { confirmSoftwareAnnualDecision } =
+      await import('../../src/core/softwareAnnualDecision.js')
+    const snapshot = samplePlanning()
+    const annual = confirmSoftwareAnnualDecision(
+      {
+        accountId: 'account-software',
+        taxUnitId: 'unit-app-v1',
+        year: 2026,
+        acquisitionAmountJpy: 120_000,
+        expenseJpy: 24_000,
+        method: 'straight-line',
+        usedOn: '2026-01-01',
+        methodReason: '通常の定額法',
+        evidenceIds: [],
+        methodBasis: '{"method":"straight-line"}',
+        staleDecisionIds: [],
+      },
+      'annual-2026',
+      '2026-12-31T00:00:00Z',
+    )
+    snapshot.decisions.push(annual)
+
+    try {
+      repository.savePlanningSnapshot(snapshot)
+      expect(repository.getPlanningSnapshot().decisions.at(-1)).toEqual(annual)
+      const { softwareAnnualBinding: _dropped, ...oldClient } = annual
+      expect(() =>
+        repository.savePlanningSnapshot({
+          ...snapshot,
+          decisions: [...snapshot.decisions.slice(0, -1), oldClient],
+        }),
+      ).toThrow()
+      repository.savePlanningSnapshot({ ...snapshot, decisions: snapshot.decisions.slice(0, -1) })
+      expect(repository.getPlanningSnapshot().decisions.some((row) => row.id === annual.id)).toBe(
+        false,
+      )
+    } finally {
+      database.getDatabase().close()
+    }
+  })
+
   it('saves annual declarations atomically, rejects duplicates, and rolls back a later SQL failure', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'devtax-presence-'))
     directories.push(directory)

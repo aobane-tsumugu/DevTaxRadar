@@ -418,25 +418,19 @@ p {
   flex: 0 0 auto;
 }
 .filters label {
-  position: relative;
+  display: grid;
+  gap: 4px;
 }
 .filters label > span {
-  position: absolute;
-  z-index: 1;
-  top: 6px;
-  left: 12px;
   color: var(--subtle);
   font-size: 16px;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  pointer-events: none;
 }
 .filters select {
   width: 164px;
   max-width: 164px;
-  height: 50px;
-  padding: 19px 34px 4px 12px;
+  height: 44px;
+  padding: 0 34px 0 12px;
   color: var(--ink);
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -3151,6 +3145,17 @@ td > .empty-setup {
   background: #fff;
   font-size: 16px;
 }
+.candidate-bulk {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 16px;
+}
+.candidate-bulk > span {
+  font-weight: 700;
+}
 .history-grouping-list {
   max-height: 440px;
   margin-top: 13px;
@@ -4005,8 +4010,20 @@ td > .empty-setup {
 
 .cost-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   font-size: 16px;
+}
+.cost-page select {
+  max-width: 100%;
+}
+/* Fieldsets default to their widest line; long cost and movement ids must wrap instead. */
+.cost-page fieldset {
+  min-width: 0;
+}
+.cost-page label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .cost-toolbar {
   display: flex;
@@ -4198,4 +4215,10 @@ td > .empty-setup {
   display: block;
   margin: 8px 0;
   overflow-wrap: anywhere;
+}
+.render-failure {
+  max-width: 42rem;
+  margin: 4rem auto;
+  padding: 1rem;
+  line-height: 1.8;
 }

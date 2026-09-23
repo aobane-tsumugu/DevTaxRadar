@@ -3,25 +3,42 @@ import type { Diagnosis, PlanningSnapshot } from '../planning/types.js'
 const text = (value: unknown) => String(value ?? '').replace(/[\r\n\t]/g, ' ').replace(/([\\`*_[\]<>#|])/g, '\\$1')
 const amount = (value: number | null) => value === null ? '不明' : value.toLocaleString('ja-JP') + '円'
 
+// A consultation handout is read by people, not parsers: stored codes print as Japanese, and a
+// code without a label still prints as itself rather than disappearing.
+const labels: Record<string, string> = {
+  undecided: '未定', miscellaneous: '雑所得（検討中）', business: '事業所得（検討中）',
+  white: '白色申告', blue: '青色申告', none: '売上なし', planned: '収益化予定', earning: '売上あり',
+  early: 'これからの記録を準備', retrospective: '過去の履歴を整理',
+  'new-software': '新規ソフトウェア', 'improvement-plan': '改良計画', 'sales-production': '販売用制作',
+  internal: '自分の実作業で使う', external: '外部へ公開・提供', mixed: '自分利用と外部提供',
+  sales: '販売', subscription: '定期課金', advertising: '広告', affiliate: 'アフィリエイト',
+  efficiency: '業務効率化', oss: 'OSS', other: 'その他',
+  idea: '構想中', prototype: '試作中', developing: '開発中', evaluating: '評価中', 'in-use': '実作業で利用中',
+  maintaining: '保守中', improving: '改良中', retired: '利用終了', abandoned: '開発中止',
+  'new-development': '新規開発', maintenance: '保守・バグ修正', 'feature-addition': '機能の大きな追加',
+  'general-learning': '一般的な学習', private: '趣味・私用', unclassified: '未分類',
+}
+const label = (value: unknown) => text(typeof value === 'string' ? labels[value] ?? value : value)
+
 /** Shared by the server and synthetic demo; no old ledger calculations or local paths. */
 export function planningMarkdown(snapshot: PlanningSnapshot, diagnosis?: Diagnosis): string {
   const lines = [
     '# DevTax 計画・原価資料', '', `対象年: ${snapshot.profile.taxYear}年`,
-    `所得区分候補: ${text(snapshot.profile.incomeCategory)}`, `申告方式: ${text(snapshot.profile.filingType)}`,
+    `所得区分候補: ${label(snapshot.profile.incomeCategory)}`, `申告方式: ${label(snapshot.profile.filingType)}`,
     '', '入力した事実・本人の判断記録です。年度採用版や、税務適用の確認完了を意味しません。',
     '名称・相談内容・自由記述はそのまま含まれます。第三者へ渡す前に確認してください。証拠のローカル保存場所は含めません。',
   ]
   if (snapshot.profile.notes) lines.push('', `計画のメモ: ${text(snapshot.profile.notes)}`)
   lines.push('', '## 制作物・改良計画', '')
   for (const unit of snapshot.taxUnits) {
-    lines.push(`- ${text(unit.name)} / ID: ${text(unit.id)} / ${text(unit.unitType)} / ${text(unit.usageMode)} / ${text(unit.lifecycleStatus)}`,
-      `  - 収益形態: ${text(unit.revenueModel)} / 売上状況: ${text(unit.monetizationStatus ?? snapshot.profile.monetizationStatus)}`,
-      `  - 整理方法: ${text(unit.journeyMode ?? snapshot.profile.journeyMode)} / 完成条件: ${text(unit.completionCriteria) || '未記入'}`)
+    lines.push(`- ${text(unit.name)} / ID: ${text(unit.id)} / ${label(unit.unitType)} / ${label(unit.usageMode)} / ${label(unit.lifecycleStatus)}`,
+      `  - 収益形態: ${label(unit.revenueModel)} / 売上状況: ${label(unit.monetizationStatus ?? snapshot.profile.monetizationStatus)}`,
+      `  - 整理方法: ${label(unit.journeyMode ?? snapshot.profile.journeyMode)} / 完成条件: ${text(unit.completionCriteria) || '未記入'}`)
     if (unit.predecessorId) lines.push(`  - 前身の制作物: ${text(unit.predecessorId)}（利用終了・原価振替を意味しません）`)
     if (unit.notes) lines.push(`  - メモ: ${text(unit.notes)}`)
   }
   lines.push('', '## 期間付き分類ルール', '')
-  for (const rule of snapshot.projectRules) lines.push(`- ${text(rule.id)} / ${text(rule.projectKey)} / ${text(rule.provider) || '両サービス'} / ${text(rule.effectiveFrom)} ～ ${text(rule.effectiveTo) || '終了未指定'} / ${text(rule.classification)} / 制作物 ${text(rule.taxUnitId) || '未指定'} / 理由 ${text(rule.reason) || '未記入'}`)
+  for (const rule of snapshot.projectRules) lines.push(`- ${text(rule.id)} / ${text(rule.projectKey)} / ${text(rule.provider) || '両サービス'} / ${text(rule.effectiveFrom)} ～ ${text(rule.effectiveTo) || '終了未指定'} / ${label(rule.classification)} / 制作物 ${text(rule.taxUnitId) || '未指定'} / 理由 ${text(rule.reason) || '未記入'}`)
   lines.push('', '## 年度別の費用項目の確認', '', '本人の記録です。未登録は「該当なし」を意味しません。')
   for (const item of snapshot.costPresence ?? []) lines.push(`- ${item.taxYear}年 ${{ equipment: '設備', home: '自宅費用', direct: '直接費' }[item.category]}: ${item.status === 'not-applicable' ? '該当なし' : '保留'} / 理由: ${text(item.reason)} / 記録日時: ${text(item.recordedAt)} / ID: ${text(item.id)}`)
   if (!snapshot.costPresence?.length) lines.push('確認記録なし。')

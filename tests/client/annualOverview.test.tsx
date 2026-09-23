@@ -50,8 +50,10 @@ describe('annual overview', () => {
       expect(entries['算定済みの費用基礎']).toBe('￥2,000')
       expect(entries['通常業務に対応する算定済み分']).toBe('￥2,000')
       expect(entries['費用基礎が未算定']).toBe('1件（小計に含めない）')
-      expect(entries['税務上の当年費用']).toBe('未算定')
-      expect(entries['全費用の処理から算定する翌期残高']).toBe('未算定')
+      // The cost basis is not presented as an adopted expense or a carry-forward balance.
+      expect(Object.keys(entries).filter((key) => /当年費用|残高/.test(key))).toEqual([])
+      expect(container.textContent).toContain('費用基礎は、採用済みの当年費用・資産残高とは別です')
+      expect(container.textContent).toContain('原額や費用基礎をそのまま将来残高へ写しません')
       await act(async () => container.querySelector('button')!.click())
       expect(open).toHaveBeenCalledOnce()
       await act(async () =>

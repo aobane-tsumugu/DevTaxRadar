@@ -131,7 +131,9 @@ export function calculateEquipmentDepreciation(
   if (input.usefulLifeYears !== null && (input.usefulLifeYears < 2 || input.usefulLifeYears > 50))
     unsupported.push('検証済み償却率表の範囲外です。率を推定しません。')
   if (unsupported.length) return result('unsupported', unsupported)
-  const smallRestriction = input.method === 'straight-line' ? smallEquipmentStraightLineRestriction(input) : null
+  // A 0-yen cost is an inconsistent fact (checked below), not a small asset awaiting rental facts.
+  const smallRestriction = input.method === 'straight-line' && input.acquisitionCostJpy !== 0
+    ? smallEquipmentStraightLineRestriction(input) : null
   if (smallRestriction) return result(
     input.acquiredOn! >= '2022-04-01' && (!input.rentalUse || input.rentalUse === 'unknown')
       ? 'missing-facts' : 'unsupported',

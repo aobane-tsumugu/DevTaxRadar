@@ -144,6 +144,12 @@ describe('local startup failure', () => {
       root!.render(<App />)
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
+    // The task list is the first page; the annual summary is one navigation away.
+    await act(async () => {
+      Array.from(container!.querySelectorAll<HTMLButtonElement>('.nav-item'))
+        .find((button) => button.textContent?.includes('今年どうなる？'))!
+        .click()
+    })
     const ai = container.querySelector('[aria-label="対象年のAI分類内訳"]')!
     expect(ai.textContent).toContain('￥3,100')
     expect(ai.textContent).not.toContain('999,999')
@@ -413,7 +419,8 @@ describe('local startup failure', () => {
     await click('確認した内容を保存')
     expect(api.saveWorkspace).toHaveBeenCalledTimes(savedCount + 1)
     expect(container.textContent).toContain('いまの整理結果です')
-  })
+    // The full App flow takes about 0.6s alone but can exceed the 5s default under a parallel run.
+  }, 20_000)
 
   it('shows an actionable failure without synthetic values, and retries the complete load', async () => {
     vi.mocked(dashboard.isLocalRuntime).mockReturnValue(true)

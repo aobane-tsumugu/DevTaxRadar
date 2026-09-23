@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Fastify, { type FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { registerObservationRoutes } from './observationRoutes.js'
 import { datasetIdentity } from './datasetIdentity.js'
+import { createDataBundle, databaseSchemaHash, restoreDataBundle, verifyDataBundle } from './dataBundle.js'
 import { previewRestoreSources, RestoreSourceConflict } from './restoreSources.js'
 import { registerBalanceRoutes } from './balanceRoutes.js'
 import { registerStaticFiles } from './staticFiles.js'
@@ -18,7 +19,7 @@ import { costProjectionMarkdown } from '../core/costExport.js'
 import { readWorkspace, saveWorkspace, workspaceSaveSchema, WorkspaceConflict, WorkspaceRequestReuse } from './workspaceRepository.js'
 import type { WorkspaceDraft } from '../planning/workspace.js'
 import { previewWorkspace, workspacePreviewSchema, verifyWorkspacePreview, WorkspacePreviewChanged, WorkspacePreviewRangeError } from './workspaceImpact.js'
-import { getClaudeSettingsPath, getAppDataDirectory, getDefaultHistoryPaths, normalizeHistoryRoot, restoreRequiresReconnect } from './paths.js'
+import { getClaudeSettingsPath, getAppDataDirectory, getDefaultHistoryPaths, getIdentifierSalt, normalizeHistoryRoot, restoreRequiresReconnect } from './paths.js'
 import { forecastNextLoss, readCleanupPeriod, readHistoryAgeCached, writeCleanupPeriod } from './retention.js'
 import { readScanProgress } from './scanProgress.js'
 import { createLoopbackHostGuard, csrfToken, protectMutation } from './security.js'
@@ -119,6 +120,68 @@ app.get('/api/sessions/detail', async (request, reply) => {
   }
 })
 app.get('/api/config', async () => getConfiguration())
+
+const transferPathSchema = z.string().trim().min(1).max(4096).refine((value) => isAbsolute(value), {
+  message: '絶対パスを指定してください。',
+})
+const insideOrSame = (root: string, candidate: string) => {
+  const result = relative(resolve(root), resolve(candidate))
+  return result === '' || (result !== '..' && !result.startsWith('..' + sep) && !isAbsolute(result))
+}
+function transferError(error: unknown, reply: FastifyReply) {
+  return reply.code(409).send({
+    error: 'data_transfer_failed',
+    message: error instanceof Error ? error.message : 'PC移行用データを処理できませんでした。',
+  })
+}
+app.post('/api/data-transfer/backup', async (request, reply) => {
+  const parsed = z.object({ destination: transferPathSchema }).strict().safeParse(request.body)
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', message: 'バックアップ先の絶対パスを確認してください。' })
+  const dataDirectory = getAppDataDirectory()
+  if (insideOrSame(dataDirectory, parsed.data.destination))
+    return reply.code(400).send({ error: 'invalid_destination', message: '現在のDevTaxデータフォルダの外に、新しいバックアップ先を指定してください。' })
+  try {
+    // The salt is otherwise created by the first history scan; a PC that never scanned can still move.
+    getIdentifierSalt()
+    const manifest = createDataBundle(dataDirectory, parsed.data.destination)
+    return {
+      created: true as const,
+      destination: resolve(parsed.data.destination),
+      manifest: { createdAt: manifest.createdAt, schemaHash: manifest.schemaHash, files: manifest.files },
+    }
+  } catch (error) { return transferError(error, reply) }
+})
+app.post('/api/data-transfer/verify', async (request, reply) => {
+  const parsed = z.object({ bundle: transferPathSchema }).strict().safeParse(request.body)
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', message: 'バックアップフォルダの絶対パスを確認してください。' })
+  try {
+    const manifest = verifyDataBundle(parsed.data.bundle)
+    return {
+      valid: true as const,
+      bundle: resolve(parsed.data.bundle),
+      manifest: { createdAt: manifest.createdAt, schemaHash: manifest.schemaHash, files: manifest.files },
+    }
+  } catch (error) { return transferError(error, reply) }
+})
+app.post('/api/data-transfer/restore', async (request, reply) => {
+  const parsed = z.object({ bundle: transferPathSchema, destination: transferPathSchema }).strict().safeParse(request.body)
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', message: 'バックアップ元と新しい復元先の絶対パスを確認してください。' })
+  const dataDirectory = getAppDataDirectory()
+  if (insideOrSame(dataDirectory, parsed.data.destination))
+    return reply.code(400).send({ error: 'invalid_destination', message: '現在のDevTaxデータフォルダとは別の、新しい復元先を指定してください。' })
+  if (insideOrSame(parsed.data.bundle, parsed.data.destination))
+    return reply.code(400).send({ error: 'invalid_destination', message: 'バックアップフォルダの外に、新しい復元先を指定してください。' })
+  try {
+    const manifest = restoreDataBundle(parsed.data.bundle, parsed.data.destination, databaseSchemaHash(getDatabase()))
+    return {
+      restored: true as const,
+      destination: resolve(parsed.data.destination),
+      bundleCreatedAt: manifest.createdAt,
+      requiresRestart: true as const,
+      message: '復元先を作成しました。現在のDevTaxはそのままです。DevTaxを終了し、復元先をデータフォルダに指定して起動してください。',
+    }
+  } catch (error) { return transferError(error, reply) }
+})
 
 const historySourceInputSchema = z.object({
   provider: z.enum(['claude', 'codex']),

@@ -36,6 +36,22 @@ export default function CostTreatmentFactsEditor({ projection, planning, disable
         ? undefined : recovery.value?.numericInputs,
       draft: { ...draft, ...patch, recordedAt: new Date().toISOString() } })
   }
+  /**
+   * Choosing evidence is itself part of confirming the displayed allocation. When nothing but the
+   * evidence differs from the confirmed basis, re-anchor it so the saved condition is not stale on
+   * arrival; a changed amount, period or target still needs the explicit re-binding below.
+   */
+  function selectEvidence(evidenceIds: string[]) {
+    if (!draft) return
+    try {
+      const unchangedOtherwise =
+        draft.costYear === projection.year &&
+        costTreatmentBasis(projection, planning, draft.contributionId, draft.evidenceIds) === draft.costBasis
+      edit(unchangedOtherwise
+        ? { evidenceIds, costBasis: costTreatmentBasis(projection, planning, draft.contributionId, evidenceIds) }
+        : { evidenceIds })
+    } catch { edit({ evidenceIds }) }
+  }
   function label(id: string): string {
     const row = projection.contributions.find((item) => item.id === id)
     if (!row) return '現在の対象年にない保存条件 / ' + id
@@ -143,7 +159,7 @@ export default function CostTreatmentFactsEditor({ projection, planning, disable
         <label>作業実態と確認した条件の理由<textarea value={draft.reason} maxLength={2000} onChange={(event) => edit({ reason: event.target.value })} /></label>
         <fieldset><legend>処理条件の根拠</legend>
           {planning.evidence.map((evidence) => <label key={evidence.id} className="balance-source-choice">
-            <input type="checkbox" checked={draft.evidenceIds.includes(evidence.id)} onChange={(event) => edit({ evidenceIds: event.target.checked ? [...draft.evidenceIds, evidence.id] : draft.evidenceIds.filter((id) => id !== evidence.id) })} />{evidence.note}
+            <input type="checkbox" checked={draft.evidenceIds.includes(evidence.id)} onChange={(event) => selectEvidence(event.target.checked ? [...draft.evidenceIds, evidence.id] : draft.evidenceIds.filter((id) => id !== evidence.id))} />{evidence.note}
           </label>)}
           {draft.evidenceIds.filter((id) => !planning.evidence.some((row) => row.id === id)).map((id) => <p key={id}>現在の一覧にない根拠：{id}。自動削除していません。</p>)}
         </fieldset>
