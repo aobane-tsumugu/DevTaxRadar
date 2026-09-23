@@ -42,7 +42,11 @@ export const expenseSourceSchema = z
   .superRefine((source, context) => {
     for (const [index, record] of (source.adjustments ?? []).entries())
       if (record.sourceId !== source.id)
-        context.addIssue({ code: 'custom', path: ['adjustments', index, 'sourceId'], message: '返金・訂正の元費用が一致しません。' })
+        context.addIssue({
+          code: 'custom',
+          path: ['adjustments', index, 'sourceId'],
+          message: '返金・訂正の元費用が一致しません。',
+        })
     if ((source.originalAmountJpy === null) !== Boolean(source.unknownOriginalAmountReasons))
       context.addIssue({
         code: 'custom',

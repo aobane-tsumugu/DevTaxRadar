@@ -16,7 +16,9 @@ export type ObservationCache = {
   events: unknown
 }
 
-export function observationGroupKey(row: Pick<RecordedObservation, 'sourceId' | 'provider' | 'sessionKey' | 'projectKey' | 'month'>): string {
+export function observationGroupKey(
+  row: Pick<RecordedObservation, 'sourceId' | 'provider' | 'sessionKey' | 'projectKey' | 'month'>,
+): string {
   return JSON.stringify([row.sourceId, row.provider, row.sessionKey, row.projectKey, row.month])
 }
 
@@ -24,13 +26,25 @@ export function observationGroupKey(row: Pick<RecordedObservation, 'sourceId' | 
 export function collapseObservations(rows: readonly RecordedObservation[]): RecordedObservation[] {
   const result = new Map<string, RecordedObservation>()
   for (const row of rows) {
-    const key = observationGroupKey(row), previous = result.get(key)
-    const canonicalTime = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : value
-    const startedAt = canonicalTime(row.startedAt), endedAt = canonicalTime(row.endedAt)
+    const key = observationGroupKey(row),
+      previous = result.get(key)
+    const canonicalTime = (value: string) =>
+      Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : value
+    const startedAt = canonicalTime(row.startedAt),
+      endedAt = canonicalTime(row.endedAt)
     const current: RecordedObservation = previous ?? {
-      sourceId: row.sourceId, provider: row.provider, sessionKey: row.sessionKey,
-      projectKey: row.projectKey, month: row.month, startedAt, endedAt,
-      messageCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+      sourceId: row.sourceId,
+      provider: row.provider,
+      sessionKey: row.sessionKey,
+      projectKey: row.projectKey,
+      month: row.month,
+      startedAt,
+      endedAt,
+      messageCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
     }
     current.messageCount += row.messageCount
     current.inputTokens += row.inputTokens
@@ -39,8 +53,15 @@ export function collapseObservations(rows: readonly RecordedObservation[]): Reco
     current.cacheWriteTokens += row.cacheWriteTokens
     if (startedAt < current.startedAt) current.startedAt = startedAt
     if (endedAt > current.endedAt) current.endedAt = endedAt
-    for (const count of [current.messageCount, current.inputTokens, current.outputTokens, current.cacheReadTokens, current.cacheWriteTokens])
-      if (!Number.isSafeInteger(count) || count < 0) throw new Error('取得値の合計が扱える整数を超えました。')
+    for (const count of [
+      current.messageCount,
+      current.inputTokens,
+      current.outputTokens,
+      current.cacheReadTokens,
+      current.cacheWriteTokens,
+    ])
+      if (!Number.isSafeInteger(count) || count < 0)
+        throw new Error('取得値の合計が扱える整数を超えました。')
     result.set(key, current)
   }
   return [...result].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row)
@@ -48,11 +69,26 @@ export function collapseObservations(rows: readonly RecordedObservation[]): Reco
 
 function decoded(value: unknown, provider: string): NormalizedUsage[] | undefined {
   if (!Array.isArray(value)) return undefined
-  if (!value.every((row) => row && typeof row === 'object' && row.provider === provider &&
-    ['sessionKey', 'projectKey', 'observedAt', 'schemaVersion'].every((key) => typeof row[key] === 'string') &&
-    Number.isFinite(Date.parse(row.observedAt)) &&
-    ['inputTokens', 'outputTokens', 'reasoningTokens', 'cacheReadTokens', 'cacheWriteTokens'].every((key) =>
-      Number.isSafeInteger(row[key]) && row[key] >= 0))) return undefined
+  if (
+    !value.every(
+      (row) =>
+        row &&
+        typeof row === 'object' &&
+        row.provider === provider &&
+        ['sessionKey', 'projectKey', 'observedAt', 'schemaVersion'].every(
+          (key) => typeof row[key] === 'string',
+        ) &&
+        Number.isFinite(Date.parse(row.observedAt)) &&
+        [
+          'inputTokens',
+          'outputTokens',
+          'reasoningTokens',
+          'cacheReadTokens',
+          'cacheWriteTokens',
+        ].every((key) => Number.isSafeInteger(row[key]) && row[key] >= 0),
+    )
+  )
+    return undefined
   return value as NormalizedUsage[]
 }
 
@@ -68,8 +104,9 @@ export function expandUsageObservations(
   const byGroup = new Map(summaries.map((row) => [observationGroupKey(row), row]))
   const points = new Map<string, UsageObservation[]>()
   const seen = new Set<string>()
-  for (const cached of [...caches].sort((a, b) =>
-    a.sourceId.localeCompare(b.sourceId) || a.fileKey.localeCompare(b.fileKey))) {
+  for (const cached of [...caches].sort(
+    (a, b) => a.sourceId.localeCompare(b.sourceId) || a.fileKey.localeCompare(b.fileKey),
+  )) {
     const events = decoded(cached.events, cached.provider)
     if (!events) continue
     for (const event of events) {
@@ -87,14 +124,28 @@ export function expandUsageObservations(
       const outputTokens = event.outputTokens + event.reasoningTokens
       if (!Number.isSafeInteger(outputTokens)) continue
       const row: UsageObservation = {
-        sourceId: summary.sourceId, sourceName: summary.sourceName,
-        provider: event.provider, sessionKey: event.sessionKey, projectKey: event.projectKey,
-        projectLabel: summary.projectLabel, model: typeof event.model === 'string' ? event.model : summary.model,
-        month, startedAt: instant, endedAt: instant, messageCount: 1,
-        inputTokens: event.inputTokens, outputTokens,
-        cacheReadTokens: event.cacheReadTokens, cacheWriteTokens: event.cacheWriteTokens,
-        timePrecision: event.provider === 'codex' && event.schemaVersion !== 'codex-local-v2' ? 'unknown' : 'instant',
-        ...(typeof event.eventKey === 'string' && /^message_[a-f0-9]{24}$/.test(event.eventKey) ? { eventRef: event.eventKey } : {}),
+        sourceId: summary.sourceId,
+        sourceName: summary.sourceName,
+        provider: event.provider,
+        sessionKey: event.sessionKey,
+        projectKey: event.projectKey,
+        projectLabel: summary.projectLabel,
+        model: typeof event.model === 'string' ? event.model : summary.model,
+        month,
+        startedAt: instant,
+        endedAt: instant,
+        messageCount: 1,
+        inputTokens: event.inputTokens,
+        outputTokens,
+        cacheReadTokens: event.cacheReadTokens,
+        cacheWriteTokens: event.cacheWriteTokens,
+        timePrecision:
+          event.provider === 'codex' && event.schemaVersion !== 'codex-local-v2'
+            ? 'unknown'
+            : 'instant',
+        ...(typeof event.eventKey === 'string' && /^message_[a-f0-9]{24}$/.test(event.eventKey)
+          ? { eventRef: event.eventKey }
+          : {}),
       }
       const group = points.get(key)
       if (group) group.push(row)
@@ -103,11 +154,20 @@ export function expandUsageObservations(
   }
   return summaries.flatMap((summary) => {
     const rows = points.get(observationGroupKey(summary))
-    if (rows && JSON.stringify(collapseObservations(rows)) === JSON.stringify(collapseObservations([summary])))
-      return rows.sort((a, b) => a.startedAt.localeCompare(b.startedAt) || (a.eventRef ?? '').localeCompare(b.eventRef ?? ''))
-    return [{
-      ...summary,
-      timePrecision: summary.provider === 'codex' ? 'unknown' as const : 'interval' as const,
-    }]
+    if (
+      rows &&
+      JSON.stringify(collapseObservations(rows)) === JSON.stringify(collapseObservations([summary]))
+    )
+      return rows.sort(
+        (a, b) =>
+          a.startedAt.localeCompare(b.startedAt) ||
+          (a.eventRef ?? '').localeCompare(b.eventRef ?? ''),
+      )
+    return [
+      {
+        ...summary,
+        timePrecision: summary.provider === 'codex' ? ('unknown' as const) : ('interval' as const),
+      },
+    ]
   })
 }

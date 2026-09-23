@@ -1,5 +1,9 @@
 import ChargeContractEditor from './ChargeContractEditor'
-import { chargeReviewGroups, distinctChargeContracts, type ProviderChargePeriod } from '../../core/chargePeriods'
+import {
+  chargeReviewGroups,
+  distinctChargeContracts,
+  type ProviderChargePeriod,
+} from '../../core/chargePeriods'
 import { yen } from './shared'
 
 export default function DuplicateChargesPanel({
@@ -29,7 +33,9 @@ export default function DuplicateChargesPanel({
               この組の各請求は、少なくとも他の1件と利用期間が重なっています。すべての請求が同じ日に重なるとは限りません。終了日と次の開始日が同じ場合も、その1日が重なります。
             </p>
           )}
-          {distinctChargeContracts(periods.filter((period) => ids.includes(period.id))) && <p>各請求を異なる契約として確認済みです。各請求の金額を保持しています。</p>}
+          {distinctChargeContracts(periods.filter((period) => ids.includes(period.id))) && (
+            <p>各請求を異なる契約として確認済みです。各請求の金額を保持しています。</p>
+          )}
           <ul>
             {ids.map((id) => {
               const period = periods.find((row) => row.id === id)!
@@ -47,7 +53,17 @@ export default function DuplicateChargesPanel({
           </ul>
         </article>
       ))}
-      {onChange && periods.map((period, index) => period.contractConfirmation || groups.some((group) => group.ids.includes(period.id)) ? <ChargeContractEditor key={period.id} period={period} index={index} onChange={onChange} /> : null)}
+      {onChange &&
+        periods.map((period, index) =>
+          period.contractConfirmation || groups.some((group) => group.ids.includes(period.id)) ? (
+            <ChargeContractEditor
+              key={period.id}
+              period={period}
+              index={index}
+              onChange={onChange}
+            />
+          ) : null,
+        )}
       <p>
         誤入力なら該当する請求行を修正し、保存前に「変更の影響を確認」で差分を確認できます。自動統合や金額の除外は行いません。
       </p>

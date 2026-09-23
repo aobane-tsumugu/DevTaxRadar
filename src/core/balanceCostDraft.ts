@@ -4,8 +4,7 @@ import type { BalanceMovement, BalanceSnapshot } from '../accounting/types.js'
 type Addition = Extract<BalanceMovement, { kind: 'addition' }>
 type Contribution = AnnualCostProjection['contributions'][number]
 export type CostLinkSuggestion =
-  | { available: false; reason: string }
-  | { available: true; amountJpy: number; cost: Contribution }
+  { available: false; reason: string } | { available: true; amountJpy: number; cost: Contribution }
 
 const safeYen = (value: number) => Number.isSafeInteger(value) && value >= 0
 const sameLink = (link: { costYear: number; contributionId: string }, year: number, id: string) =>
@@ -27,10 +26,15 @@ export function suggestCostLink(
   const date = new Date(movement.occurredOn + 'T00:00:00Z')
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(movement.occurredOn) ||
-    !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== movement.occurredOn ||
-    year < 1900 || year > 9999 || !Number.isInteger(projection.year) ||
-    projection.year < 1900 || projection.year > year
-  ) return blocked('増加日と費用の対象年を確認してください。将来の費用は取り込みません。')
+    !Number.isFinite(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== movement.occurredOn ||
+    year < 1900 ||
+    year > 9999 ||
+    !Number.isInteger(projection.year) ||
+    projection.year < 1900 ||
+    projection.year > year
+  )
+    return blocked('増加日と費用の対象年を確認してください。将来の費用は取り込みません。')
   if (!projection.invariantSatisfied) return blocked('費用資料の整合を確認できません。')
   const accounts = snapshot.accounts.filter((row) => row.id === movement.accountId)
   if (accounts.length !== 1 || accounts[0]!.openingYear > year)
@@ -40,7 +44,8 @@ export function suggestCostLink(
   const matching = projection.contributions.filter((row) => row.id === contributionId)
   if (matching.length !== 1) return blocked('対応する費用配分を一意に確認できません。')
   const cost = matching[0]!
-  if (cost.consumedByBasisId) return blocked('別の費用基礎へ組入れ済みです。最終配分を選んでください。')
+  if (cost.consumedByBasisId)
+    return blocked('別の費用基礎へ組入れ済みです。最終配分を選んでください。')
   if (cost.target.kind !== 'tax-unit' || cost.target.taxUnitId !== accounts[0]!.taxUnitId)
     return blocked('同じ制作物への配分だけを取り込めます。私用・未配分等は対象外です。')
   const bases = projection.bases.filter((row) => row.id === cost.basisId)
@@ -48,9 +53,12 @@ export function suggestCostLink(
     return blocked('費用基礎が未算定、または対応先が不明です。')
   if (bases[0]!.period.endedOn > movement.occurredOn)
     return blocked('増加日より後までの費用を含みます。対象期間と増加日を確認してください。')
-  if (!safeYen(cost.amountJpy) || !cost.sourceIds.length ||
-      new Set(cost.sourceIds).size !== cost.sourceIds.length ||
-      cost.sourceIds.some((id) => projection.sources.filter((row) => row.id === id).length !== 1))
+  if (
+    !safeYen(cost.amountJpy) ||
+    !cost.sourceIds.length ||
+    new Set(cost.sourceIds).size !== cost.sourceIds.length ||
+    cost.sourceIds.some((id) => projection.sources.filter((row) => row.id === id).length !== 1)
+  )
     return blocked('費用配分の金額または原額の参照を確認できません。')
   if ((movement.costAllocations ?? []).some((link) => sameLink(link, projection.year, cost.id)))
     return blocked('この配分は追加済みです。既存の対応額を確認してください。')
@@ -58,7 +66,8 @@ export function suggestCostLink(
   let claimed = 0n
   const movementIds = new Set<string>()
   for (const existing of snapshot.movements) {
-    if (movementIds.has(existing.id)) return blocked('増減IDが重複しているため残額を算定できません。')
+    if (movementIds.has(existing.id))
+      return blocked('増減IDが重複しているため残額を算定できません。')
     movementIds.add(existing.id)
     if (existing.id === movement.id || existing.kind !== 'addition') continue
     const links = existing.costAllocations ?? []
@@ -73,7 +82,9 @@ export function suggestCostLink(
         return blocked('同じ原額を参照する既存増加の金額を確認してください。')
       const linked = links.reduce((sum, link) => sum + BigInt(link.amountJpy), 0n)
       if (linked !== BigInt(existing.amountJpy))
-        return blocked('同じ原額を参照する既存増加に未対応額があります。先に内訳を確認してください。')
+        return blocked(
+          '同じ原額を参照する既存増加に未対応額があります。先に内訳を確認してください。',
+        )
     }
   }
   const remaining = BigInt(cost.amountJpy) - claimed

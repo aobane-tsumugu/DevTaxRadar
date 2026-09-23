@@ -18,8 +18,13 @@ describe('C04 existing wizard recovery remains usable with guarded extension sch
     assert.throws(() => editingShape(source).parse('untrusted'))
   })
   it('retains unfinished wizard decision numbers and text through unions and records', () => {
-    const schema = z.object({ year: z.number().int().min(2000), name: z.string().min(1),
-      flags: z.record(z.string(), z.union([z.number().int(), z.null()])) }).strict()
+    const schema = z
+      .object({
+        year: z.number().int().min(2000),
+        name: z.string().min(1),
+        flags: z.record(z.string(), z.union([z.number().int(), z.null()])),
+      })
+      .strict()
     const draft = { year: NaN, name: '', flags: { partiallyEntered: NaN, unknown: null } }
     assert.ok(Number.isNaN((editingShape(schema).parse(draft) as typeof draft).year))
     assert.throws(() => schema.parse(draft))

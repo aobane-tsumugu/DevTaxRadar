@@ -61,20 +61,32 @@ export function inspectSoftwareAnnualDecision(
   if (!Number.isInteger(year) || year < Number(selection.usedOn.slice(0, 4)))
     throw new Error('供用年以降の費用化年を指定してください。')
   if (selection.ordinaryThroughYear !== undefined && year > selection.ordinaryThroughYear)
-    throw new Error('この年は通常計算の終了後です。記録した理由に沿って別の処理を確認してください。')
+    throw new Error(
+      'この年は通常計算の終了後です。記録した理由に沿って別の処理を確認してください。',
+    )
   if (softwareEvidenceBasis(planning.evidence, selection.evidenceIds) !== selection.evidenceBasis)
     throw new Error('方法の根拠内容が変わっています。変更を確認してから方法を更新してください。')
   if (selection.evidenceIds.some((id) => !planning.evidence.some((row) => row.id === id)))
     throw new Error('方法の根拠がなくなっています。確認し直してください。')
-  if (planning.lifecycleEvents.some((row) => row.taxUnitId === account.taxUnitId &&
-      ['retired', 'abandoned'].includes(row.eventType) && row.occurredOn <= `${year}-12-31`))
+  if (
+    planning.lifecycleEvents.some(
+      (row) =>
+        row.taxUnitId === account.taxUnitId &&
+        ['retired', 'abandoned'].includes(row.eventType) &&
+        row.occurredOn <= `${year}-12-31`,
+    )
+  )
     throw new Error('終了・中止の出来事があります。継続使用を仮定した年額判断を作りません。')
-  const expected = softwareMethodSchedule(snapshot, account.id, selection, year)
-    .find((row) => row.year === year)
+  const expected = softwareMethodSchedule(snapshot, account.id, selection, year).find(
+    (row) => row.year === year,
+  )
   if (!expected) throw new Error('対象年の費用化額が計算できません。')
-  if (expected.expenseJpy > 0 && selection.blueSpecial &&
-      (planning.profile.filingType !== selection.blueSpecial.filingType ||
-       planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory))
+  if (
+    expected.expenseJpy > 0 &&
+    selection.blueSpecial &&
+    (planning.profile.filingType !== selection.blueSpecial.filingType ||
+      planning.profile.incomeCategory !== selection.blueSpecial.incomeCategory)
+  )
     throw new Error('青色申告・所得区分が方法確認時から変わっています。方法を再確認してください。')
   const origin = snapshot.movements.find((row) => row.id === selection.acquisitionMovementId)
   if (!origin || !Number.isSafeInteger(origin.amountJpy) || origin.amountJpy <= 0)
@@ -117,7 +129,8 @@ export function softwareAnnualDecisionMatches(
     decision.selectedCandidate === 'ordinary-expense' &&
     !decision.treatmentBinding &&
     decisionIsConfirmed(decision) &&
-    canonicalSoftwareValue(decision.softwareAnnualBinding) === canonicalSoftwareValue(binding(context)),
+    canonicalSoftwareValue(decision.softwareAnnualBinding) ===
+      canonicalSoftwareValue(binding(context)),
   )
 }
 
@@ -129,12 +142,15 @@ export function softwareAnnualDecisionProposal(
 ): SoftwareAnnualDecisionProposal {
   const context = inspectSoftwareAnnualDecision(snapshot, planning, accountId, year)
   if (context.expenseJpy === 0) return { ...context, staleDecisionIds: [] }
-  const related = planning.decisions.filter((row) =>
-    row.softwareAnnualBinding?.accountId === accountId &&
-    row.softwareAnnualBinding.year === year)
+  const related = planning.decisions.filter(
+    (row) =>
+      row.softwareAnnualBinding?.accountId === accountId && row.softwareAnnualBinding.year === year,
+  )
   const current = related.filter((row) => softwareAnnualDecisionMatches(row, context))
   if (current.length > 1)
-    throw new Error('同じ資産・年・方法の確認済み判断が複数あります。どれかを自動採用せず確認してください。')
+    throw new Error(
+      '同じ資産・年・方法の確認済み判断が複数あります。どれかを自動採用せず確認してください。',
+    )
   return {
     ...context,
     ...(current[0] ? { existingDecisionId: current[0].id } : {}),
@@ -147,8 +163,7 @@ export function confirmSoftwareAnnualDecision(
   id: string,
   confirmedAt: string,
 ): DecisionRecord {
-  if (proposal.expenseJpy <= 0)
-    throw new Error('年額0円の年には不要な判断記録を作りません。')
+  if (proposal.expenseJpy <= 0) throw new Error('年額0円の年には不要な判断記録を作りません。')
   if (proposal.existingDecisionId)
     throw new Error('同じ方法・対象年の確認済み判断があります。既存記録を再利用してください。')
   if (!/^[A-Za-z0-9_-]{1,120}$/.test(id) || !Number.isFinite(Date.parse(confirmedAt)))

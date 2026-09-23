@@ -128,7 +128,11 @@ function records(data: string) {
         const quoted = '"' + name.replaceAll('"', '""') + '"'
         return [
           name,
-          db.prepare('SELECT * FROM ' + quoted).all().map((row) => JSON.stringify(row)).sort(),
+          db
+            .prepare('SELECT * FROM ' + quoted)
+            .all()
+            .map((row) => JSON.stringify(row))
+            .sort(),
         ]
       }),
     )

@@ -366,59 +366,59 @@ export default function BalancesPage({
           {recoveryNotice && <p role="status">{recoveryNotice}</p>}
           {recoveryError && <p role="alert">{recoveryError}</p>}
           <details open={recoveries.length > 0 || undefined}>
-          <summary>前回の編集中入力を復旧（このブラウザの控え）</summary>
-          <p>
-            入力の控えは、このブラウザの同じ接続先に保存します。ブラウザのデータ削除や別PCへの移行では引き継がれず、DBバックアップにも含まれません。
-          </p>
-          <button type="button" disabled={busy} onClick={inspectRecoveries}>
-            復旧できる入力を確認
-          </button>
-          {recoveries.map((record) => (
-            <article key={record.editorId}>
-              <p>
-                {new Date(record.savedAt).toLocaleString('ja-JP')} / 保存元の版{' '}
-                {record.base.revision} / 残高 {record.snapshot.accounts.length}件・増減{' '}
-                {record.snapshot.movements.length}件・未判断{' '}
-                {record.snapshot.pendingDecisions.length}件
-              </p>
-              <details>
-                <summary>控えた入力の全内容</summary>
-                <pre>
-                  {JSON.stringify(
-                    record.snapshot,
-                    (_key, value) =>
-                      typeof value === 'number' && Number.isNaN(value) ? '数値入力が空欄' : value,
-                    2,
-                  )}
-                </pre>
-              </details>
-              <button
-                type="button"
-                disabled={busy || dirty}
-                onClick={() => void recoverInput(record)}
-              >
-                この入力を復旧して確認
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  try {
-                    if (!removeRecovery(window.localStorage, record))
-                      setRecoveryError('別画面で更新されています。最新の控えを確認してください。')
-                    else inspectRecoveries()
-                  } catch {
-                    setRecoveryError('復旧用入力を削除できませんでした。')
-                  }
-                }}
-              >
-                この控えを削除
-              </button>
-            </article>
-          ))}
-          {dirty && recoveries.length > 0 && (
-            <p>現在の入力を保存するか、保存済みを読み直してから別の控えを復旧できます。</p>
-          )}
+            <summary>前回の編集中入力を復旧（このブラウザの控え）</summary>
+            <p>
+              入力の控えは、このブラウザの同じ接続先に保存します。ブラウザのデータ削除や別PCへの移行では引き継がれず、DBバックアップにも含まれません。
+            </p>
+            <button type="button" disabled={busy} onClick={inspectRecoveries}>
+              復旧できる入力を確認
+            </button>
+            {recoveries.map((record) => (
+              <article key={record.editorId}>
+                <p>
+                  {new Date(record.savedAt).toLocaleString('ja-JP')} / 保存元の版{' '}
+                  {record.base.revision} / 残高 {record.snapshot.accounts.length}件・増減{' '}
+                  {record.snapshot.movements.length}件・未判断{' '}
+                  {record.snapshot.pendingDecisions.length}件
+                </p>
+                <details>
+                  <summary>控えた入力の全内容</summary>
+                  <pre>
+                    {JSON.stringify(
+                      record.snapshot,
+                      (_key, value) =>
+                        typeof value === 'number' && Number.isNaN(value) ? '数値入力が空欄' : value,
+                      2,
+                    )}
+                  </pre>
+                </details>
+                <button
+                  type="button"
+                  disabled={busy || dirty}
+                  onClick={() => void recoverInput(record)}
+                >
+                  この入力を復旧して確認
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    try {
+                      if (!removeRecovery(window.localStorage, record))
+                        setRecoveryError('別画面で更新されています。最新の控えを確認してください。')
+                      else inspectRecoveries()
+                    } catch {
+                      setRecoveryError('復旧用入力を削除できませんでした。')
+                    }
+                  }}
+                >
+                  この控えを削除
+                </button>
+              </article>
+            ))}
+            {dirty && recoveries.length > 0 && (
+              <p>現在の入力を保存するか、保存済みを読み直してから別の控えを復旧できます。</p>
+            )}
           </details>
         </section>
       )}
@@ -469,14 +469,27 @@ export default function BalancesPage({
               {dirty ? '入力を破棄して保存済みを読み直す' : '保存済みを読み直す'}
             </button>
           </div>
-          {local && <SoftwareAcquisitionPanel datasetId={datasetId} snapshot={draft.snapshot}
-            planning={planning} busy={busy || conflict} edit={edit} viewedYear={year}
-            onReviewAnnualDecision={onReviewSoftwareAnnualDecision} />}
-          {local && navigation?.contributionId && <TreatmentBalanceDraftPanel
-            request={{ ...navigation, contributionId: navigation.contributionId }} datasetId={datasetId}
-            snapshot={draft.snapshot} planning={planning} disabled={busy || conflict}
-            onApply={(snapshot) => edit((current) => Object.assign(current, snapshot))}
-          />}
+          {local && (
+            <SoftwareAcquisitionPanel
+              datasetId={datasetId}
+              snapshot={draft.snapshot}
+              planning={planning}
+              busy={busy || conflict}
+              edit={edit}
+              viewedYear={year}
+              onReviewAnnualDecision={onReviewSoftwareAnnualDecision}
+            />
+          )}
+          {local && navigation?.contributionId && (
+            <TreatmentBalanceDraftPanel
+              request={{ ...navigation, contributionId: navigation.contributionId }}
+              datasetId={datasetId}
+              snapshot={draft.snapshot}
+              planning={planning}
+              disabled={busy || conflict}
+              onApply={(snapshot) => edit((current) => Object.assign(current, snapshot))}
+            />
+          )}
           {conflict && (
             <div>
               <p role="alert">

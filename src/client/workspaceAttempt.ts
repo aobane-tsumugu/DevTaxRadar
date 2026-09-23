@@ -53,8 +53,7 @@ export function encodeWorkspaceAttempt(record: WorkspaceAttempt): string {
 }
 
 export function decodeWorkspaceAttempt(raw: string): WorkspaceAttempt {
-  if (utf8Bytes(raw) > WORKSPACE_ATTEMPT_LIMIT)
-    throw new Error('保存要求の控えが大きすぎます。')
+  if (utf8Bytes(raw) > WORKSPACE_ATTEMPT_LIMIT) throw new Error('保存要求の控えが大きすぎます。')
   const record = JSON.parse(raw) as WorkspaceAttempt
   schema.parse(record)
   return record
@@ -77,7 +76,10 @@ export function listWorkspaceAttempts(storage: Storage, datasetId: string) {
   return { records: records.sort((a, b) => b.createdAt.localeCompare(a.createdAt)), unreadable }
 }
 
-export function writeWorkspaceAttempt(storage: Storage, record: WorkspaceAttempt): WorkspaceAttempt {
+export function writeWorkspaceAttempt(
+  storage: Storage,
+  record: WorkspaceAttempt,
+): WorkspaceAttempt {
   const raw = encodeWorkspaceAttempt(record)
   const previous = storage.getItem(key(record))
   if (previous !== null) {
@@ -128,7 +130,9 @@ export function retainWorkspaceAttempt(record: WorkspaceAttempt): WorkspaceAttem
         'ブラウザ内に送信控えを保存できないため、個人用のJSON控えをファイルとして出力しました。料金・計画と自由記述を含みます。ファイルを保存できたことを確認してから「OK」で送信してください。「キャンセル」では送信せず、編集中の入力を保持します。',
       )
     )
-      throw new Error('送信していません。控えファイルの保存を確認するまで、編集中の画面を閉じないでください。')
+      throw new Error(
+        '送信していません。控えファイルの保存を確認するまで、編集中の画面を閉じないでください。',
+      )
     // The original request and its base are now in the explicitly confirmed
     // file copy. No localStorage copy may be deleted on this path.
     return null

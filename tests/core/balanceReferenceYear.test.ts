@@ -20,44 +20,95 @@ function fixture() {
       monetizationStatus: 'planned',
       hasBookkeeping: false,
     },
-    taxUnits: [{
-      id: 'u', name: '合成アプリ', unitType: 'new-software',
-      usageMode: 'internal', revenueModel: 'efficiency', lifecycleStatus: 'developing',
-    }],
-    projectRules: [], lifecycleEvents: [], equipment: [], homeCosts: [], directCosts: [],
-    evidence: [{
-      id: 'e', evidenceType: 'other', strength: 'external',
-      recordedAt: '2026-01-01T00:00:00Z', note: '合成資料',
-    }],
-    decisions: [{
-      id: 'd', taxUnitId: 'u', taxYear: 2026, engineVersion: 'manual-decision/1',
-      candidate: '記録', selectedCandidate: '記録', reason: '合成資料による確認',
-      status: 'confirmed', createdAt: '2026-01-01T00:00:00Z',
-      confirmedAt: '2026-01-02T00:00:00Z',
-    }],
+    taxUnits: [
+      {
+        id: 'u',
+        name: '合成アプリ',
+        unitType: 'new-software',
+        usageMode: 'internal',
+        revenueModel: 'efficiency',
+        lifecycleStatus: 'developing',
+      },
+    ],
+    projectRules: [],
+    lifecycleEvents: [],
+    equipment: [],
+    homeCosts: [],
+    directCosts: [],
+    evidence: [
+      {
+        id: 'e',
+        evidenceType: 'other',
+        strength: 'external',
+        recordedAt: '2026-01-01T00:00:00Z',
+        note: '合成資料',
+      },
+    ],
+    decisions: [
+      {
+        id: 'd',
+        taxUnitId: 'u',
+        taxYear: 2026,
+        engineVersion: 'manual-decision/1',
+        candidate: '記録',
+        selectedCandidate: '記録',
+        reason: '合成資料による確認',
+        status: 'confirmed',
+        createdAt: '2026-01-01T00:00:00Z',
+        confirmedAt: '2026-01-02T00:00:00Z',
+      },
+    ],
   }
   const snapshot: BalanceSnapshot = {
     version: 1,
-    accounts: [{
-      id: 'a', taxUnitId: 'u', name: '制作中', kind: 'construction', openingYear: 2026,
-      opening: { status: 'known', amountJpy: 0 },
-    }],
-    movements: [{
-      id: 'm', accountId: 'a', kind: 'addition', occurredOn: '2026-01-02',
-      amountJpy: 100, sourceIds: ['e'], decisionId: 'd', reason: '合成資料による記録',
-    }],
+    accounts: [
+      {
+        id: 'a',
+        taxUnitId: 'u',
+        name: '制作中',
+        kind: 'construction',
+        openingYear: 2026,
+        opening: { status: 'known', amountJpy: 0 },
+      },
+    ],
+    movements: [
+      {
+        id: 'm',
+        accountId: 'a',
+        kind: 'addition',
+        occurredOn: '2026-01-02',
+        amountJpy: 100,
+        sourceIds: ['e'],
+        decisionId: 'd',
+        reason: '合成資料による記録',
+      },
+    ],
     pendingDecisions: [],
   }
   const context: AdjustmentCostContext = { costs: [], trace: { year: 2026, movements: [] } }
-  const check = (year: number | undefined = 2026, costs: AdjustmentCostContext | undefined = undefined) =>
-    checkBalanceReferences(snapshot, planning, [], [], costs, year)
-  const futureMovement = () => snapshot.movements.push({
-    id: 'future', accountId: 'a', kind: 'addition', occurredOn: '2027-01-01',
-    amountJpy: 10, sourceIds: ['e'], decisionId: 'future-decision', reason: '翌年度の作業案',
-  })
+  const check = (
+    year: number | undefined = 2026,
+    costs: AdjustmentCostContext | undefined = undefined,
+  ) => checkBalanceReferences(snapshot, planning, [], [], costs, year)
+  const futureMovement = () =>
+    snapshot.movements.push({
+      id: 'future',
+      accountId: 'a',
+      kind: 'addition',
+      occurredOn: '2027-01-01',
+      amountJpy: 10,
+      sourceIds: ['e'],
+      decisionId: 'future-decision',
+      reason: '翌年度の作業案',
+    })
   const question = (taxYear = 2026): PendingBalanceDecision => ({
-    id: 'q', taxUnitId: 'u', taxYear, amount: { status: 'known', amountJpy: 50 },
-    accountIds: ['a'], sourceIds: ['e'], reasons: ['要確認'],
+    id: 'q',
+    taxUnitId: 'u',
+    taxYear,
+    amount: { status: 'known', amountJpy: 50 },
+    accountIds: ['a'],
+    sourceIds: ['e'],
+    reasons: ['要確認'],
   })
   return { planning, snapshot, context, check, futureMovement, question }
 }
@@ -80,15 +131,20 @@ describe('annual balance reference scope', () => {
   it('keeps the existing full-snapshot check when no year is specified', () => {
     const f = fixture()
     f.futureMovement()
-    assert.ok(checkBalanceReferences(f.snapshot, f.planning, []).issues.some(
-      (row) => row.recordId === 'future' && row.code === 'missing-decision',
-    ))
+    assert.ok(
+      checkBalanceReferences(f.snapshot, f.planning, []).issues.some(
+        (row) => row.recordId === 'future' && row.code === 'missing-decision',
+      ),
+    )
   })
 
   it('ignores future accounts only for annual reference checks', () => {
     const f = fixture()
     f.snapshot.accounts.push({
-      ...f.snapshot.accounts[0]!, id: 'future-account', taxUnitId: 'future-unit', openingYear: 2027,
+      ...f.snapshot.accounts[0]!,
+      id: 'future-account',
+      taxUnitId: 'future-unit',
+      openingYear: 2027,
     })
     assert.equal(f.check().status, 'consistent')
     assert.ok(f.check(2027).issues.some((row) => row.code === 'missing-unit'))
@@ -115,10 +171,18 @@ describe('annual balance reference scope', () => {
   it('still detects current-year missing and ambiguous sources', () => {
     const f = fixture()
     f.snapshot.movements[0]!.sourceIds = ['gone', 'direct:x']
-    f.planning.directCosts = [{
-      id: 'x', incurredOn: '2026-01-01', costType: 'other', amountJpy: 100,
-      directlyAttributable: true, treatment: 'direct', taxUnitId: 'u', evidenceIds: ['e'],
-    }]
+    f.planning.directCosts = [
+      {
+        id: 'x',
+        incurredOn: '2026-01-01',
+        costType: 'other',
+        amountJpy: 100,
+        directlyAttributable: true,
+        treatment: 'direct',
+        taxUnitId: 'u',
+        evidenceIds: ['e'],
+      },
+    ]
     f.planning.evidence.push({ ...f.planning.evidence[0]!, id: 'direct:x' })
     const codes = f.check().issues.map((row) => row.code)
     assert.ok(codes.includes('missing-source'))
@@ -153,10 +217,16 @@ describe('annual balance reference scope', () => {
   it('keeps confirmed question and answer matching for the selected year', () => {
     const f = fixture()
     const question = f.question()
-    question.answers = [{
-      id: 'answer', taxYear: 2026, receivedOn: '2026-03-01', kind: 'fact',
-      answer: '合成の事実', source: '合成資料',
-    }]
+    question.answers = [
+      {
+        id: 'answer',
+        taxYear: 2026,
+        receivedOn: '2026-03-01',
+        kind: 'fact',
+        answer: '合成の事実',
+        source: '合成資料',
+      },
+    ]
     question.resolution = { taxYear: 2026, decisionId: 'd', reason: '当年の確認' }
     question.resolution.answerBasis = consultationAnswersForYear(question, 2026)
     question.resolution.questionBasis = consultationQuestionBasis(question)
@@ -170,7 +240,10 @@ describe('annual balance reference scope', () => {
   it('keeps current-year pending-to-account unit checks', () => {
     const f = fixture()
     f.snapshot.accounts.push({
-      ...f.snapshot.accounts[0]!, id: 'future-account', taxUnitId: 'other', openingYear: 2027,
+      ...f.snapshot.accounts[0]!,
+      id: 'future-account',
+      taxUnitId: 'other',
+      openingYear: 2027,
     })
     f.snapshot.pendingDecisions.push({ ...f.question(), accountIds: ['future-account'] })
     assert.ok(f.check().issues.some((row) => row.code === 'pending-unit'))
@@ -178,9 +251,15 @@ describe('annual balance reference scope', () => {
 
   it('does not require a future external-opening confirmation for this year', () => {
     const f = fixture()
-    f.snapshot.accounts.push({ ...f.snapshot.accounts[0]!, id: 'future-account', openingYear: 2027 })
+    f.snapshot.accounts.push({
+      ...f.snapshot.accounts[0]!,
+      id: 'future-account',
+      openingYear: 2027,
+    })
     f.snapshot.pendingDecisions.push({
-      ...f.question(2027), id: 'external-opening:future', accountIds: ['future-account'],
+      ...f.question(2027),
+      id: 'external-opening:future',
+      accountIds: ['future-account'],
     })
     assert.equal(f.check().status, 'consistent')
     assert.ok(f.check(2027).issues.some((row) => row.code === 'changed-answer'))
@@ -189,7 +268,8 @@ describe('annual balance reference scope', () => {
   it('does not silently confirm a current external opening with a future resolution', () => {
     const f = fixture()
     f.snapshot.pendingDecisions.push({
-      ...f.question(), id: 'external-opening:current',
+      ...f.question(),
+      id: 'external-opening:current',
       resolution: { taxYear: 2027, decisionId: 'later', reason: '後で確認' },
     })
     assert.ok(f.check().issues.some((row) => row.code === 'changed-answer'))
@@ -197,26 +277,44 @@ describe('annual balance reference scope', () => {
 
   it('excludes future refund links from both generic source checks and cost checks', () => {
     const f = fixture()
-    f.planning.sourceAdjustments = [{
-      id: 'refund', sourceId: 'direct:future', sourceYear: 2027,
-      sourceBasis: { kind: 'direct', originalAmountJpy: 100 },
-      kind: 'refund', amountJpy: -10, occurredOn: '2027-02-01',
-      recordedAt: '2027-02-01T00:00:00Z', effect: 'balance-reduction',
-      balanceMovementId: 'future-reduction', reason: '翌年の返金', evidenceIds: ['future-receipt'],
-    }]
+    f.planning.sourceAdjustments = [
+      {
+        id: 'refund',
+        sourceId: 'direct:future',
+        sourceYear: 2027,
+        sourceBasis: { kind: 'direct', originalAmountJpy: 100 },
+        kind: 'refund',
+        amountJpy: -10,
+        occurredOn: '2027-02-01',
+        recordedAt: '2027-02-01T00:00:00Z',
+        effect: 'balance-reduction',
+        balanceMovementId: 'future-reduction',
+        reason: '翌年の返金',
+        evidenceIds: ['future-receipt'],
+      },
+    ]
     assert.equal(f.check(2026, f.context).status, 'consistent')
     assert.ok(f.check(2027).issues.some((row) => row.code === 'adjustment-link'))
   })
 
   it('still checks current-year refund references and missing reductions', () => {
     const f = fixture()
-    f.planning.sourceAdjustments = [{
-      id: 'refund', sourceId: 'direct:missing', sourceYear: 2026,
-      sourceBasis: { kind: 'direct', originalAmountJpy: 100 },
-      kind: 'refund', amountJpy: -10, occurredOn: '2026-02-01',
-      recordedAt: '2026-02-01T00:00:00Z', effect: 'balance-reduction',
-      balanceMovementId: 'missing-reduction', reason: '当年の返金', evidenceIds: ['e'],
-    }]
+    f.planning.sourceAdjustments = [
+      {
+        id: 'refund',
+        sourceId: 'direct:missing',
+        sourceYear: 2026,
+        sourceBasis: { kind: 'direct', originalAmountJpy: 100 },
+        kind: 'refund',
+        amountJpy: -10,
+        occurredOn: '2026-02-01',
+        recordedAt: '2026-02-01T00:00:00Z',
+        effect: 'balance-reduction',
+        balanceMovementId: 'missing-reduction',
+        reason: '当年の返金',
+        evidenceIds: ['e'],
+      },
+    ]
     const codes = f.check(2026, f.context).issues.map((row) => row.code)
     assert.ok(codes.includes('missing-source'))
     assert.ok(codes.includes('adjustment-link'))
@@ -244,14 +342,22 @@ describe('annual balance reference scope', () => {
   it('does not mutate frozen drafts, including future resolutions and answers', () => {
     const f = fixture()
     const question = f.question()
-    question.answers = [{
-      id: 'future-answer', taxYear: 2027, receivedOn: '2027-01-01', kind: 'fact',
-      answer: '翌年の記録', source: '合成資料',
-    }]
+    question.answers = [
+      {
+        id: 'future-answer',
+        taxYear: 2027,
+        receivedOn: '2027-01-01',
+        kind: 'fact',
+        answer: '翌年の記録',
+        source: '合成資料',
+      },
+    ]
     question.resolution = { taxYear: 2027, decisionId: 'later', reason: '翌年の確認' }
     f.snapshot.pendingDecisions.push(question)
     const before = JSON.stringify([f.snapshot, f.planning, f.context])
-    freeze(f.snapshot); freeze(f.planning); freeze(f.context)
+    freeze(f.snapshot)
+    freeze(f.planning)
+    freeze(f.context)
     assert.equal(f.check(2026, f.context).status, 'consistent')
     assert.equal(JSON.stringify([f.snapshot, f.planning, f.context]), before)
   })

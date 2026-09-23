@@ -31,11 +31,14 @@ export const equipmentDepreciationInputSchema = z
     method: z.enum(['straight-line', 'immediate-expense', 'three-year-pool', 'other', 'unknown']),
     rentalUse: z.enum(['none', 'primary-business', 'other', 'unknown']).optional(),
     methodReason: z.string().max(2000),
-    poolElection: z.object({
-      serviceYear: z.number().int().min(2007).max(2100).nullable(),
-      reference: z.string().max(2000),
-      roundingConfirmed: z.boolean().nullable(),
-    }).strict().optional(),
+    poolElection: z
+      .object({
+        serviceYear: z.number().int().min(2007).max(2100).nullable(),
+        reference: z.string().max(2000),
+        roundingConfirmed: z.boolean().nullable(),
+      })
+      .strict()
+      .optional(),
     acquisitionCostJpy: money.nullable(),
     acquiredOn: date.nullable(),
     businessUseStartedOn: date.nullable(),
@@ -52,7 +55,8 @@ export const equipmentDepreciationInputSchema = z
   })
   .strict()
 export type EquipmentDepreciationInput = z.infer<typeof equipmentDepreciationInputSchema>
-export type EquipmentDepreciationResult = EquipmentImmediateExpenseResult | EquipmentStraightLineResult | EquipmentPoolResult
+export type EquipmentDepreciationResult =
+  EquipmentImmediateExpenseResult | EquipmentStraightLineResult | EquipmentPoolResult
 export type EquipmentStraightLineResult = {
   engineVersion: typeof EQUIPMENT_STRAIGHT_LINE_RULE.id
   equipmentId: string
@@ -132,13 +136,17 @@ export function calculateEquipmentDepreciation(
     unsupported.push('検証済み償却率表の範囲外です。率を推定しません。')
   if (unsupported.length) return result('unsupported', unsupported)
   // A 0-yen cost is an inconsistent fact (checked below), not a small asset awaiting rental facts.
-  const smallRestriction = input.method === 'straight-line' && input.acquisitionCostJpy !== 0
-    ? smallEquipmentStraightLineRestriction(input) : null
-  if (smallRestriction) return result(
-    input.acquiredOn! >= '2022-04-01' && (!input.rentalUse || input.rentalUse === 'unknown')
-      ? 'missing-facts' : 'unsupported',
-    [smallRestriction],
-  )
+  const smallRestriction =
+    input.method === 'straight-line' && input.acquisitionCostJpy !== 0
+      ? smallEquipmentStraightLineRestriction(input)
+      : null
+  if (smallRestriction)
+    return result(
+      input.acquiredOn! >= '2022-04-01' && (!input.rentalUse || input.rentalUse === 'unknown')
+        ? 'missing-facts'
+        : 'unsupported',
+      [smallRestriction],
+    )
   const missing: string[] = []
   if (input.taxpayer === 'unknown') missing.push('納税者区分')
   if (input.assetKind === 'unknown') missing.push('有形設備の区分')

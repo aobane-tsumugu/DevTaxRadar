@@ -13,14 +13,21 @@ export function readCostTreatmentFacts(db: DatabaseSync): CostTreatmentFacts[] {
 }
 
 /** Owned by the existing planning SAVEPOINT; no new save API or schema migration. */
-export function writeCostTreatmentFacts(db: DatabaseSync, records: CostTreatmentFacts[] | undefined): void {
+export function writeCostTreatmentFacts(
+  db: DatabaseSync,
+  records: CostTreatmentFacts[] | undefined,
+): void {
   if (records === undefined) {
     if (readCostTreatmentFacts(db).length)
-      throw new Error('保存済みの処理条件を含む最新の計画を読み直してください。削除は空の一覧で明示します。')
+      throw new Error(
+        '保存済みの処理条件を含む最新の計画を読み直してください。削除は空の一覧で明示します。',
+      )
     return
   }
   validateCostTreatmentFacts(records)
   if (!records.length) db.prepare('DELETE FROM app_settings WHERE key = ?').run(key)
-  else db.prepare('INSERT INTO app_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
-    .run(key, JSON.stringify(records))
+  else
+    db.prepare(
+      'INSERT INTO app_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+    ).run(key, JSON.stringify(records))
 }

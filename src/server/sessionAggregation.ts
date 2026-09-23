@@ -24,7 +24,10 @@ const confidenceByGrade = { A: 'high', B: 'medium', C: 'low' } as const
 const confidenceRank = { high: 0, medium: 1, low: 2 }
 
 /** Month summaries are for storage/listing; cost attribution can use the matching event cache. */
-export function aggregateSessions(events: NormalizedUsage[], diagnostics?: AggregationDiagnostics): UsageSession[] {
+export function aggregateSessions(
+  events: NormalizedUsage[],
+  diagnostics?: AggregationDiagnostics,
+): UsageSession[] {
   const byKey = new Map<string, UsageSession>()
   for (const event of events) {
     if (diagnostics && !event.observedAt.endsWith('Z')) diagnostics.nonUtcTimestamps++
@@ -36,11 +39,21 @@ export function aggregateSessions(events: NormalizedUsage[], diagnostics?: Aggre
     const current = byKey.get(key)
     if (!current) {
       byKey.set(key, {
-        provider: event.provider, sessionKey: event.sessionKey, projectKey: event.projectKey,
-        month: event.month, startedAt: observedAt, endedAt: observedAt, messageCount: 1,
-        projectLabel: event.projectLabel, model: event.model, localReference: event.localReference,
-        inputTokens: event.inputTokens, outputTokens, cacheReadTokens: event.cacheReadTokens,
-        cacheWriteTokens: event.cacheWriteTokens, schemaVersion: event.schemaVersion,
+        provider: event.provider,
+        sessionKey: event.sessionKey,
+        projectKey: event.projectKey,
+        month: event.month,
+        startedAt: observedAt,
+        endedAt: observedAt,
+        messageCount: 1,
+        projectLabel: event.projectLabel,
+        model: event.model,
+        localReference: event.localReference,
+        inputTokens: event.inputTokens,
+        outputTokens,
+        cacheReadTokens: event.cacheReadTokens,
+        cacheWriteTokens: event.cacheWriteTokens,
+        schemaVersion: event.schemaVersion,
         confidence: confidenceByGrade[event.confidence],
       })
       continue

@@ -49,13 +49,30 @@ export function buildReviewMaterials(
   const costYears = [
     ...new Set([
       year,
-      ...planning.decisions.filter((decision) => decision.treatmentBinding && decision.taxYear <= year &&
-        (balances.movements.some((movement) => movement.decisionId === decision.id && Number(movement.occurredOn.slice(0, 4)) <= year) ||
-         balances.pendingDecisions.some((pending) => pending.resolution?.decisionId === decision.id && pending.resolution.taxYear <= year)))
+      ...planning.decisions
+        .filter(
+          (decision) =>
+            decision.treatmentBinding &&
+            decision.taxYear <= year &&
+            (balances.movements.some(
+              (movement) =>
+                movement.decisionId === decision.id &&
+                Number(movement.occurredOn.slice(0, 4)) <= year,
+            ) ||
+              balances.pendingDecisions.some(
+                (pending) =>
+                  pending.resolution?.decisionId === decision.id &&
+                  pending.resolution.taxYear <= year,
+              )),
+        )
         .map((decision) => decision.treatmentBinding!.costYear),
       ...(planning.sourceAdjustments ?? [])
-        .filter((row) => row.effect === 'restate-original-cost' || Number(row.occurredOn.slice(0, 4)) <= year)
-        .map((row) => row.sourceYear).filter((value) => value <= year),
+        .filter(
+          (row) =>
+            row.effect === 'restate-original-cost' || Number(row.occurredOn.slice(0, 4)) <= year,
+        )
+        .map((row) => row.sourceYear)
+        .filter((value) => value <= year),
       ...balances.movements
         .filter((row) => row.kind === 'addition' && Number(row.occurredOn.slice(0, 4)) <= year)
         .flatMap((row) =>
@@ -83,7 +100,9 @@ export function buildReviewMaterials(
     configuration: { ...configuration, chargePeriods: configuration.chargePeriods ?? [] },
     planning,
     observations,
-    ...(observation.sourceCaptures ? { sourceCaptures: sanitizedCaptureContext(observation.sourceCaptures) } : {}),
+    ...(observation.sourceCaptures
+      ? { sourceCaptures: sanitizedCaptureContext(observation.sourceCaptures) }
+      : {}),
     scanTimeZones: Object.fromEntries(
       Object.entries(observation.lastScanTimeZones).map(([key, zone]) => [
         opaque(['scan-source', key]),
@@ -112,14 +131,20 @@ export function buildReviewMaterials(
           ? scan.status
           : 'unknown',
     })),
-    referenceCheck: checkTreatmentDecisionReferences(balances, planning, linkedCosts, year, checkBalanceReferences(
+    referenceCheck: checkTreatmentDecisionReferences(
       balances,
       planning,
-      configuration.chargePeriods ?? [],
-      linkedCosts.flatMap((row) => row.sources),
-      { costs: linkedCosts, trace: balanceLotTrace },
+      linkedCosts,
       year,
-    )),
+      checkBalanceReferences(
+        balances,
+        planning,
+        configuration.chargePeriods ?? [],
+        linkedCosts.flatMap((row) => row.sources),
+        { costs: linkedCosts, trace: balanceLotTrace },
+        year,
+      ),
+    ),
     balanceFlowCheck: checkBalanceFlowLinks(balances, year),
     balanceLotTrace,
     costLinks: {

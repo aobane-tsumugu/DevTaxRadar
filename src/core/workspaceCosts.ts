@@ -52,7 +52,11 @@ export function buildWorkspaceCostSnapshot(
   subscriptions: SubscriptionCostScope[],
 ): CostSnapshot {
   const year = planning.profile.taxYear
-  const adjustSource = createSourceAdjuster(planning.sourceAdjustments ?? [], new Set(planning.evidence.map((row) => row.id)), year)
+  const adjustSource = createSourceAdjuster(
+    planning.sourceAdjustments ?? [],
+    new Set(planning.evidence.map((row) => row.id)),
+    year,
+  )
   const snapshot: CostSnapshot = {
     version: 1,
     taxUnits: planning.taxUnits.map((unit) => ({ id: unit.id, name: unit.name })),
@@ -100,10 +104,22 @@ export function buildWorkspaceCostSnapshot(
     const adjusted = adjustSource(source)
     source = adjusted.source
     if (source.adjustments?.length) {
-      if (source.kind === 'home' || source.kind === 'direct') amountJpy = adjusted.evaluation.costAmountJpy
+      if (source.kind === 'home' || source.kind === 'direct')
+        amountJpy = adjusted.evaluation.costAmountJpy
       else if (adjusted.evaluation.costAmountJpy === null) amountJpy = null
-      warnings = [...new Set([...warnings, ...adjusted.evaluation.reasons, ...adjusted.evaluation.rows.flatMap((row) => row.reasons)])]
-      method = { ...method, explanation: method.explanation + ` 原額 ${source.originalAmountJpy ?? '不明'}円を保持。返金・訂正後の元費用基礎 ${adjusted.evaluation.costAmountJpy ?? '未算定'}円。` }
+      warnings = [
+        ...new Set([
+          ...warnings,
+          ...adjusted.evaluation.reasons,
+          ...adjusted.evaluation.rows.flatMap((row) => row.reasons),
+        ]),
+      ]
+      method = {
+        ...method,
+        explanation:
+          method.explanation +
+          ` 原額 ${source.originalAmountJpy ?? '不明'}円を保持。返金・訂正後の元費用基礎 ${adjusted.evaluation.costAmountJpy ?? '未算定'}円。`,
+      }
     }
     addSource(source)
     const basis: CostBasis = {
@@ -117,7 +133,9 @@ export function buildWorkspaceCostSnapshot(
           ? {
               status: 'unknown',
               amountJpy: null,
-              reasons: adjusted.evaluation.reasons.length ? adjusted.evaluation.reasons : source.unknownOriginalAmountReasons ?? ['原額が未確認です。'],
+              reasons: adjusted.evaluation.reasons.length
+                ? adjusted.evaluation.reasons
+                : (source.unknownOriginalAmountReasons ?? ['原額が未確認です。']),
             }
           : { status: 'known', amountJpy },
       method,
@@ -140,7 +158,8 @@ export function buildWorkspaceCostSnapshot(
         : {
             status: 'unknown',
             amountJpy: null,
-            reasons: scope.basisUnknownReasons ?? scope.source.unknownOriginalAmountReasons ?? ['請求額が未確認です。'],
+            reasons: scope.basisUnknownReasons ??
+              scope.source.unknownOriginalAmountReasons ?? ['請求額が未確認です。'],
           },
       method: {
         id: 'subscription-period-allocation',
@@ -351,8 +370,10 @@ export function buildWorkspaceCostSnapshot(
         equipmentTaxUnitId && projectRatio !== null ? Math.round(business * ratio(projectRatio)) : 0
       if (projectRatio === null)
         basis.warnings.push('年度別の制作物割合が未確認のため、業務分を未配分として保持します。')
-      const annualLabel = calculation.engineVersion === 'jp-individual-small-equipment/1'
-        ? '少額設備の供用年費用基礎' : '普通償却額'
+      const annualLabel =
+        calculation.engineVersion === 'jp-individual-small-equipment/1'
+          ? '少額設備の供用年費用基礎'
+          : '普通償却額'
       const reason = `設備全体の${annualLabel} ${annual}円 × 業務割合 ${businessRatio} を円単位で四捨五入して業務額 ${business}円。${allocation ? ` ${year}年の配分根拠：${allocation.reason}` : ''}`
       basis.method.explanation += ` ${reason}`
       addContribution(
@@ -440,7 +461,9 @@ export function buildWorkspaceCostSnapshot(
       continue
     }
     const business = Math.round(costAmountJpy * ratio(item.businessUseRatio))
-    const amountLabel = sourceMap.get(source.id)?.adjustments?.length ? '訂正後の費用基礎' : '支払額'
+    const amountLabel = sourceMap.get(source.id)?.adjustments?.length
+      ? '訂正後の費用基礎'
+      : '支払額'
     const businessCalculation = `${amountLabel} ${costAmountJpy}円 × 業務割合 ${item.businessUseRatio} を円単位で四捨五入して、業務額 ${business}円（割合1は100%）。`
     basis.method.explanation += ` ${businessCalculation}`
     addContribution(
@@ -527,7 +550,9 @@ export function buildWorkspaceCostSnapshot(
         other: 'その他の直接費',
       }[item.costType],
       originalAmountJpy: item.amountJpy,
-      ...(item.amountJpy === null ? { unknownOriginalAmountReasons: [item.unknownAmountReason ?? '原額が未確認です。'] } : {}),
+      ...(item.amountJpy === null
+        ? { unknownOriginalAmountReasons: [item.unknownAmountReason ?? '原額が未確認です。'] }
+        : {}),
       currency: 'JPY',
       ...(validIsoCalendarDate(item.incurredOn) ? { incurredOn: item.incurredOn } : {}),
       evidenceIds: [...item.evidenceIds],
@@ -559,7 +584,10 @@ export function buildWorkspaceCostSnapshot(
       basis.amount = {
         status: 'unknown',
         amountJpy: null,
-        reasons: basis.amount.status === 'unknown' ? basis.amount.reasons : source.unknownOriginalAmountReasons ?? ['訂正後の費用基礎が未確認です。'],
+        reasons:
+          basis.amount.status === 'unknown'
+            ? basis.amount.reasons
+            : (source.unknownOriginalAmountReasons ?? ['訂正後の費用基礎が未確認です。']),
       }
       basis.affectedTaxUnitIds = affected
       continue

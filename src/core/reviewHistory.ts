@@ -24,15 +24,21 @@ function ordered(value: unknown): unknown {
 // this metadata must not turn a no-adjustment legacy year into a correction.
 function comparableCosts(costs: AnnualCostProjection): AnnualCostProjection {
   const treatments = costs.treatments
-  const qualification = treatments ? (() => {
-    const { methodComparisons: _unadoptedScenarios, ...recordedQualification } = treatments
-    return recordedQualification
-  })() : undefined
-  return { ...costs, ...(qualification ? { treatments: qualification } : {}), sources: costs.sources.map((source) => {
-    if (source.adjustments?.length) return source
-    const { incurredOn: _duplicateDate, ...compatible } = source
-    return compatible
-  }) }
+  const qualification = treatments
+    ? (() => {
+        const { methodComparisons: _unadoptedScenarios, ...recordedQualification } = treatments
+        return recordedQualification
+      })()
+    : undefined
+  return {
+    ...costs,
+    ...(qualification ? { treatments: qualification } : {}),
+    sources: costs.sources.map((source) => {
+      if (source.adjustments?.length) return source
+      const { incurredOn: _duplicateDate, ...compatible } = source
+      return compatible
+    }),
+  }
 }
 
 /** Year-scoped evidence used to guard a carry-forward; later scans and unrelated future inputs are not historical changes. */
@@ -69,9 +75,11 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
     ...costTreatmentFacts.flatMap((fact) => fact.evidenceIds),
     ...costInputs.flatMap((costs) => costs.sources.flatMap((source) => source.evidenceIds)),
     ...costInputs.flatMap((costs) => costs.contributions.flatMap((item) => item.evidenceIds)),
-    ...costInputs.flatMap((costs) => costs.sources.flatMap((source) =>
-      (source.adjustments ?? []).flatMap((row) => row.evidenceIds),
-    )),
+    ...costInputs.flatMap((costs) =>
+      costs.sources.flatMap((source) =>
+        (source.adjustments ?? []).flatMap((row) => row.evidenceIds),
+      ),
+    ),
     ...balances.movements
       .filter((movement) => inYear(movement.occurredOn))
       .flatMap((movement) => movement.sourceIds),
@@ -122,7 +130,9 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
     ...(adjustments.length ? { sourceAdjustments: adjustments } : {}),
     ...(material.costLinks?.costs.some((row) => row.year !== year)
       ? {
-          linkedCostInputs: material.costLinks.costs.filter((row) => row.year !== year).map(comparableCosts),
+          linkedCostInputs: material.costLinks.costs
+            .filter((row) => row.year !== year)
+            .map(comparableCosts),
         }
       : {}),
     directCosts,

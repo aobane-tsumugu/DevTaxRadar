@@ -285,7 +285,10 @@ export function getDatabase(): DatabaseSync {
       !tableColumns(database, 'provider_charge_periods').has('evidence_ids_json')
     ) {
       createVerifiedMigrationBackup(database, directory, 'charge-period-evidence')
-    } else if (databaseAlreadyExisted && !tableColumns(database, 'provider_charge_periods').has('contract_confirmation_json')) {
+    } else if (
+      databaseAlreadyExisted &&
+      !tableColumns(database, 'provider_charge_periods').has('contract_confirmation_json')
+    ) {
       createVerifiedMigrationBackup(database, directory, 'charge-contract-confirmation')
     } else if (databaseAlreadyExisted && !tableColumns(database, 'balance_draft').has('revision')) {
       createVerifiedMigrationBackup(database, directory, 'balance-records')
@@ -670,7 +673,9 @@ export function getDatabase(): DatabaseSync {
         )
       }
       if (!tableColumns(database, 'provider_charge_periods').has('contract_confirmation_json')) {
-        database.exec("ALTER TABLE provider_charge_periods ADD COLUMN contract_confirmation_json TEXT CHECK(contract_confirmation_json IS NULL OR (json_valid(contract_confirmation_json) AND json_type(contract_confirmation_json)='object'))")
+        database.exec(
+          "ALTER TABLE provider_charge_periods ADD COLUMN contract_confirmation_json TEXT CHECK(contract_confirmation_json IS NULL OR (json_valid(contract_confirmation_json) AND json_type(contract_confirmation_json)='object'))",
+        )
       }
       initializeBalanceSchema(database)
       initializeDatasetIdentity(database)
@@ -1668,7 +1673,13 @@ export function getConfiguration(
       ...(period.unknownAmountReason ? { unknownAmountReason: period.unknownAmountReason } : {}),
       ...(period.billedOn ? { billedOn: period.billedOn } : {}),
       ...(period.note ? { note: period.note } : {}),
-      ...(period.contractConfirmationJson === null ? {} : { contractConfirmation: JSON.parse(period.contractConfirmationJson) as ProviderChargePeriod['contractConfirmation'] }),
+      ...(period.contractConfirmationJson === null
+        ? {}
+        : {
+            contractConfirmation: JSON.parse(
+              period.contractConfirmationJson,
+            ) as ProviderChargePeriod['contractConfirmation'],
+          }),
       ...(period.evidenceIdsJson === null
         ? {}
         : { evidenceIds: JSON.parse(period.evidenceIdsJson) as string[] }),
@@ -1739,7 +1750,9 @@ export function saveConfiguration(
           period.note ?? null,
           period.unknownAmountReason ?? null,
           period.evidenceIds === undefined ? null : JSON.stringify(period.evidenceIds),
-          period.contractConfirmation === undefined ? null : JSON.stringify(period.contractConfirmation),
+          period.contractConfirmation === undefined
+            ? null
+            : JSON.stringify(period.contractConfirmation),
         )
       }
     }

@@ -32,14 +32,19 @@ try {
   insert.run('calendar-valid', JSON.stringify([event]))
   insert.run('calendar-invalid', JSON.stringify([{ ...event, observedAt: 'not-a-date' }]))
   const entries = getHistoryFileCacheEntries('local-claude', 'claude')
-  const stored = db.prepare(`SELECT events_json AS json FROM history_file_cache
-    WHERE source_id='local-claude' AND provider='claude' AND file_key='calendar-valid'`)
+  const stored = db
+    .prepare(
+      `SELECT events_json AS json FROM history_file_cache
+    WHERE source_id='local-claude' AND provider='claude' AND file_key='calendar-valid'`,
+    )
     .get() as { json: string }
-  process.stdout.write(JSON.stringify({
-    entries: entries.map(({ fileKey, valid, events }) => ({ fileKey, valid, events })),
-    freshMonth: localMonthFromTimestamp(event.observedAt),
-    storedMonth: (JSON.parse(stored.json) as Array<{ month: string }>)[0]!.month,
-  }))
+  process.stdout.write(
+    JSON.stringify({
+      entries: entries.map(({ fileKey, valid, events }) => ({ fileKey, valid, events })),
+      freshMonth: localMonthFromTimestamp(event.observedAt),
+      storedMonth: (JSON.parse(stored.json) as Array<{ month: string }>)[0]!.month,
+    }),
+  )
 } finally {
   db.close()
 }

@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import {
-  attachCostTreatments, costTreatmentBasis, newCostTreatmentFacts, projectCostTreatments,
+  attachCostTreatments,
+  costTreatmentBasis,
+  newCostTreatmentFacts,
+  projectCostTreatments,
 } from '../../src/core/costTreatments.js'
 import {
-  canonicalTreatmentValue, editCostTreatmentFacts, validateCostTreatmentFacts,
+  canonicalTreatmentValue,
+  editCostTreatmentFacts,
+  validateCostTreatmentFacts,
 } from '../../src/core/costTreatmentFacts.js'
 import { costTreatmentMarkdown } from '../../src/core/costTreatmentExport.js'
 
@@ -43,7 +48,13 @@ describe('final allocations to conditional treatments', () => {
   }
   it('leaves new facts unknown rather than using the current lifecycle or a default purpose', () => {
     const f = fixture()
-    const fresh = newCostTreatmentFacts(f.costs, f.planning, 'part', 'facts', '2026-09-18T01:00:00+09:00')
+    const fresh = newCostTreatmentFacts(
+      f.costs,
+      f.planning,
+      'part',
+      'facts',
+      '2026-09-18T01:00:00+09:00',
+    )
     assert.equal(fresh.workPurpose, 'unknown')
     assert.equal(fresh.placedInService, 'unknown')
     assert.equal(fresh.serviceProvidedInCurrentPeriod, null)
@@ -54,7 +65,11 @@ describe('final allocations to conditional treatments', () => {
   for (const unknown of [null, false]) {
     it(`does not assume an ordinary expense when liability confirmation is ${unknown}`, () => {
       const f = fixture()
-      addFacts(f, { workPurpose: 'maintenance', placedInService: 'after', liabilityFixedAtYearEnd: unknown })
+      addFacts(f, {
+        workPurpose: 'maintenance',
+        placedInService: 'after',
+        liabilityFixedAtYearEnd: unknown,
+      })
       assert.equal(row(f).status, 'needs-facts')
       assert.equal(row(f).currentYearExpenseJpy, null)
       assert.ok(row(f).missingFacts.some((m) => m.includes('債務')))
@@ -118,7 +133,11 @@ describe('final allocations to conditional treatments', () => {
   })
   it('keeps ordinary equipment use unresolved instead of deducting its annual allocation automatically', () => {
     const f = fixture('equipment')
-    addFacts(f, { workPurpose: 'maintenance', placedInService: 'after', liabilityFixedAtYearEnd: true })
+    addFacts(f, {
+      workPurpose: 'maintenance',
+      placedInService: 'after',
+      liabilityFixedAtYearEnd: true,
+    })
     assert.equal(row(f).currentYearExpenseJpy, null)
   })
   it('does not classify equipment acquisition as unprovided service', () => {
@@ -137,14 +156,27 @@ describe('final allocations to conditional treatments', () => {
     f.costs.contributions[0]!.amountJpy = 700
     f.costs.contributions.push(
       { ...f.costs.contributions[0]!, id: 'private', amountJpy: 100, target: { kind: 'private' } },
-      { ...f.costs.contributions[0]!, id: 'unobserved', amountJpy: 200, target: { kind: 'unobserved' } },
+      {
+        ...f.costs.contributions[0]!,
+        id: 'unobserved',
+        amountJpy: 200,
+        target: { kind: 'unobserved' },
+      },
     )
-    f.costs.bases.push({ ...f.costs.bases[0]!, id: 'unknown-basis', amount: { status: 'unknown', amountJpy: null, reasons: ['金額確認待ち'] } })
+    f.costs.bases.push({
+      ...f.costs.bases[0]!,
+      id: 'unknown-basis',
+      amount: { status: 'unknown', amountJpy: null, reasons: ['金額確認待ち'] },
+    })
     f.costs.totals.unknownBasisIds = ['unknown-basis']
     addFacts(f)
     const r = projectCostTreatments(f.costs, f.planning)
-    assert.deepEqual(r.totals, { currentYearExpenseCandidateJpy: 0, futureCostCandidateJpy: 700,
-      unresolvedKnownJpy: 200, excludedJpy: 100 })
+    assert.deepEqual(r.totals, {
+      currentYearExpenseCandidateJpy: 0,
+      futureCostCandidateJpy: 700,
+      unresolvedKnownJpy: 200,
+      excludedJpy: 100,
+    })
     assert.equal(r.unknownBases[0]!.reasons[0], '金額確認待ち')
   })
   it('does not let private-purpose facts silently remove business allocations', () => {
@@ -156,11 +188,28 @@ describe('final allocations to conditional treatments', () => {
   it('does not count an already consumed intermediate contribution a second time', () => {
     const f = fixture()
     f.costs.contributions[0]!.consumedByBasisId = 'final-basis'
-    f.costs.bases.push({ ...f.costs.bases[0]!, id: 'final-basis', sourceId: undefined, parentContributionIds: ['part'] })
-    f.costs.contributions.push({ ...f.costs.contributions[0]!, id: 'final', basisId: 'final-basis', consumedByBasisId: undefined })
-    const fact = { ...newCostTreatmentFacts(f.costs, f.planning, 'final', 'facts', '2026-09-18T00:00:00Z'),
-      reason: '製作の根拠', workPurpose: 'new-development' as const, placedInService: 'before' as const,
-      assetKind: 'software' as const, directlyAttributable: true, serviceProvidedInCurrentPeriod: true, evidenceIds: ['proof'] }
+    f.costs.bases.push({
+      ...f.costs.bases[0]!,
+      id: 'final-basis',
+      sourceId: undefined,
+      parentContributionIds: ['part'],
+    })
+    f.costs.contributions.push({
+      ...f.costs.contributions[0]!,
+      id: 'final',
+      basisId: 'final-basis',
+      consumedByBasisId: undefined,
+    })
+    const fact = {
+      ...newCostTreatmentFacts(f.costs, f.planning, 'final', 'facts', '2026-09-18T00:00:00Z'),
+      reason: '製作の根拠',
+      workPurpose: 'new-development' as const,
+      placedInService: 'before' as const,
+      assetKind: 'software' as const,
+      directlyAttributable: true,
+      serviceProvidedInCurrentPeriod: true,
+      evidenceIds: ['proof'],
+    }
     fact.costBasis = costTreatmentBasis(f.costs, f.planning, 'final', fact.evidenceIds)
     f.planning.costTreatmentFacts = [fact]
     const result = projectCostTreatments(f.costs, f.planning)
@@ -216,8 +265,14 @@ describe('facts bound to cost, method and evidence', () => {
     assert.ok(!fact.costBasis.includes('PRIVATE-LOCAL-REFERENCE'))
     f.planning.evidence[0]!.localReference = 'MOVED-PRIVATE-PATH'
     f.planning.evidence.push({ ...f.planning.evidence[0]!, id: 'unrelated', note: '無関係な記録' })
-    f.planning.lifecycleEvents.push({ id: 'future', taxUnitId: 'unit', eventType: 'abandoned',
-      occurredOn: '2027-01-01', recordedAt: '2027-01-01T00:00:00Z', evidenceIds: [] })
+    f.planning.lifecycleEvents.push({
+      id: 'future',
+      taxUnitId: 'unit',
+      eventType: 'abandoned',
+      occurredOn: '2027-01-01',
+      recordedAt: '2027-01-01T00:00:00Z',
+      evidenceIds: [],
+    })
     f.planning.taxUnits[0]!.lifecycleStatus = 'retired'
     assert.equal(row(f).status, 'conditional')
   })
@@ -229,8 +284,14 @@ describe('facts bound to cost, method and evidence', () => {
   })
   it('detects a supply-date crossing or contradiction instead of applying one state to the period', () => {
     const f = fixture()
-    f.planning.lifecycleEvents.push({ id: 'start', taxUnitId: 'unit', eventType: 'internal-use-started',
-      occurredOn: '2026-01-15', recordedAt: '2026-01-15T00:00:00Z', evidenceIds: ['proof'] })
+    f.planning.lifecycleEvents.push({
+      id: 'start',
+      taxUnitId: 'unit',
+      eventType: 'internal-use-started',
+      occurredOn: '2026-01-15',
+      recordedAt: '2026-01-15T00:00:00Z',
+      evidenceIds: ['proof'],
+    })
     addFacts(f)
     assert.equal(row(f).futureCostJpy, null)
     assert.ok(row(f).missingFacts.some((m) => m.includes('またぐ')))
@@ -240,8 +301,14 @@ describe('facts bound to cost, method and evidence', () => {
   })
   it('does not let an ended or abandoned activity post a new known candidate', () => {
     const f = fixture()
-    f.planning.lifecycleEvents.push({ id: 'ended', taxUnitId: 'unit', eventType: 'abandoned',
-      occurredOn: '2026-01-20', recordedAt: '2026-01-20T00:00:00Z', evidenceIds: ['proof'] })
+    f.planning.lifecycleEvents.push({
+      id: 'ended',
+      taxUnitId: 'unit',
+      eventType: 'abandoned',
+      occurredOn: '2026-01-20',
+      recordedAt: '2026-01-20T00:00:00Z',
+      evidenceIds: ['proof'],
+    })
     addFacts(f)
     assert.equal(row(f).futureCostJpy, null)
   })
@@ -286,11 +353,18 @@ describe('facts bound to cost, method and evidence', () => {
 
 describe('shared facts validation and record edits', () => {
   for (const patch of [
-    { costYear: 1999 }, { id: '' }, { workPurpose: 'invented' }, { extra: 'do not strip' },
-    { serviceProvidedInCurrentPeriod: undefined }, { reason: 'x'.repeat(2001) },
-    { evidenceIds: ['proof', 'proof'] }, { recordedAt: '2026-02-30T00:00:00Z' },
-    { recordedAt: '2026-09-18T24:00:00Z' }, { recordedAt: '2026-09-18T00:00:00' },
-    { costBasis: '{' }, { costBasis: '{ "b": 1 }' },
+    { costYear: 1999 },
+    { id: '' },
+    { workPurpose: 'invented' },
+    { extra: 'do not strip' },
+    { serviceProvidedInCurrentPeriod: undefined },
+    { reason: 'x'.repeat(2001) },
+    { evidenceIds: ['proof', 'proof'] },
+    { recordedAt: '2026-02-30T00:00:00Z' },
+    { recordedAt: '2026-09-18T24:00:00Z' },
+    { recordedAt: '2026-09-18T00:00:00' },
+    { costBasis: '{' },
+    { costBasis: '{ "b": 1 }' },
   ]) {
     it(`rejects invalid ${Object.keys(patch).join(',')} without stripping fields`, () => {
       const f = fixture()
@@ -301,10 +375,13 @@ describe('shared facts validation and record edits', () => {
   it('rejects duplicate identity and duplicate year/contribution natural keys', () => {
     const f = fixture()
     const facts = addFacts(f)
-    assert.throws(() => validateCostTreatmentFacts([facts, { ...facts, contributionId: 'other' }]), /重複/)
+    assert.throws(
+      () => validateCostTreatmentFacts([facts, { ...facts, contributionId: 'other' }]),
+      /重複/,
+    )
     assert.throws(() => validateCostTreatmentFacts([facts, { ...facts, id: 'other' }]), /重複/)
   })
-  it('compares whole records and never silently edits another tab\'s version', () => {
+  it("compares whole records and never silently edits another tab's version", () => {
     const f = fixture()
     const facts = addFacts(f)
     const next = { ...facts, reason: 'explicit changed reason' }
@@ -316,7 +393,13 @@ describe('shared facts validation and record edits', () => {
   })
   it('records partial facts without requiring fake dates, amounts or a confirmation state', () => {
     const f = fixture()
-    const facts = newCostTreatmentFacts(f.costs, f.planning, 'part', 'draft', '2026-09-18T00:00:00Z')
+    const facts = newCostTreatmentFacts(
+      f.costs,
+      f.planning,
+      'part',
+      'draft',
+      '2026-09-18T00:00:00Z',
+    )
     const result = editCostTreatmentFacts([], facts, null)
     validateCostTreatmentFacts(result)
     assert.equal(result[0]!.reason, '')

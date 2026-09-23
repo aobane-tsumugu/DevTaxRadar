@@ -56,11 +56,13 @@ export default function DecisionEditor({
   const [message, setMessage] = useState('')
 
   function baseValue(): DecisionEditorValue {
-    return editor ? structuredClone(editor) : {
-      decisions: structuredClone(rows),
-      originals: [],
-      yearInputs: [],
-    }
+    return editor
+      ? structuredClone(editor)
+      : {
+          decisions: structuredClone(rows),
+          originals: [],
+          yearInputs: [],
+        }
   }
   function markOriginal(next: DecisionEditorValue, id: string) {
     if (next.originals.some((row) => row.id === id)) return
@@ -85,7 +87,10 @@ export default function DecisionEditor({
     if (!row) return
     markOriginal(next, row.id)
     next.yearInputs = [...next.yearInputs.filter((item) => item.id !== row.id), { id: row.id, raw }]
-    setVolatileYears((current) => [...current.filter((item) => item.id !== row.id), { id: row.id, raw }])
+    setVolatileYears((current) => [
+      ...current.filter((item) => item.id !== row.id),
+      { id: row.id, raw },
+    ])
     const parsed = /^\d{4}$/.test(raw) ? Number(raw) : null
     next.decisions[index] = reviseDecision(
       row,
@@ -118,21 +123,25 @@ export default function DecisionEditor({
   }, [editorHash, parentRevision, recovery.parentRevision, savedHash])
 
   const conflicts = useMemo(() => {
-    if (!editor) return [] as Array<{
-      id: string
-      original: DecisionRecord | null
-      current: DecisionRecord | null
-      editing: DecisionRecord | null
-    }>
+    if (!editor)
+      return [] as Array<{
+        id: string
+        original: DecisionRecord | null
+        current: DecisionRecord | null
+        editing: DecisionRecord | null
+      }>
     return editor.originals.flatMap((origin) => {
       const current = saved.find((row) => row.id === origin.id) ?? null
-      if (canonicalDecisionEditorValue(origin.value) === canonicalDecisionEditorValue(current)) return []
-      return [{
-        id: origin.id,
-        original: origin.value,
-        current,
-        editing: editor.decisions.find((row) => row.id === origin.id) ?? null,
-      }]
+      if (canonicalDecisionEditorValue(origin.value) === canonicalDecisionEditorValue(current))
+        return []
+      return [
+        {
+          id: origin.id,
+          original: origin.value,
+          current,
+          editing: editor.decisions.find((row) => row.id === origin.id) ?? null,
+        },
+      ]
     })
   }, [editor, saved])
   const conflictIds = new Set(conflicts.map((row) => row.id))
@@ -150,7 +159,12 @@ export default function DecisionEditor({
   }
   function restore(raw: string, imported = false) {
     try {
-      const copy = restoreEditorCopy(raw, recoveryDataset, RECOVERY_EDITOR, validDecisionEditorValue)
+      const copy = restoreEditorCopy(
+        raw,
+        recoveryDataset,
+        RECOVERY_EDITOR,
+        validDecisionEditorValue,
+      )
       if (recovery.restore(raw, imported)) {
         onChange(structuredClone(copy.value.decisions))
         setMessage('判断案を復旧しました。まだworkspaceへ保存・送信・本人確認していません。')
@@ -178,8 +192,11 @@ export default function DecisionEditor({
           </p>
           {recovery.copies.map(({ copy, raw }) => (
             <p key={copy.id}>
-              編集対象{copy.value.originals.length}件 / 保存元{copy.parentRevision}版 / {copy.updatedAt}{' '}
-              <button type="button" onClick={() => restore(raw)}>この内容を復旧</button>
+              編集対象{copy.value.originals.length}件 / 保存元{copy.parentRevision}版 /{' '}
+              {copy.updatedAt}{' '}
+              <button type="button" onClick={() => restore(raw)}>
+                この内容を復旧
+              </button>
             </p>
           ))}
         </section>
@@ -198,7 +215,9 @@ export default function DecisionEditor({
                 setMessage('判断案の控えが大きすぎます。元ファイルは保持してください。')
                 return
               }
-              void file.text().then((raw) => restore(raw, true))
+              void file
+                .text()
+                .then((raw) => restore(raw, true))
                 .catch(() => setMessage('判断案の控えを読み取れません。'))
             }}
           />
@@ -222,8 +241,8 @@ export default function DecisionEditor({
         <div>
           <p>
             回答の対象：
-            {units.find((unit) => unit.id === consultation.taxUnitId)?.name ?? '制作物未確認'} /{' '}
-            {consultation.answer.taxYear}
+            {units.find((unit) => unit.id === consultation.taxUnitId)?.name ??
+              '制作物未確認'} / {consultation.answer.taxYear}
             年。既存の判断を見直すか、この対象に未確認の判断を追加できます。
           </p>
           <button
@@ -254,20 +273,25 @@ export default function DecisionEditor({
           ))}
       </datalist>
       {rows.map((row, index) => {
-        if (row.softwareAnnualBinding) return (
-          <article className="cost-source panel" key={row.id}
-            data-consultation-decision={row.taxUnitId + ':' + row.taxYear}>
-            <h5>ソフトウェア年額の本人確認</h5>
-            <p>
-              {row.taxYear}年 / {row.reason}
-            </p>
-            <p>
-              方法画面で確認して保存した判断です。ここでは内部候補名や確認元を手入力で変更せず、
-              方法・取得価額・根拠・供用・対象年が変わる場合は方法画面で再確認します。
-            </p>
-          </article>
-        )
-        const rawYear = editor?.yearInputs.find((item) => item.id === row.id)?.raw ??
+        if (row.softwareAnnualBinding)
+          return (
+            <article
+              className="cost-source panel"
+              key={row.id}
+              data-consultation-decision={row.taxUnitId + ':' + row.taxYear}
+            >
+              <h5>ソフトウェア年額の本人確認</h5>
+              <p>
+                {row.taxYear}年 / {row.reason}
+              </p>
+              <p>
+                方法画面で確認して保存した判断です。ここでは内部候補名や確認元を手入力で変更せず、
+                方法・取得価額・根拠・供用・対象年が変わる場合は方法画面で再確認します。
+              </p>
+            </article>
+          )
+        const rawYear =
+          editor?.yearInputs.find((item) => item.id === row.id)?.raw ??
           volatileYears.find((item) => item.id === row.id)?.raw ??
           (Number.isFinite(row.taxYear) ? String(row.taxYear) : '')
         const parsedYear = /^\d{4}$/.test(rawYear) ? Number(rawYear) : null
@@ -291,14 +315,25 @@ export default function DecisionEditor({
             <div className="cost-toolbar">
               <label>
                 判断する制作物{' '}
-                <select value={row.taxUnitId} onChange={(e) => edit(index, { taxUnitId: e.target.value })}>
+                <select
+                  value={row.taxUnitId}
+                  onChange={(e) => edit(index, { taxUnitId: e.target.value })}
+                >
                   <option value="">選択してください</option>
-                  {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                  {units.map((unit) => (
+                    <option key={unit.id} value={unit.id}>
+                      {unit.name}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>
                 判断の対象年{' '}
-                <input inputMode="numeric" value={rawYear} onChange={(e) => editYear(index, e.target.value)} />
+                <input
+                  inputMode="numeric"
+                  value={rawYear}
+                  onChange={(e) => editYear(index, e.target.value)}
+                />
               </label>
               <label>
                 検討した扱い{' '}
@@ -374,7 +409,8 @@ export default function DecisionEditor({
           <button
             type="button"
             onClick={() => {
-              if (!window.confirm('未送信の判断案だけを破棄し、現在の保存済み判断へ戻します。')) return
+              if (!window.confirm('未送信の判断案だけを破棄し、現在の保存済み判断へ戻します。'))
+                return
               if (recovery.close()) onChange(structuredClone(saved))
             }}
           >

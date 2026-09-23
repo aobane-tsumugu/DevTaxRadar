@@ -214,7 +214,11 @@ export function mergeWorkspaceDrafts(
       (value) => `${value.taxYear}:${value.category}`,
     )
   }
-  if (base.planning.sourceAdjustments || local.planning.sourceAdjustments || latest.planning.sourceAdjustments) {
+  if (
+    base.planning.sourceAdjustments ||
+    local.planning.sourceAdjustments ||
+    latest.planning.sourceAdjustments
+  ) {
     result.planning.sourceAdjustments = records(
       'sourceAdjustments',
       '返金・訂正',
@@ -224,7 +228,11 @@ export function mergeWorkspaceDrafts(
       (value) => value.id,
     )
   }
-  if (base.planning.costTreatmentFacts || local.planning.costTreatmentFacts || latest.planning.costTreatmentFacts) {
+  if (
+    base.planning.costTreatmentFacts ||
+    local.planning.costTreatmentFacts ||
+    latest.planning.costTreatmentFacts
+  ) {
     result.planning.costTreatmentFacts = records(
       'costTreatmentFacts',
       '費用の処理条件',

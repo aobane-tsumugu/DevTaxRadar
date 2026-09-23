@@ -364,13 +364,21 @@ async function readSourceIncrementally(
   const cacheSalt = sourceIdentifierSalt(identifierSalt, source.id)
   const files = await discoverSourceFiles(source.root, cacheSalt, diagnostics)
   if (!files) {
-    return { events: [], diagnostics, fileCache: { upsert: [], deleteFileKeys: [] }, captures: [], failed: true }
+    return {
+      events: [],
+      diagnostics,
+      fileCache: { upsert: [], deleteFileKeys: [] },
+      captures: [],
+      failed: true,
+    }
   }
 
   const captures: FileCapture[] = []
   const previousFiles = new Map(
-    (readSourceCapture(getDatabase(), source.id, source.provider)?.files ?? [])
-      .map((file) => [file.fileKey, file]),
+    (readSourceCapture(getDatabase(), source.id, source.provider)?.files ?? []).map((file) => [
+      file.fileKey,
+      file,
+    ]),
   )
   const cacheEntries = getHistoryFileCacheEntries(source.id, source.provider)
   const cachedByFileKey = new Map(cacheEntries.map((entry) => [entry.fileKey, entry]))
@@ -411,11 +419,15 @@ async function readSourceIncrementally(
       diagnostics.filesReused += 1
       appendCachedContribution(cached!.events)
       captures.push({
-        fileKey: file.fileKey, state: 'reused', adapter: cached!.adapter,
-        schemaVersion: cached!.schemaVersion, eventCount: cached!.events.length,
+        fileKey: file.fileKey,
+        state: 'reused',
+        adapter: cached!.adapter,
+        schemaVersion: cached!.schemaVersion,
+        eventCount: cached!.events.length,
         observationRefs: captureReferences(cached!.events),
         ...(previousFiles.get(file.fileKey)?.acceptedAt
-          ? { acceptedAt: previousFiles.get(file.fileKey)!.acceptedAt } : {}),
+          ? { acceptedAt: previousFiles.get(file.fileKey)!.acceptedAt }
+          : {}),
       })
       continue
     }
@@ -437,8 +449,11 @@ async function readSourceIncrementally(
     if (parsed.state === 'accepted' && parsed.snapshot) {
       appendContribution(parsed.events)
       captures.push({
-        fileKey: file.fileKey, state: 'read', adapter: signature.adapter,
-        schemaVersion: signature.schemaVersion, eventCount: parsed.events.length,
+        fileKey: file.fileKey,
+        state: 'read',
+        adapter: signature.adapter,
+        schemaVersion: signature.schemaVersion,
+        eventCount: parsed.events.length,
         observationRefs: captureReferences(parsed.events),
         acceptedAt: new Date().toISOString(),
       })
@@ -459,13 +474,15 @@ async function readSourceIncrementally(
     diagnostics.filesDeferred += 1
     if (cached?.valid) appendCachedContribution(cached.events)
     captures.push({
-      fileKey: file.fileKey, state: cached?.valid ? 'deferred-previous' : 'deferred-missing',
+      fileKey: file.fileKey,
+      state: cached?.valid ? 'deferred-previous' : 'deferred-missing',
       adapter: cached?.valid ? cached.adapter : signature.adapter,
       schemaVersion: cached?.valid ? cached.schemaVersion : signature.schemaVersion,
       eventCount: cached?.valid ? cached.events.length : 0,
       observationRefs: captureReferences(cached?.valid ? cached.events : []),
       ...(cached?.valid && previousFiles.get(file.fileKey)?.acceptedAt
-        ? { acceptedAt: previousFiles.get(file.fileKey)!.acceptedAt } : {}),
+        ? { acceptedAt: previousFiles.get(file.fileKey)!.acceptedAt }
+        : {}),
     })
   }
 

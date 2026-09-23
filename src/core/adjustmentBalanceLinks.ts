@@ -57,13 +57,17 @@ export function adjustmentBalanceLinkIssues(
     const original = costs.get(row.sourceYear)?.sources.find((source) => source.id === row.sourceId)
     if (!original) {
       add('返金元の費用を参照年の資料で確認できません。参照年と元費用を確認してください。')
-    } else if (evaluateSourceAdjustments(original, [row]).rows.some((item) => item.status === 'stale')) {
+    } else if (
+      evaluateSourceAdjustments(original, [row]).rows.some((item) => item.status === 'stale')
+    ) {
       add('返金記録の原額・期間・契約が現在の元費用と異なります。確認内容を見直してください。')
     }
 
     const trace = traced.get(movementId)
     if (!trace || trace.untracedJpy !== 0 || trace.amountJpy !== movement.amountJpy) {
-      add('残高減少に使った原価の内訳が未確定です。根拠IDの記載だけでは返金元との一致を確認できません。')
+      add(
+        '残高減少に使った原価の内訳が未確定です。根拠IDの記載だけでは返金元との一致を確認できません。',
+      )
       continue
     }
     let matched = 0n
@@ -78,7 +82,9 @@ export function adjustmentBalanceLinkIssues(
       }
       seen.add(key)
       if (lot.amountJpy === 0) continue
-      const contribution = costs.get(lot.costYear)?.contributions.find((item) => item.id === lot.contributionId)
+      const contribution = costs
+        .get(lot.costYear)
+        ?.contributions.find((item) => item.id === lot.contributionId)
       if (!contribution || contribution.sourceIds.length !== 1) {
         // A multi-source lot has no source-by-source yen breakdown. Do not
         // infer that its full amount belongs to every listed source.
@@ -89,15 +95,23 @@ export function adjustmentBalanceLinkIssues(
         matched += BigInt(lot.amountJpy)
       }
     }
-    if (differentSource) add('残高減少に使った原価が返金元の費用と異なります。元費用名だけの付替えはできません。')
-    if (ambiguous) add('使用した原価を返金元の費用別金額まで特定できません。内訳を確認するか、返金の扱いを未判断で保持してください。')
+    if (differentSource)
+      add('残高減少に使った原価が返金元の費用と異なります。元費用名だけの付替えはできません。')
+    if (ambiguous)
+      add(
+        '使用した原価を返金元の費用別金額まで特定できません。内訳を確認するか、返金の扱いを未判断で保持してください。',
+      )
     if (!ambiguous && !differentSource && matched !== BigInt(movement.amountJpy))
       add('返金元に対応する原価の使用額と残高減少額が一致しません。')
   }
   for (const [movementId, ids] of claimants) {
     if (ids.length < 2) continue
     for (const recordId of ids)
-      issues.push({ recordId, movementId, message: '同じ残高減少を複数の返金・訂正へ重複して対応させることはできません。' })
+      issues.push({
+        recordId,
+        movementId,
+        message: '同じ残高減少を複数の返金・訂正へ重複して対応させることはできません。',
+      })
   }
   return issues
 }

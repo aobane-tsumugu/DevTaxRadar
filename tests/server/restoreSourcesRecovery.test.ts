@@ -126,7 +126,10 @@ describe('restored source recovery without originals', () => {
     plan.sources[0]!.enabled = false
     const result = applyRestoreSources(f.db, f.directory, plan)
     assert.equal(result.scanStarted, false)
-    assert.deepEqual(result.sources.map((source) => source.sourceId), ['a', 'b'])
+    assert.deepEqual(
+      result.sources.map((source) => source.sourceId),
+      ['a', 'b'],
+    )
     assert.equal(result.sources[0]!.root, 'unavailable-on-this-os')
     assert.equal(result.sources[0]!.enabled, false)
     assert.equal(

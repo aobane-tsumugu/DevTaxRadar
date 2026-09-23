@@ -17,7 +17,12 @@ export function createSourceAdjuster(
   validateSourceAdjustments(records)
   const bySource = new Map<string, SourceAdjustmentRecord[]>()
   for (const record of records) {
-    if (year !== undefined && record.effect !== 'restate-original-cost' && Number(record.occurredOn.slice(0, 4)) > year) continue
+    if (
+      year !== undefined &&
+      record.effect !== 'restate-original-cost' &&
+      Number(record.occurredOn.slice(0, 4)) > year
+    )
+      continue
     const rows = bySource.get(record.sourceId) ?? []
     rows.push(record)
     bySource.set(record.sourceId, rows)
@@ -43,18 +48,27 @@ export function adjustSubscriptionScope(
 ): SubscriptionCostScope {
   const { source, evaluation } = adjustSource(scope.source)
   if (!source.adjustments?.length && !scope.source.adjustments?.length) return scope
-  const sourceWarnings = [...new Set([
-    ...(scope.sourceWarnings ?? []),
-    ...evaluation.reasons,
-    ...evaluation.rows.flatMap((row) => row.reasons),
-  ])]
+  const sourceWarnings = [
+    ...new Set([
+      ...(scope.sourceWarnings ?? []),
+      ...evaluation.reasons,
+      ...evaluation.rows.flatMap((row) => row.reasons),
+    ]),
+  ]
   const unknown = (reasons: string[]): SubscriptionCostScope => ({
-    ...scope, source, result: null, sourceWarnings,
+    ...scope,
+    source,
+    result: null,
+    sourceWarnings,
     basisUnknownReasons: reasons.length ? reasons : ['返金・訂正後の費用基礎を確認できません。'],
   })
   if (evaluation.costAmountJpy === null) return unknown(evaluation.reasons)
-  if (!scope.result) return unknown(scope.basisUnknownReasons ?? ['配分に必要な元の利用量がありません。'])
-  if (!source.servicePeriod || scope.period.startedOn.slice(0, 7) !== scope.period.endedOn.slice(0, 7))
+  if (!scope.result)
+    return unknown(scope.basisUnknownReasons ?? ['配分に必要な元の利用量がありません。'])
+  if (
+    !source.servicePeriod ||
+    scope.period.startedOn.slice(0, 7) !== scope.period.endedOn.slice(0, 7)
+  )
     return unknown(['訂正対象の請求期間と月別の費用基礎を確認できません。'])
   const { provider, billingMonth } = scope.result
   const monthly = monthlyAmountsForCharge({
@@ -82,20 +96,25 @@ export function adjustSubscriptionScope(
     provider,
     billingMonth,
     monthlyFeeJpy: monthly.amountJpy,
-    unobservedUsage: ratio === null
-      ? { kind: 'unknown' }
-      : ratio === 0 ? { kind: 'confirmed-none' } : { kind: 'estimated', ratio },
+    unobservedUsage:
+      ratio === null
+        ? { kind: 'unknown' }
+        : ratio === 0
+          ? { kind: 'confirmed-none' }
+          : { kind: 'estimated', ratio },
     usageLines: scope.result.lines.flatMap((line) => {
       if (line.kind !== 'product' && line.kind !== 'private') return []
       if (!line.sourceId) throw new Error('訂正する配分の利用量参照がありません。')
-      return [{
-        id: line.sourceId,
-        productId: line.productId,
-        taxUnitId: line.taxUnitId,
-        workStage: line.workStage,
-        bucket: line.kind,
-        usageWeight: line.usageWeight,
-      }]
+      return [
+        {
+          id: line.sourceId,
+          productId: line.productId,
+          taxUnitId: line.taxUnitId,
+          workStage: line.workStage,
+          bucket: line.kind,
+          usageWeight: line.usageWeight,
+        },
+      ]
     }),
   })
   result.warnings = [...new Set([...scope.result.warnings, ...result.warnings, ...sourceWarnings])]
