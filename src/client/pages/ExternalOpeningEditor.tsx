@@ -32,9 +32,17 @@ export default function ExternalOpeningEditor(props: Props) {
       </p>
       <label>
         外部資料と対応する期首
-        <select value={accountId} disabled={props.busy} onChange={(event) => setAccountId(event.target.value)}>
+        <select
+          value={accountId}
+          disabled={props.busy}
+          onChange={(event) => setAccountId(event.target.value)}
+        >
           <option value="">残高を選択してください</option>
-          {accounts.map((row) => <option key={row.id} value={row.id}>{row.name || '名前未入力'} / {row.openingYear}年</option>)}
+          {accounts.map((row) => (
+            <option key={row.id} value={row.id}>
+              {row.name || '名前未入力'} / {row.openingYear}年
+            </option>
+          ))}
         </select>
       </label>
       {account && <OpeningForm key={account.id} {...props} account={account} />}
@@ -42,64 +50,127 @@ export default function ExternalOpeningEditor(props: Props) {
   )
 }
 
-function OpeningForm({ snapshot, planning, busy, edit, account }: Props & { account: BalanceAccount }) {
+function OpeningForm({
+  snapshot,
+  planning,
+  busy,
+  edit,
+  account,
+}: Props & { account: BalanceAccount }) {
   // An imported duplicate is shown as a repair issue, not silently overwritten.
   let existing: ReturnType<typeof externalOpeningRecord> | undefined
   let readError = ''
-  try { existing = externalOpeningRecord(snapshot, account.id) }
-  catch (error) { readError = error instanceof Error ? error.message : '期首の確認を読み取れません。' }
+  try {
+    existing = externalOpeningRecord(snapshot, account.id)
+  } catch (error) {
+    readError = error instanceof Error ? error.message : '期首の確認を読み取れません。'
+  }
   const [reference, setReference] = useState(existing?.answers?.[0]?.answer ?? '')
   const [evidenceIds, setEvidenceIds] = useState<string[]>(existing?.sourceIds ?? [])
   const [decisionId, setDecisionId] = useState(existing?.resolution?.decisionId ?? '')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
-  const decisions = planning.decisions.filter((row) => decisionIsConfirmed(row) &&
-    row.taxUnitId === account.taxUnitId && row.taxYear === account.openingYear)
+  const decisions = planning.decisions.filter(
+    (row) =>
+      decisionIsConfirmed(row) &&
+      row.taxUnitId === account.taxUnitId &&
+      row.taxYear === account.openingYear,
+  )
   const selectedIsKnown = account.opening.status === 'known'
   return (
     <fieldset disabled={busy || Boolean(readError)}>
       <legend>{account.name}の期首根拠</legend>
       {readError && <p role="alert">{readError}</p>}
-      <p>{account.openingYear}年期首 / {externalOpeningMeaning(account.kind)} / {selectedIsKnown
-        ? yen.format(account.opening.amountJpy!) : '金額不明（0円ではありません）'}</p>
+      <p>
+        {account.openingYear}年期首 / {externalOpeningMeaning(account.kind)} /{' '}
+        {selectedIsKnown ? yen.format(account.opening.amountJpy!) : '金額不明（0円ではありません）'}
+      </p>
       <label>
         外部資料の名称・対象年・残高の意味
-        <textarea maxLength={2000} value={reference} onChange={(event) => setReference(event.target.value)} />
+        <textarea
+          maxLength={2000}
+          value={reference}
+          onChange={(event) => setReference(event.target.value)}
+        />
       </label>
       <fieldset>
         <legend>期首の外部資料として登録した証拠</legend>
         {planning.evidence.map((row) => (
           <label className="balance-source-choice" key={row.id}>
-            <input type="checkbox" checked={evidenceIds.includes(row.id)} onChange={(event) =>
-              setEvidenceIds(event.target.checked ? [...evidenceIds, row.id] : evidenceIds.filter((id) => id !== row.id))} />
+            <input
+              type="checkbox"
+              checked={evidenceIds.includes(row.id)}
+              onChange={(event) =>
+                setEvidenceIds(
+                  event.target.checked
+                    ? [...evidenceIds, row.id]
+                    : evidenceIds.filter((id) => id !== row.id),
+                )
+              }
+            />
             {row.note} / {row.strength === 'external' ? '外部資料' : '本人記録・その他'}
           </label>
         ))}
-        {evidenceIds.filter((id) => !planning.evidence.some((row) => row.id === id)).map((id) => (
-          <p key={id}>一覧にない証拠参照：{id} <button type="button" onClick={() => setEvidenceIds(evidenceIds.filter((value) => value !== id))}>この参照を外す</button></p>
-        ))}
+        {evidenceIds
+          .filter((id) => !planning.evidence.some((row) => row.id === id))
+          .map((id) => (
+            <p key={id}>
+              一覧にない証拠参照：{id}{' '}
+              <button
+                type="button"
+                onClick={() => setEvidenceIds(evidenceIds.filter((value) => value !== id))}
+              >
+                この参照を外す
+              </button>
+            </p>
+          ))}
         {!planning.evidence.length && <p>設定の証拠欄で外部資料を登録してください。</p>}
       </fieldset>
-      {selectedIsKnown && <label>
-        同じ制作物・期首年の確認済み判断
-        <select value={decisionId} onChange={(event) => setDecisionId(event.target.value)}>
-          <option value="">判断を選択してください</option>
-          {decisions.map((row) => <option key={row.id} value={row.id}>{row.selectedCandidate} / {row.reason}</option>)}
-        </select>
-      </label>}
-      {selectedIsKnown && !decisions.length && <p>設定の判断欄で、この制作物・期首年の残高確認を記録してください。</p>}
-      <button type="button" onClick={() => {
-        setError('')
-        setMessage('')
-        try {
-          const next = recordExternalOpening(snapshot, planning, {
-            accountId: account.id, requestId: crypto.randomUUID(), reference,
-            evidenceIds, decisionId, recordedAt: new Date().toISOString(),
-          })
-          edit((value) => { value.pendingDecisions = next.pendingDecisions })
-          setMessage('期首の根拠を作業中入力へ反映しました。期首額は変更していません。「作業中の残高を保存」で保存してください。')
-        } catch (cause) { setError(cause instanceof Error ? cause.message : '期首根拠を記録できませんでした。') }
-      }}>{selectedIsKnown ? 'この金額の意味と外部資料を確認して記録' : '金額不明のまま外部資料の確認事項を記録'}</button>
+      {selectedIsKnown && (
+        <label>
+          同じ制作物・期首年の確認済み判断
+          <select value={decisionId} onChange={(event) => setDecisionId(event.target.value)}>
+            <option value="">判断を選択してください</option>
+            {decisions.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.selectedCandidate} / {row.reason}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {selectedIsKnown && !decisions.length && (
+        <p>設定の判断欄で、この制作物・期首年の残高確認を記録してください。</p>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          setError('')
+          setMessage('')
+          try {
+            const next = recordExternalOpening(snapshot, planning, {
+              accountId: account.id,
+              requestId: crypto.randomUUID(),
+              reference,
+              evidenceIds,
+              decisionId,
+              recordedAt: new Date().toISOString(),
+            })
+            edit((value) => {
+              value.pendingDecisions = next.pendingDecisions
+            })
+            setMessage(
+              '期首の根拠を作業中入力へ反映しました。期首額は変更していません。「作業中の残高を保存」で保存してください。',
+            )
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : '期首根拠を記録できませんでした。')
+          }
+        }}
+      >
+        {selectedIsKnown
+          ? 'この金額の意味と外部資料を確認して記録'
+          : '金額不明のまま外部資料の確認事項を記録'}
+      </button>
       {message && <p role="status">{message}</p>}
       {error && <p role="alert">{error} 入力と保存済み記録は変更していません。</p>}
     </fieldset>

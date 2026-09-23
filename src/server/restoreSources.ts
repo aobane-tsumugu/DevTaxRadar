@@ -114,7 +114,10 @@ export function applyRestoreSources(db: DatabaseSync, directory: string, input: 
         throw new Error('すべての読み取り元を一度ずつ指定してください。')
       const normalized = plan.sources.map((s) => ({
         ...s,
-        ...resolveRestoreHistoryRoot(s, existing.find((row) => row.id === s.sourceId)!),
+        ...resolveRestoreHistoryRoot(
+          s,
+          existing.find((row) => row.id === s.sourceId)!,
+        ),
       }))
       const keys = new Set<string>()
       for (const row of normalized) {

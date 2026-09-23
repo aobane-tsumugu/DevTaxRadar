@@ -131,7 +131,17 @@ describe('session storage', () => {
   it('migrates invoice contract confirmations with backup and preserves snapshots after restart', async () => {
     const initial = db.getDatabase()
     const configuration = db.getConfiguration()
-    configuration.chargePeriods = [{id:'contract-invoice',provider:'claude',planName:'既存請求', serviceStartedOn:'2026-01-01',serviceEndedOn:'2026-01-31',amountJpy:1000,evidenceIds:['e']}]
+    configuration.chargePeriods = [
+      {
+        id: 'contract-invoice',
+        provider: 'claude',
+        planName: '既存請求',
+        serviceStartedOn: '2026-01-01',
+        serviceEndedOn: '2026-01-31',
+        amountJpy: 1000,
+        evidenceIds: ['e'],
+      },
+    ]
     db.saveConfiguration(configuration)
     initial.exec('ALTER TABLE provider_charge_periods DROP COLUMN contract_confirmation_json')
     initial.close()
@@ -139,15 +149,26 @@ describe('session storage', () => {
     db = await import('../../src/server/database.ts')
     const restored = db.getConfiguration()
     expect(restored.chargePeriods).toEqual(configuration.chargePeriods)
-    const filename = readdirSync(sessionDirectory).find((name) => name.includes('before-charge-contract-confirmation-'))!
+    const filename = readdirSync(sessionDirectory).find((name) =>
+      name.includes('before-charge-contract-confirmation-'),
+    )!
     expect(filename).toBeTruthy()
-    const backup = new DatabaseSync(join(sessionDirectory,filename), { readOnly: true })
+    const backup = new DatabaseSync(join(sessionDirectory, filename), { readOnly: true })
     try {
-      expect(backup.prepare('PRAGMA integrity_check').get()).toEqual({integrity_check:'ok'})
-      expect(backup.prepare('SELECT amount_jpy FROM provider_charge_periods').get()).toEqual({amount_jpy:1000})
-    } finally { backup.close() }
+      expect(backup.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' })
+      expect(backup.prepare('SELECT amount_jpy FROM provider_charge_periods').get()).toEqual({
+        amount_jpy: 1000,
+      })
+    } finally {
+      backup.close()
+    }
     const period = restored.chargePeriods[0]!
-    period.contractConfirmation = { reference:'業務契約',reason:'請求と契約明細を照合',confirmedAt:'2026-09-09T00:00:00Z',basis:chargeContractBasis(period) }
+    period.contractConfirmation = {
+      reference: '業務契約',
+      reason: '請求と契約明細を照合',
+      confirmedAt: '2026-09-09T00:00:00Z',
+      basis: chargeContractBasis(period),
+    }
     db.saveConfiguration(restored)
     db.getDatabase().close()
     vi.resetModules()

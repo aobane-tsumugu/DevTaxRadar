@@ -45,7 +45,11 @@ function monetaryEstimates(
 ): Pick<TaxDecision, 'currentYearExpenseEstimate' | 'futureBalanceEstimate' | 'estimateStatus'> {
   if (candidate === 'private-use')
     return { currentYearExpenseEstimate: 0, futureBalanceEstimate: 0, estimateStatus: 'estimated' }
-  if (businessAmount === null || candidate === 'unclassified' || candidate === 'capital-expenditure')
+  if (
+    businessAmount === null ||
+    candidate === 'unclassified' ||
+    candidate === 'capital-expenditure'
+  )
     return {
       currentYearExpenseEstimate: null,
       futureBalanceEstimate: null,
@@ -70,7 +74,9 @@ export function decideTaxCandidate(input: TaxDecisionInput): TaxDecision {
     throw new RangeError('amount must be a finite non-negative number')
   if (
     input.privateUseRatio !== undefined &&
-    (!Number.isFinite(input.privateUseRatio) || input.privateUseRatio < 0 || input.privateUseRatio > 1)
+    (!Number.isFinite(input.privateUseRatio) ||
+      input.privateUseRatio < 0 ||
+      input.privateUseRatio > 1)
   )
     throw new RangeError('private use ratio must be between 0 and 1')
 
@@ -99,7 +105,9 @@ export function decideTaxCandidate(input: TaxDecisionInput): TaxDecision {
   } else if (input.workPurpose === 'ordinary-operation') {
     candidate = 'ordinary-expense'
     appliedRuleIds.push('TAX-ORDINARY-OPERATION')
-    reasons.push('特定資産の供用・修繕とは別の通常業務です。受益期間・債務確定等は費用の条件として確認します。')
+    reasons.push(
+      '特定資産の供用・修繕とは別の通常業務です。受益期間・債務確定等は費用の条件として確認します。',
+    )
   } else if (input.workPurpose === 'sales-production') {
     if (input.workInProgressAtPeriodEnd === true) {
       candidate = 'production-cost'
@@ -120,7 +128,9 @@ export function decideTaxCandidate(input: TaxDecisionInput): TaxDecision {
     }
   } else if (
     input.workInProgressAtPeriodEnd === true &&
-    ['software-sale', 'contract-development', 'digital-content-sale'].includes(input.revenueModel ?? '')
+    ['software-sale', 'contract-development', 'digital-content-sale'].includes(
+      input.revenueModel ?? '',
+    )
   ) {
     candidate = 'production-cost'
     appliedRuleIds.push('TAX-PRODUCTION-WIP')
@@ -179,7 +189,8 @@ export function decideTaxCandidate(input: TaxDecisionInput): TaxDecision {
     reasons,
     missingFacts: [...new Set(missingFacts)],
     // Confidence describes the evidence; it is not an additional approval state.
-    userConfirmationRequired: !input.userConfirmed || missingFacts.length > 0 || candidate === 'unclassified',
+    userConfirmationRequired:
+      !input.userConfirmed || missingFacts.length > 0 || candidate === 'unclassified',
     ...monetaryEstimates(candidate, businessAmount),
   }
 }

@@ -47,8 +47,12 @@ export default function EquipmentCalculationsPanel({
               {row.result?.calculation ? (
                 <p>
                   設備全体の期首・当年取得基礎 {yen.format(row.result.calculation.openingBasisJpy)}{' '}
-                  / {row.result.engineVersion === 'jp-individual-small-equipment/1' ? '少額設備の費用基礎'
-                    : row.result.engineVersion === 'jp-individual-equipment-pool/1' ? '3年一括償却の費用基礎' : '普通償却'}{' '}
+                  /{' '}
+                  {row.result.engineVersion === 'jp-individual-small-equipment/1'
+                    ? '少額設備の費用基礎'
+                    : row.result.engineVersion === 'jp-individual-equipment-pool/1'
+                      ? '3年一括償却の費用基礎'
+                      : '普通償却'}{' '}
                   {yen.format(row.result.calculation.depreciationJpy)} / 期末{' '}
                   {yen.format(row.result.calculation.closingBasisJpy)}
                 </p>

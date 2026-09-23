@@ -56,20 +56,33 @@ export default function WorkspaceAttemptPanel({
             if (!file) return
             setBusy(true)
             try {
-              if (file.size > WORKSPACE_ATTEMPT_LIMIT) throw new Error('控えファイルが大きすぎます。')
+              if (file.size > WORKSPACE_ATTEMPT_LIMIT)
+                throw new Error('控えファイルが大きすぎます。')
               const record = decodeWorkspaceAttempt(await file.text())
               if (record.datasetId !== datasetId)
                 throw new Error('別のデータセットの控えです。この資料へは再送できません。')
-              const existing = records.find((row) => row.request.requestId === record.request.requestId)
+              const existing = records.find(
+                (row) => row.request.requestId === record.request.requestId,
+              )
               if (
                 existing &&
-                JSON.stringify([existing.base, existing.request]) !== JSON.stringify([record.base, record.request])
+                JSON.stringify([existing.base, existing.request]) !==
+                  JSON.stringify([record.base, record.request])
               )
-                throw new Error('同じ要求IDで内容の異なる控えがあります。送信せず確認してください。')
-              setRecords([record, ...records.filter((row) => row.request.requestId !== record.request.requestId)])
-              setMessage('ファイル控えを読み込みました。まだ送信していません。対象と変更内容を確認してください。')
+                throw new Error(
+                  '同じ要求IDで内容の異なる控えがあります。送信せず確認してください。',
+                )
+              setRecords([
+                record,
+                ...records.filter((row) => row.request.requestId !== record.request.requestId),
+              ])
+              setMessage(
+                'ファイル控えを読み込みました。まだ送信していません。対象と変更内容を確認してください。',
+              )
             } catch (error) {
-              setMessage(error instanceof Error ? error.message : '控えファイルを読み込めませんでした。')
+              setMessage(
+                error instanceof Error ? error.message : '控えファイルを読み込めませんでした。',
+              )
             } finally {
               input.value = ''
               setBusy(false)
@@ -103,8 +116,12 @@ export default function WorkspaceAttemptPanel({
             onClick={() => {
               try {
                 removeWorkspaceAttempt(window.localStorage, record)
-                setRecords((current) => current.filter((row) => row.request.requestId !== record.request.requestId))
-                setMessage('ブラウザの控えと一覧から取り除きました。端末上のファイル控えは削除していません。')
+                setRecords((current) =>
+                  current.filter((row) => row.request.requestId !== record.request.requestId),
+                )
+                setMessage(
+                  'ブラウザの控えと一覧から取り除きました。端末上のファイル控えは削除していません。',
+                )
               } catch (error) {
                 setMessage(error instanceof Error ? error.message : '控えを削除できませんでした。')
               }
@@ -118,8 +135,12 @@ export default function WorkspaceAttemptPanel({
               setBusy(true)
               try {
                 await onRetry(record)
-                setRecords((current) => current.filter((row) => row.request.requestId !== record.request.requestId))
-                setMessage('保存結果を確認しました。端末上のファイル控えは必要に応じてご自身で整理してください。')
+                setRecords((current) =>
+                  current.filter((row) => row.request.requestId !== record.request.requestId),
+                )
+                setMessage(
+                  '保存結果を確認しました。端末上のファイル控えは必要に応じてご自身で整理してください。',
+                )
               } catch (error) {
                 setMessage(
                   error instanceof Error ? error.message : '保存結果を確認できませんでした。',

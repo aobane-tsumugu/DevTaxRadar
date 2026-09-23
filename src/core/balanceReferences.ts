@@ -1,4 +1,7 @@
-import { adjustmentBalanceLinkIssues, type AdjustmentCostContext } from './adjustmentBalanceLinks.js'
+import {
+  adjustmentBalanceLinkIssues,
+  type AdjustmentCostContext,
+} from './adjustmentBalanceLinks.js'
 import { externalOpeningIssues } from './externalOpening.js'
 import type { BalanceSnapshot } from '../accounting/types.js'
 import type { PlanningSnapshot } from '../planning/types.js'
@@ -63,7 +66,8 @@ export function checkBalanceReferences(
     planning = {
       ...planning,
       sourceAdjustments: (planning.sourceAdjustments ?? []).filter(
-        (row) => row.effect === 'restate-original-cost' ||
+        (row) =>
+          row.effect === 'restate-original-cost' ||
           Number(row.occurredOn.slice(0, 4)) <= reviewYear,
       ),
     }
@@ -161,11 +165,10 @@ export function checkBalanceReferences(
     const to = movement.kind === 'transfer' ? accounts.get(movement.toAccountId) : undefined
     const successorTransfer = Boolean(
       from &&
-        to &&
-        from.taxUnitId !== to.taxUnitId &&
-        decision.taxUnitId === to.taxUnitId &&
-        planning.taxUnits.find((item) => item.id === to.taxUnitId)?.predecessorId ===
-          from.taxUnitId,
+      to &&
+      from.taxUnitId !== to.taxUnitId &&
+      decision.taxUnitId === to.taxUnitId &&
+      planning.taxUnits.find((item) => item.id === to.taxUnitId)?.predecessorId === from.taxUnitId,
     )
     if (
       !successorTransfer &&
@@ -242,7 +245,8 @@ export function checkBalanceReferences(
   }
   const adjustments = planning.sourceAdjustments ?? []
   for (const row of adjustments) {
-    if (row.effect === 'balance-reduction') sources('movement', row.balanceMovementId!, [row.sourceId, ...row.evidenceIds])
+    if (row.effect === 'balance-reduction')
+      sources('movement', row.balanceMovementId!, [row.sourceId, ...row.evidenceIds])
   }
   for (const issue of adjustmentBalanceLinkIssues(adjustments, snapshot, adjustmentCosts))
     add('movement', issue.movementId, issue.recordId, 'adjustment-link', issue.message)

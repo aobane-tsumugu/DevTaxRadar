@@ -13,7 +13,9 @@ export async function saveWorkspaceFixture(
   const has = (key: keyof typeof patch) => Object.hasOwn(patch, key)
   const planning = has('projectRules')
     ? { ...current.planning, projectRules: patch.projectRules }
-    : has('planning') ? patch.planning : current.planning
+    : has('planning')
+      ? patch.planning
+      : current.planning
   return fetch(origin + '/api/workspace', {
     method: 'PUT',
     headers: {

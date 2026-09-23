@@ -8,14 +8,20 @@ type Props = ComponentProps<typeof SoftwareAcquisitionForm> & {
 }
 
 /** Acquisition and annual expense selection share the existing balance draft and save path. */
-export default function SoftwareAcquisitionPanel({ onReviewAnnualDecision, viewedYear, ...props }: Props) {
-  return <>
-    <SoftwareAcquisitionForm {...props} />
-    <SoftwareMethodPanel
-      key={props.datasetId}
-      {...props}
-      viewedYear={viewedYear}
-      onReviewAnnualDecision={onReviewAnnualDecision}
-    />
-  </>
+export default function SoftwareAcquisitionPanel({
+  onReviewAnnualDecision,
+  viewedYear,
+  ...props
+}: Props) {
+  return (
+    <>
+      <SoftwareAcquisitionForm {...props} />
+      <SoftwareMethodPanel
+        key={props.datasetId}
+        {...props}
+        viewedYear={viewedYear}
+        onReviewAnnualDecision={onReviewAnnualDecision}
+      />
+    </>
+  )
 }
