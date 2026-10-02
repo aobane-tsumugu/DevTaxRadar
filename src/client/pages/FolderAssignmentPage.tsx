@@ -407,11 +407,11 @@ export default function FolderAssignmentPage({
                             <div className="session-detail">
                               {detail.available === false ? (
                                 <p className="session-missing">
-                                  この履歴の参照情報がありません。再度スキャンすると復元されます。
+                                  この履歴の参照情報がありません。元ファイルが残っている場合は再走査で確認できます。
                                 </p>
                               ) : detail.transcriptExists === false ? (
                                 <p className="session-missing">
-                                  元の履歴は削除済みです。集計値だけが残っています。
+                                  元の履歴を現在の場所で確認できません。保存済みの集計値は残っていますが、本文の復元や再開はできません。
                                 </p>
                               ) : (
                                 <p className="session-preview">

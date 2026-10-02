@@ -3,6 +3,7 @@ import type {
   ObservationRecord,
   ObservationRecordSummary,
 } from '../../accounting/observationRecord'
+import { captureWarnings } from '../../core/captureProvenance'
 import { isLocalRuntime } from '../dashboard'
 
 type Listing = { records: ObservationRecordSummary[]; unreadable: number; nextOffset?: number }
@@ -77,7 +78,7 @@ export default function ObservationRecordsPanel() {
     <details aria-label="取得時点の数値記録">
       <summary>再走査前後の数値記録を読む（年度未採用でも保存）</summary>
       <p>
-        元履歴が消える前に取り込んだ数値、費用の入力と計算結果、取得来歴を保存しています。原本・会話本文の控えでも、税務処理の採用や法定保存の代替でもありません。
+        元履歴が消える前に取り込んだ数値、費用の入力と計算結果、取得来歴を保存しています。原本・会話本文のバックアップではなく、取り込み前に削除された履歴は復元できません。税務処理の採用や法定保存の代替でもありません。
       </p>
       <button type="button" disabled={busy} onClick={() => void load()}>
         保存した数値記録を表示
@@ -104,7 +105,9 @@ export default function ObservationRecordsPanel() {
               </p>
               <p>
                 前回値を使用したファイル {row.deferredPrevious}件、初回取得を保留したファイル{' '}
-                {row.deferredMissing}件、取得来歴が不明または不完全な読み取り元{' '}
+                {row.deferredMissing}件、原本が見つからず数値を保持したファイル{' '}
+                {row.missingRetained ?? 0}件、原本との対応未確認で数値を保持したセッション{' '}
+                {row.unverifiedRetained ?? 0}件、取得来歴が不明または不完全な読み取り元{' '}
                 {row.incompleteSources}件
               </p>
               <button type="button" disabled={busy} onClick={() => void open(row.id)}>
@@ -127,6 +130,20 @@ export default function ObservationRecordsPanel() {
             未算定：{record.payload.costs.totals.unknownBasisIds.length}件 / 計算時間帯：
             {record.payload.timeZone}
           </p>
+          <ul aria-label="保存時点の取得状態">
+            {(['claude', 'codex'] as const).flatMap((provider) =>
+              captureWarnings(
+                record.payload.sources.map((source) => ({
+                  ...source,
+                  capture: record.payload.captures.find(
+                    (capture) =>
+                      capture.sourceId === source.sourceId && capture.provider === source.provider,
+                  ),
+                })),
+                provider,
+              ).map((warning) => <li key={`${provider}:${warning}`}>{warning}</li>),
+            )}
+          </ul>
           <p>記録ID：{record.id}</p>
           <details>
             <summary>出力する内容を確認</summary>

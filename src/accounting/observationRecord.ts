@@ -21,7 +21,15 @@ export type RecordedObservation = {
 
 export type FileCapture = {
   fileKey: string
-  state: 'read' | 'reused' | 'deferred-previous' | 'deferred-missing'
+  state:
+    | 'read'
+    | 'reused'
+    | 'deferred-previous'
+    | 'deferred-missing'
+    /** Absent in the last completed walk; imported numerical contribution is retained. */
+    | 'missing-retained'
+    /** Retained summary has no usable file-cache correspondence; absence is unproven. */
+    | 'unverified-retained'
   adapter: string
   schemaVersion: string
   eventCount: number
@@ -35,6 +43,7 @@ export type SourceCapture = {
   checkedAt: string
   timeZone: string
   mode: 'incremental' | 'full'
+  /** Walk status only; retained and deferred files are not freshly verified. */
   status: 'complete' | 'unavailable' | 'failed'
   observationsHash: string
   files: FileCapture[]
@@ -76,6 +85,10 @@ export type ObservationRecordSummary = {
   observationCount: number
   deferredPrevious: number
   deferredMissing: number
+  /** Retained absent-file contributions; optional for older API responses. */
+  missingRetained?: number
+  /** Unique sessions without usable file-cache correspondence. */
+  unverifiedRetained?: number
   incompleteSources: number
 }
 

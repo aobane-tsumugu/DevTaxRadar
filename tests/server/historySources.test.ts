@@ -341,7 +341,7 @@ describe('configured filesystem history sources', () => {
     expect(database.getUsageSessions()).toHaveLength(1)
   })
 
-  it('Codexも未変更ファイルを再読込みせず、変更と削除をファイル単位で反映する', async () => {
+  it('Codexも未変更ファイルを再読込みせず、変更を反映し削除後は数値を保持する', async () => {
     const codexFixture = join(root, 'pc1-codex-incremental')
     const codexHistory = join(codexFixture, '2026', '04')
     mkdirSync(codexHistory, { recursive: true })
@@ -376,9 +376,10 @@ describe('configured filesystem history sources', () => {
     rmSync(history)
     const deleted = await scanner.scanHistorySources(['codex'], [source.id])
     expect(deleted.sources[0]).toEqual(
-      expect.objectContaining({ sourceId: source.id, status: 'complete', events: 0 }),
+      expect.objectContaining({ sourceId: source.id, status: 'complete', events: 1 }),
     )
-    expect(database.getHistoryFileCacheEntries(source.id, 'codex')).toEqual([])
+    expect(database.getHistoryFileCacheEntries(source.id, 'codex')).toHaveLength(1)
+    expect(database.getHistoryFileCacheEntries(source.id, 'codex')[0]?.sourceState).toBe('missing')
   })
 
   it('変更中のファイルはタイミング競合なしに前回の寄与を保持する', async () => {

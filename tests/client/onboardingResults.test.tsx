@@ -50,6 +50,76 @@ describe('onboarding result refresh', () => {
     container?.remove()
     container = undefined
   })
+  it('keeps retained-history warnings visible after advancing past the scan step', async () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const scan = vi.fn(async () => ({
+      completedAt: '2026-09-01T00:00:00Z',
+      providers: {
+        codex: {
+          events: 3,
+          diagnostics: { filesMissingRetained: 1, sessionsUnverifiedRetained: 2, filesDeferred: 1 },
+        },
+      },
+      sources: [],
+    }))
+    function Harness() {
+      const [step, setStep] = useState(0)
+      return (
+        <Onboarding
+          step={step}
+          onStep={setStep}
+          data={demoDashboard}
+          runtime={runtime}
+          runtimeLoading={false}
+          historySources={(['claude', 'codex'] as const).map((provider) => ({
+            id: `synthetic-${provider}`,
+            provider,
+            kind: 'configured' as const,
+            name: provider,
+            root: `/synthetic/${provider}`,
+            enabled: true,
+            availability: 'available' as const,
+            lastScan: { status: 'never' as const },
+          }))}
+          configuration={configuration}
+          planning={demoPlanning}
+          unassignedFolderCount={0}
+          onScan={scan}
+          onSaveHistorySource={async () => {}}
+          onTestHistorySource={async () => ({ availability: 'available', filesDiscovered: 0 })}
+          onRemoveHistorySource={async () => {}}
+          onSaveRetention={async (days) => ({ days })}
+          onSaveWorkspace={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+    }
+    try {
+      await act(async () => root.render(<Harness />))
+      const start = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === '履歴を確認して次へ',
+      )!
+      await act(async () => start.click())
+      expect(scan).toHaveBeenCalledOnce()
+      expect(container.querySelector('.setup-progress')?.getAttribute('aria-label')).toBe(
+        '2/5まで進みました',
+      )
+      const warnings = container.querySelector('[aria-label="履歴の取得状態"]')!.textContent
+      expect(warnings).toContain('見つからなかった原本1ファイルの取込済み数値を保持')
+      expect(warnings).toContain('原本との対応を確認できない2セッション')
+      expect(warnings).toContain('取り込み前に削除された履歴は復元できません')
+      expect(warnings).toContain('初回のものは未取得')
+      expect(container.querySelector('.setup-notice')!.textContent).toContain(
+        '原本を確認できない保存済み数値を含みます',
+      )
+      expect(container.querySelector('.setup-notice.success')).toBeNull()
+    } finally {
+      await act(async () => root.unmount())
+    }
+  })
+
   it('carries the question into the correct unit and year without saving or confirming a decision', async () => {
     container = document.createElement('div')
     document.body.append(container)

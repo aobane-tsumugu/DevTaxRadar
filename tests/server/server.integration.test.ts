@@ -480,6 +480,25 @@ describe('local API integration through the versioned workspace', () => {
         expect(body).not.toContain(marker)
     expect(readFileSync(join(root, 'data', 'devtax-radar.db'), 'utf8')).not.toContain(prompt)
   })
+  it('keeps deleted Codex numerical usage but never offers a missing transcript resume command', async () => {
+    const dashboard = await json<DashboardData>('/api/dashboard')
+    const project = dashboard.products.find((row) => row.providers?.includes('Codex'))!
+    const before = await json<{ sessions: Array<{ sessionKey: string; provider: string }> }>(
+      '/api/sessions?projectKey=' + encodeURIComponent(project.projectKey!),
+    )
+    const session = before.sessions[0]!
+    const detailUrl = `/api/sessions/detail?provider=codex&sessionKey=${session.sessionKey}`
+    expect(await json(detailUrl)).toMatchObject({ available: true, transcriptExists: true })
+    rmSync(join(root, '.codex', 'sessions', 'synthetic.jsonl'))
+    expect((await post('/api/scan', { providers: ['codex'] })).status).toBe(200)
+    expect(
+      await json('/api/sessions?projectKey=' + encodeURIComponent(project.projectKey!)),
+    ).toEqual(before)
+    const detail = await json<Record<string, unknown>>(detailUrl)
+    expect(detail).toMatchObject({ available: true, transcriptExists: false })
+    expect(detail).not.toHaveProperty('preview')
+    expect(detail).not.toHaveProperty('resume')
+  })
   it('backs up retention settings only after an explicit request', async () => {
     const response = await post('/api/retention', { days: 365 })
     expect(response.status).toBe(200)

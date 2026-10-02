@@ -101,11 +101,23 @@ Hostは起動したloopbackのportまで照合する。更新要求はCSRF token
 | ファイル一覧 | 明示root → 不透明file keyの集合 | 完全列挙できなければ消失扱いで既存寄与を消さない |
 | 増分判定 | size/mtime/adapter/schema → reuseまたはparse | cacheは観測の最適化。採用版の保存機構に兼用しない |
 | Adapter | JSONL → 正規化usage・精度・警告 | 不安定/不適合fileは前回有効寄与を保持し、新規不適合は未取得として表示 |
-| 集約 | source/契約/期間 → 観測snapshot | source全体I/O失敗は旧snapshotの古さを明示。正常走査での消失は観測のみへ反映 |
+| 集約 | source/契約/期間 → 観測snapshot | source全体I/O失敗は旧snapshotの古さを明示。正常走査で原本が消失しても取込済み数値を保持し、未検証の寄与として来歴へ反映 |
 | 重複確認 | 同一契約内の複製候補 → 採用sourceの対応 | 異なる実契約の利用をnative IDだけで除外しない |
 | 時間対応 | 観測時刻 → 費用対象期間・活動期間 | 形式が持つ以上の時間精度を生成しない。方式版と制約を保存 |
 
-現行Claudeはmessage usage、Codexはfileの最終累積を使う。この差を保存・表示し、cache/reasoningの包含関係を検証した定義で重み付けする。Codexを正確なturn別配賦として表示しない。Adapter更新で粒度が変わる場合も旧採用版は維持する。
+現行Claudeはmessage usage、Codexはfile内の累積スナップショット差分を使う。この差を保存・表示し、cache/reasoningの包含関係を検証した定義で重み付けする。Codexを正確なturn別配賦として表示しない。Adapter更新で粒度が変わる場合も旧採用版は維持する。
+
+### Codexのアーカイブ移動・原本不在と数値保持
+
+既定のlocal-codexはsessionsと兄弟archived_sessionsを同じsource ID・識別子saltで読み、追加sourceは指定したroot内だけを読む。既定sourceの再接続でもroot名がsessionsの場合だけ兄弟archiveを対象とする。両既定rootがない場合はunavailableで前回snapshotを保持する。一部rootが読めず一覧を確定できない場合も、正常走査による不在とは扱わない。
+
+同じsource/provider/sessionについて採用するファイル寄与は一つ。現在見える候補、通常/configuredルート（sourceRank 0）、既定archive（sourceRank 1）、新しいmtime、同値ならfileKeyの順に決定的に選ぶ。複製を加算せず、現在利用可能な選択コピーでセッション全体を置換する。過去最大値へ固定せず減額訂正も受け入れる。選択順は真の最新版を証明するものではなく、異なるsourceのコピーまで同一視しない。
+
+正常に一覧取得したsourceで、前回取り込んだファイルが見つからない場合、その数値寄与を保持してFileCapture.stateをmissing-retainedとする。古いusage_eventsや再接続後など、使えるファイルcacheとの対応がないセッション集計はunverified-retainedとし、存在しないイベント明細や時刻精度を作らない。再取得できた同じセッションは旧集計を置き換える。unavailable/failedはsource statusとして残し、missing-retainedは最後に正常走査できた時点の不在、unverified-retainedは対応未確認として区別する。削除・移動・未観測の原因は確定しない。
+
+走査API diagnosticsのfilesMissingRetainedは数値寄与を保持した不在ファイル数（採用されなかった複製は除く）、sessionsUnverifiedRetainedは対応未確認セッション数。数値記録一覧は任意フィールドmissingRetained/unverifiedRetainedで同じ単位を返し、古い応答を読むUIは未収録の件数を0とする。completeは走査の完了を指し、保持・保留した寄与の最新性を保証しない。保持状態を数値記録、費用の来歴警告、画面・JSON/Markdownへ渡し、現行データで過去の保存版を補完しない。
+
+保存対象は取り込んだ数値・不透明参照・取得来歴で、会話本文は保存しない。取り込み前に削除された履歴の復元、原本バックアップ、税務上の証明・法定保存の適合は提供しない。検証は合成fixtureと一時ディレクトリで行い、実際のCodex履歴を読まない。
 
 capture statusはobserved、stale、estimated、unknown、conflicted等を契約×期間で持つ。未知割合に既定値を自動採用しない。旧snapshotと捕捉外の留保を二重計上しない。
 

@@ -292,6 +292,8 @@ function Onboarding({
             filesRead?: number
             filesReused?: number
             filesDeferred?: number
+            filesMissingRetained?: number
+            sessionsUnverifiedRetained?: number
           }
         | undefined
       const nonUtc = Number(diagnostics?.nonUtcTimestamps ?? 0)
@@ -309,14 +311,31 @@ function Onboarding({
       const filesRead = Number(diagnostics?.filesRead ?? 0)
       const filesReused = Number(diagnostics?.filesReused ?? 0)
       const filesDeferred = Number(diagnostics?.filesDeferred ?? 0)
+      const filesMissingRetained = Number(diagnostics?.filesMissingRetained ?? 0)
+      const sessionsUnverifiedRetained = Number(diagnostics?.sessionsUnverifiedRetained ?? 0)
       if (filesRead + filesReused > 0) {
         notes.push(
           `${label}は変更あり${filesRead}ファイルを読み、変更なし${filesReused}ファイルは前回結果を再利用しました。`,
         )
       }
+      if (filesMissingRetained > 0) {
+        notes.push(
+          `${label}は今回の走査で見つからなかった原本${filesMissingRetained}ファイルの取込済み数値を保持しました。削除・移動等の理由は判定できません。`,
+        )
+      }
+      if (sessionsUnverifiedRetained > 0) {
+        notes.push(
+          `${label}は原本との対応を確認できない${sessionsUnverifiedRetained}セッションの取込済み数値を保持しました。削除されたのか、まだ見えていないのかは未確認です。`,
+        )
+      }
+      if (filesMissingRetained || sessionsUnverifiedRetained) {
+        notes.push(
+          `${label}の保持済み数値を新しく確認できた利用量とは扱いません。元の会話本文のバックアップではなく、取り込み前に削除された履歴は復元できません。`,
+        )
+      }
       if (filesDeferred > 0) {
         notes.push(
-          `${label}の更新中または形式確認待ち${filesDeferred}ファイルは、そのファイルだけ前回の正常値を保持しました。`,
+          `${label}の更新中または形式確認待ち${filesDeferred}ファイルは取得を保留しました。前回の正常値がある分は保持し、初回のものは未取得です。`,
         )
       }
     }
@@ -767,12 +786,19 @@ function Onboarding({
         const incompleteSources = (result.sources ?? []).filter(
           (source) => source.status !== 'complete',
         )
+        const hasRetained = Object.values(result.providers).some(
+          (provider) =>
+            Number(provider?.diagnostics?.filesMissingRetained ?? 0) > 0 ||
+            Number(provider?.diagnostics?.sessionsUnverifiedRetained ?? 0) > 0,
+        )
         setNotice({
-          kind: incompleteSources.length > 0 ? 'info' : 'success',
+          kind: incompleteSources.length > 0 || hasRetained ? 'info' : 'success',
           message:
             incompleteSources.length > 0
               ? `${events.toLocaleString()}件を更新しました。読めなかった読み取り元は、前回の正常な取り込み分を保持しています。`
-              : `${events.toLocaleString()}件の利用記録をローカルに取り込みました。`,
+              : hasRetained
+                ? `${events.toLocaleString()}件の利用記録を保持しています。原本を確認できない保存済み数値を含みます。`
+                : `${events.toLocaleString()}件の利用記録をローカルに取り込みました。`,
         })
         onStep(1)
       } catch (error) {
@@ -1095,6 +1121,13 @@ function Onboarding({
         <div className="onboarding-main">
           <div className="onboarding-body" ref={onboardingBodyRef}>
             <PlanningDateRepairPanel planning={planningDraft} onChange={setPlanningDraft} />
+            {!busy && lastScanResult && scanNotes.length > 0 && (
+              <p className="scan-note" role="status" aria-label="履歴の取得状態">
+                {scanNotes.map((note) => (
+                  <span key={note}>{note}</span>
+                ))}
+              </p>
+            )}
             {isDemoData && (
               <div className="demo-mode-banner" role="status">
                 <strong>デモモード</strong>
@@ -1326,13 +1359,6 @@ function Onboarding({
                     {scanProgress?.running
                       ? `${scanProgress.sourceName ?? (scanProgress.provider === 'codex' ? 'Codex' : 'Claude Code')}の履歴を走査しています。走査したファイル数：${scanProgress.filesScanned}`
                       : '履歴を確認しています。'}
-                  </p>
-                )}
-                {!busy && lastScanResult && scanNotes.length > 0 && (
-                  <p className="scan-note" role="status">
-                    {scanNotes.map((note) => (
-                      <span key={note}>{note}</span>
-                    ))}
                   </p>
                 )}
                 <div className="privacy-callout">

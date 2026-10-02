@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -45,6 +46,60 @@ function send(path: string, method: 'POST' | 'PUT', body: string, withCsrf = tru
       ...(withCsrf ? { 'x-devtax-csrf': csrfToken } : {}),
     },
     body,
+  })
+}
+
+/**
+ * The parser can send 413 and close the connection before a large upload has
+ * finished. Node's fetch can then reject on the write side (EPIPE), discarding
+ * the already-sent response. Collect the real HTTP response independently.
+ * An upload error alone is NEVER success: a complete response is mandatory.
+ */
+function sendOversized(path: string, method: 'POST' | 'PUT', body: string): Promise<Response> {
+  return new Promise((resolveResponse, reject) => {
+    let responseStarted = false
+    let uploadError: Error | undefined
+    const request = httpRequest(
+      origin + path,
+      {
+        method,
+        agent: false,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body, 'utf8'),
+          origin,
+          'x-devtax-csrf': csrfToken,
+        },
+      },
+      (response) => {
+        responseStarted = true
+        const chunks: Buffer[] = []
+        response.on('data', (chunk: Buffer) => chunks.push(chunk))
+        response.once('error', reject)
+        response.once('aborted', () => reject(new Error('Oversized request response was aborted')))
+        response.once('end', () => {
+          if (!response.complete || response.statusCode === undefined) {
+            reject(new Error('Oversized request did not receive a complete HTTP response'))
+            return
+          }
+          resolveResponse(
+            new Response(Buffer.concat(chunks).toString('utf8'), {
+              status: response.statusCode,
+            }),
+          )
+        })
+      },
+    )
+    request.once('error', (error) => {
+      uploadError = error
+      // A response, when started, has its own completion/error handlers above.
+    })
+    request.once('close', () => {
+      if (!responseStarted)
+        reject(uploadError ?? new Error('No HTTP response to oversized request'))
+    })
+    request.setTimeout(4_000, () => request.destroy(new Error('Oversized request timed out')))
+    request.end(body)
   })
 }
 
@@ -177,7 +232,7 @@ describe('workspace request capacity', () => {
     const input = requestFor(before)
     const { requestId: _requestId, ...previewInput } = input
     const body = padToBytes(method === 'POST' ? previewInput : input, WORKSPACE_BODY_LIMIT + 1)
-    const response = await send(path, method, body)
+    const response = await sendOversized(path, method, body)
     expect(response.status).toBe(413)
     expect(await response.json()).toMatchObject({
       error: 'workspace_too_large',

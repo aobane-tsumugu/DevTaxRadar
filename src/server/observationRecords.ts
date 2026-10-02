@@ -1,3 +1,4 @@
+import { retainedCaptureCounts } from '../core/captureProvenance.js'
 import { collapseObservations } from '../core/usageGranularity.js'
 import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
@@ -92,7 +93,14 @@ function cleanCapture(input: SourceCapture): SourceCapture {
         if (
           !file ||
           !/^[a-f0-9]{64}$/.test(file.fileKey) ||
-          !['read', 'reused', 'deferred-previous', 'deferred-missing'].includes(file.state) ||
+          ![
+            'read',
+            'reused',
+            'deferred-previous',
+            'deferred-missing',
+            'missing-retained',
+            'unverified-retained',
+          ].includes(file.state) ||
           typeof file.adapter !== 'string' ||
           typeof file.schemaVersion !== 'string' ||
           !Number.isSafeInteger(file.eventCount) ||
@@ -299,6 +307,7 @@ export function listObservationRecords(
     try {
       const record = readObservationRecord(db, row.key.slice(recordPrefix.length))!
       const captures = record.payload.captures
+      const retained = captures.map((capture) => retainedCaptureCounts(capture.files))
       records.push({
         id: record.id,
         createdAt: record.createdAt,
@@ -312,11 +321,22 @@ export function listObservationRecords(
         deferredMissing: captures
           .flatMap((capture) => capture.files)
           .filter((file) => file.state === 'deferred-missing').length,
+        missingRetained: retained.reduce((sum, counts) => sum + counts.missingRetained, 0),
+        unverifiedRetained: retained.reduce((sum, counts) => sum + counts.unverifiedRetained, 0),
         incompleteSources: record.payload.sources.filter((source) => {
           const capture = captures.find(
             (row) => row.sourceId === source.sourceId && row.provider === source.provider,
           )
-          return !capture || !capture.matchesCurrentValues || capture.status !== 'complete'
+          return (
+            !capture ||
+            !capture.matchesCurrentValues ||
+            capture.status !== 'complete' ||
+            capture.files.some(
+              (file) =>
+                (file.state === 'missing-retained' && file.eventCount > 0) ||
+                file.state === 'unverified-retained',
+            )
+          )
         }).length,
       })
     } catch {
