@@ -50,12 +50,16 @@ function send(path: string, method: 'POST' | 'PUT', body: string, withCsrf = tru
 }
 
 /**
- * The parser can send 413 and close the connection before a large upload has
- * finished. Node's fetch can then reject on the write side (EPIPE), discarding
- * the already-sent response. Collect the real HTTP response independently.
+ * Content-Length lets the parser reject before reading any body. Uploading the
+ * whole fixture then races the connection close, and EPIPE can prevent even
+ * node:http from receiving the response. Use chunked framing so the real parser
+ * must read the limit + 1 bytes, and finish the in-limit write before sending
+ * the last byte. There is no large pending upload when rejection becomes valid.
  * An upload error alone is NEVER success: a complete response is mandatory.
  */
 function sendOversized(path: string, method: 'POST' | 'PUT', body: string): Promise<Response> {
+  const bytes = Buffer.from(body, 'utf8')
+  expect(bytes.length).toBe(WORKSPACE_BODY_LIMIT + 1)
   return new Promise((resolveResponse, reject) => {
     let responseStarted = false
     let uploadError: Error | undefined
@@ -66,7 +70,7 @@ function sendOversized(path: string, method: 'POST' | 'PUT', body: string): Prom
         agent: false,
         headers: {
           'content-type': 'application/json',
-          'content-length': Buffer.byteLength(body, 'utf8'),
+          'transfer-encoding': 'chunked',
           origin,
           'x-devtax-csrf': csrfToken,
         },
@@ -99,7 +103,13 @@ function sendOversized(path: string, method: 'POST' | 'PUT', body: string): Prom
         reject(uploadError ?? new Error('No HTTP response to oversized request'))
     })
     request.setTimeout(4_000, () => request.destroy(new Error('Oversized request timed out')))
-    request.end(body)
+    request.write(bytes.subarray(0, WORKSPACE_BODY_LIMIT), (error) => {
+      if (error) {
+        request.destroy(error)
+        return
+      }
+      request.end(bytes.subarray(WORKSPACE_BODY_LIMIT))
+    })
   })
 }
 

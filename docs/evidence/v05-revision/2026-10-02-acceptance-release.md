@@ -17,7 +17,7 @@
 
 ## 環境・実行
 
-Node v24.19.0 / npm 11.9.0 / Linux。lockfile に対して `npm ci` を実行した。依存更新は行っていない。
+Node v24.19.0 / npm 11.9.0 / Linux。lockfile に対して `npm ci` を実行した。依存更新は `brace-expansion` 5.0.9 → 5.0.12 の同一majorのセキュリティ修正に限定した。
 
 - `npm ci`: 終了 0
 - `npm run docs:check`: 終了 0（31 要件 / 21 受入条件 / 8 完了条件 / 39 API）
@@ -32,6 +32,12 @@ Node v24.19.0 / npm 11.9.0 / Linux。lockfile に対して `npm ci` を実行し
 最終テスト結果: 179 files、1,686 passed / 1 skipped（合計1,687）。skipはWindowsのパス大小文字検証で、Linuxでは実行しない条件分岐。過去の件数は合算していない。
 
 配布 lifecycle は起動、請求保存・投影、backup 作成・検証、全表 restore、採用資料の単独読取り、再接続、再起動を合成データで検証する。新規保存先のみを使用し、原本接続なしの固定資料も検証する。
+
+## CIで追加検出した事項
+
+初回 `bb1a979` の Windows CI は全ゲートと配布lifecycleに成功。Ubuntuでは既存の過大リクエスト試験がwrite EPIPEで失敗した。Content-Lengthによる早期拒否と2MiB送信の競合を避け、chunkedで制限内の書込み完了後に超過1byteを送る試験へ修正した。完全な413本文・上限値・保存不変の検査は弱めていない。30回の独立したサーバー起動で180試験（過大リクエスト60回）が成功した。最終CIはPRの固定HEADで再実行する。
+
+依存監査では、配布対象の`@fastify/static → glob → minimatch → brace-expansion`に既知のbrace-pattern DoSを確認し、5.0.12へpatch更新した。アプリのwildcard=true設定ではglob列挙の分岐を使わないが、配布依存自体も更新する。`npm audit --omit=dev`は指摘0件。開発専用のVitest/mocker、ViteのPostCSS/nanoid、jsdom等のundici、Wrangler/miniflare/sharpには対応可能な指摘が残る。最小ZIPには開発依存を含めず、全依存の監査完了とはしない。
 
 ## 実ブラウザの確認と制限
 
