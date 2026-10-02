@@ -329,6 +329,9 @@ function cacheMatches(
     cached &&
     cached.valid &&
     cached.sourceState !== 'missing' &&
+    // Pre-retention empty Codex caches cannot identify the session whose zero
+    // usage must supersede archived copies. Read once to recover that identity.
+    (signature.adapter !== CODEX_HISTORY_ADAPTER || (cached.sessionKeys?.length ?? 0) > 0) &&
     cached.byteSize === file.byteSize &&
     cached.fileMtime === file.fileMtime &&
     cached.adapter === signature.adapter &&

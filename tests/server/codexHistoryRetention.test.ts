@@ -338,6 +338,26 @@ describe('Codex history retention lifecycle', () => {
     }
   })
 
+  it('revalidates a legacy empty Codex cache before choosing an archived duplicate', async () => {
+    const active = join(activeRoot, 'synthetic-session.jsonl')
+    writeTranscript(active, [])
+    await scan()
+    // The previous cache schema had no independent identity for zero usage.
+    database.getDatabase().exec("UPDATE history_file_cache SET session_keys_json='[]'")
+    writeTranscript(join(archiveRoot, 'synthetic-session.jsonl'))
+    const result = await scan()
+    expect(result.sources[0]?.diagnostics?.filesRead).toBe(2)
+    expect(sessions()).toEqual([])
+    expect(exactObservations()).toEqual([])
+    expect(
+      database
+        .getHistoryFileCacheEntries('local-codex', 'codex')
+        .find((row) => row.sourceRank === 0)?.sessionKeys,
+    ).toHaveLength(1)
+    await scan()
+    expect(sessions()).toEqual([])
+  })
+
   it('uses the current accepted session across all months, including a zero-usage replacement', async () => {
     const active = join(activeRoot, 'synthetic-session.jsonl')
     writeTranscript(active, [
