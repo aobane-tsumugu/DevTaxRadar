@@ -4222,3 +4222,34 @@ td > .empty-setup {
   padding: 1rem;
   line-height: 1.8;
 }
+
+.product-timeline,
+.activity-editor {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.timeline-entries {
+  padding-left: 1.5rem;
+}
+.timeline-entries > li {
+  border-left: 2px solid var(--border, #ddd);
+  padding: 0 0 1rem 1rem;
+  margin-bottom: 1rem;
+}
+.activity-editor input,
+.activity-editor textarea,
+.activity-editor select {
+  max-width: 100%;
+  min-width: 0;
+}
+.product-timeline details {
+  margin: 1rem 0;
+}
+@media (max-width: 640px) {
+  .activity-editor .simple-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .timeline-entries {
+    padding-left: 1rem;
+  }
+}

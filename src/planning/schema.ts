@@ -1,3 +1,4 @@
+import { activityLedgerSchema } from './activityFacts.js'
 import { sourceAdjustmentsSchema } from './sourceAdjustmentSchema.js'
 import { treatmentDecisionBindingSchema } from './treatmentDecisionBindingSchema.js'
 import { costTreatmentFactsSchema } from './costTreatmentFactsSchema.js'
@@ -274,7 +275,8 @@ const decisionSchema = z
 
 // Manual and imported adjustments use the same validator as persistence.
 export const planningSnapshotSchema = z
-  .object({
+  .strictObject({
+    activityLedger: activityLedgerSchema.optional(),
     sourceAdjustments: sourceAdjustmentsSchema.optional(),
     costTreatmentFacts: costTreatmentFactsSchema.optional(),
     costPresence: costPresenceRecordsSchema.optional(),
@@ -293,6 +295,21 @@ export const planningSnapshotSchema = z
   .superRefine((snapshot, context) => {
     const unitIds = new Set(snapshot.taxUnits.map((unit) => unit.id))
     const knownEvidence = new Set(snapshot.evidence.map((item) => item.id))
+    for (const link of snapshot.activityLedger?.unitLinks ?? [])
+      if (!unitIds.has(link.taxUnitId))
+        context.addIssue({
+          code: 'custom',
+          path: ['activityLedger'],
+          message: '活動記録に対応する費用単位が存在しません。',
+        })
+    for (const fact of snapshot.activityLedger?.facts ?? [])
+      for (const id of fact.evidenceIds)
+        if (!knownEvidence.has(id))
+          context.addIssue({
+            code: 'custom',
+            path: ['activityLedger'],
+            message: '活動記録の証拠が存在しません。',
+          })
     const collections = [
       ['taxUnits', snapshot.taxUnits],
       ['projectRules', snapshot.projectRules],

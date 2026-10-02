@@ -79,6 +79,7 @@ function ContributionList({
 
 export default function CostsPage({
   initial,
+  navigation,
   onEdit,
   local,
   readOnly = false,
@@ -87,6 +88,7 @@ export default function CostsPage({
   adjustmentsEditor,
   treatmentEditor,
 }: {
+  navigation?: { year: number; contributionId?: string; request: number }
   adjustmentsEditor?: (projection: AnnualCostProjection) => ReactNode
   treatmentEditor?: (projection: AnnualCostProjection) => ReactNode
   initial?: AnnualCostProjection
@@ -138,6 +140,11 @@ export default function CostsPage({
       if (id === request.current.generation) setBusy(false)
     }
   }
+  useEffect(() => {
+    if (!navigation) return
+    setYear(String(navigation.year))
+    if (local) void loadYear(String(navigation.year))
+  }, [navigation, local])
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 1900
   return (
     <section className="cost-page" aria-label="全費用の原額と配分">
@@ -247,7 +254,14 @@ export default function CostsPage({
             )}
           </article>
           <h2>原額・期間・配分の明細</h2>
-          <CostTracePanel projection={projection} evidence={evidence} />
+          <CostTracePanel
+            key={`${projection.year}:${navigation?.request ?? 0}`}
+            projection={projection}
+            evidence={evidence}
+            initialContributionId={
+              projection.year === navigation?.year ? navigation.contributionId : undefined
+            }
+          />
           {!projection.sources.length && (
             <p>{projection.year}年に対応する費用源がありません。他の年の記録は削除していません。</p>
           )}

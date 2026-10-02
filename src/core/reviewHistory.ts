@@ -1,3 +1,4 @@
+import { scopedActivityFacts } from '../planning/activityFacts.js'
 import type { ReviewMaterials } from '../accounting/reviewMaterials.js'
 import type { AnnualCostProjection } from '../accounting/costs.js'
 import type { BalanceSnapshot } from '../accounting/types.js'
@@ -71,7 +72,19 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
       const { methodComparison: _scenario, recordedAt: _editedAt, ...production } = fact
       return production
     })
+  const activityFacts = [
+    ...new Map(
+      material.planning.taxUnits
+        .flatMap((unit) =>
+          [...costYears].flatMap((year) =>
+            scopedActivityFacts(material.planning, unit.id, `${year}-01-01`, `${year}-12-31`),
+          ),
+        )
+        .map((fact) => [fact.id, fact]),
+    ).values(),
+  ]
   const evidenceIds = new Set([
+    ...activityFacts.flatMap((fact) => fact.evidenceIds),
     ...costTreatmentFacts.flatMap((fact) => fact.evidenceIds),
     ...costInputs.flatMap((costs) => costs.sources.flatMap((source) => source.evidenceIds)),
     ...costInputs.flatMap((costs) => costs.contributions.flatMap((item) => item.evidenceIds)),
@@ -124,6 +137,7 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
     for (const id of row.evidenceIds) evidenceIds.add(id)
   return ordered({
     year,
+    ...(activityFacts.length ? { activityFacts } : {}),
     timeZone: material.timeZone,
     costs: comparableCosts(material.costs),
     ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}),

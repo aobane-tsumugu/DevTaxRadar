@@ -22,8 +22,10 @@ function targetName(target: CostTarget, projection: AnnualCostProjection) {
 export default function CostTracePanel({
   projection,
   evidence,
+  initialContributionId,
 }: {
   projection: AnnualCostProjection
+  initialContributionId?: string
   evidence?: readonly EvidenceExplanation[]
 }) {
   const traceId = useId()
@@ -48,7 +50,9 @@ export default function CostTracePanel({
     ],
     [projection],
   )
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState(
+    initialContributionId ? `contribution:${initialContributionId}` : '',
+  )
   const choice = options.find((option) => option.key === selected)
   const trace = choice ? traceCost(projection, choice) : null
   return (

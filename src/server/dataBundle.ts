@@ -1,3 +1,4 @@
+import { readActivityLedger } from './activityLedgerRepository.js'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   copyFileSync,
@@ -46,6 +47,8 @@ export function databaseSchemaHash(db: DatabaseSync): string {
   )
 }
 function assertDatabase(db: DatabaseSync) {
+  if (db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name='app_settings'").get())
+    readActivityLedger(db)
   const checks = db.prepare('PRAGMA integrity_check').all()
   if (checks.length !== 1 || checks[0]?.integrity_check !== 'ok')
     throw new Error('バックアップDBの整合性を確認できません。')

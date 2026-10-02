@@ -1,3 +1,4 @@
+import { projectProductTimeline } from '../core/productTimeline.js'
 import { checkTreatmentDecisionReferences } from '../core/treatmentDecisionReferences.js'
 import { sanitizedCaptureContext } from './observationRecords.js'
 import { createHash } from 'node:crypto'
@@ -92,6 +93,9 @@ export function buildReviewMaterials(
   const count = (value: unknown) =>
     typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
   return {
+    ...(planning.activityLedger
+      ? { productTimeline: projectProductTimeline(planning, linkedCosts, balances) }
+      : {}),
     schemaVersion: 1,
     engineVersion: 'review-materials/1',
     year,

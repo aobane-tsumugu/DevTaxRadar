@@ -1,3 +1,8 @@
+import {
+  scopedActivityFacts,
+  activeUnitLinks,
+  activityOverlaps,
+} from '../planning/activityFacts.js'
 import { buildCostMethodComparisons } from './costMethodConnection.js'
 import type { AnnualMethodComparison } from './annualMethodComparison.js'
 import type { AnnualCostProjection } from '../accounting/costs.js'
@@ -84,7 +89,14 @@ function treatmentBasisRecord(
   const events = planning.lifecycleEvents
     .filter((row) => row.taxUnitId === taxUnitId && row.occurredOn <= `${costs.year}-12-31`)
     .sort(compareId)
+  const activityFacts = scopedActivityFacts(
+    planning,
+    taxUnitId,
+    one(costs.bases, cost.basisId).period.startedOn,
+    one(costs.bases, cost.basisId).period.endedOn,
+  )
   const relevantEvidence = unique([
+    ...activityFacts.flatMap((row) => row.evidenceIds),
     ...selectedEvidenceIds,
     ...[...sources.values()].flatMap((row) => [
       ...row.evidenceIds,
@@ -119,6 +131,7 @@ function treatmentBasisRecord(
         }
       : null,
     events,
+    ...(activityFacts.length ? { activityFacts } : {}),
     evidence,
   }
 }
@@ -263,6 +276,36 @@ export function projectCostTreatments(
           missingFacts: ['旧版残高は新しい費用にせず、既存の振替へ対応させてください。'],
         }
       const missing = [...item.missingFacts]
+      const activeProductId =
+        planning.activityLedger && row.target.kind === 'tax-unit'
+          ? activeUnitLinks(planning.activityLedger).find(
+              (link) => row.target.kind === 'tax-unit' && link.taxUnitId === row.target.taxUnitId,
+            )?.productId
+          : undefined
+      const activeActivities = (basisRecord.activityFacts ?? []).filter(
+        (activity) =>
+          !planning.activityLedger?.facts.some((next) => next.correctsId === activity.id) &&
+          activity.productId === activeProductId &&
+          (!activity.taxUnitId ||
+            (row.target.kind === 'tax-unit' && activity.taxUnitId === row.target.taxUnitId)) &&
+          activityOverlaps(activity, basis.period.startedOn, basis.period.endedOn),
+      )
+      if (activeActivities.some((activity) => activity.state === 'conflicted'))
+        missing.push(
+          '活動事実の矛盾を訂正・確認してください。確認元の結び直しだけでは解消しません。',
+        )
+      if (
+        activeActivities.some(
+          (activity) =>
+            activity.state === 'confirmed' &&
+            activity.purpose !== 'unknown' &&
+            activity.purpose !== fact.workPurpose,
+        )
+      )
+        missing.push(
+          '本人確認済みの活動用途と費用の作業目的が一致しません。対象・期間・用途を確認してください。',
+        )
+
       if (!fact.reason.trim()) missing.push('登録した作業実態の理由')
       if (!fact.evidenceIds.length) missing.push('処理条件に対応する根拠参照')
       // Resealing confirms which records were reviewed, not that a missing

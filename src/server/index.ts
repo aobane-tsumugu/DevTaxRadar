@@ -1,3 +1,5 @@
+import { ActivityLedgerConflict } from './activityLedgerRepository.js'
+import { readProductTimeline } from './productTimeline.js'
 import { existsSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -426,6 +428,8 @@ function workspaceView(draft: WorkspaceDraft) {
   }
 }
 function sendWorkspaceError(error: unknown, reply: FastifyReply) {
+  if (error instanceof ActivityLedgerConflict)
+    return reply.code(409).send({ error: 'activity_conflict', message: error.message })
   if (error instanceof WorkspaceConflict)
     return reply.code(409).send({
       error: 'workspace_conflict',
@@ -472,6 +476,7 @@ app.put('/api/workspace', workspaceRequestOptions, async (request, reply) => {
   }
 })
 // Existing read formats stay readable. There is no unversioned planning/config writer.
+app.get('/api/products/timeline', async () => readProductTimeline(getDatabase()))
 app.get('/api/planning', async () => {
   const { getPlanningSnapshot } = await import('./planningRepository.js')
   return getPlanningSnapshot()

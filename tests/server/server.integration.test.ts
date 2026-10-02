@@ -79,6 +79,51 @@ describe('local API integration through the versioned workspace', () => {
     expect((await savePlanningFixture(planning, connection())).status).toBe(200)
     return planning
   }
+  it('reads product activity across years through the real API without private evidence paths', async () => {
+    const planning = await assign()
+    planning.evidence = [
+      {
+        id: 'activity-proof',
+        evidenceType: 'memo',
+        strength: 'self-recorded',
+        recordedAt: '2026-01-01T00:00:00Z',
+        note: '合成資料',
+        localReference: 'PRIVATE_ACTIVITY_PATH_CANARY',
+      },
+    ]
+    planning.activityLedger = {
+      version: 1,
+      products: [{ id: 'product', name: '合成制作物' }],
+      unitLinks: [{ id: 'link', productId: 'product', taxUnitId: 'app' }],
+      facts: [
+        {
+          id: 'activity',
+          productId: 'product',
+          taxUnitId: 'app',
+          kind: 'development',
+          purpose: 'new-development',
+          state: 'estimated',
+          time: { kind: 'period', startedOn: '2025-01-01', endedOn: '2026-12-31' },
+          scope: '初期版',
+          reason: '合成記録から推定',
+          recordedAt: '2026-01-01T00:00:00Z',
+          evidenceIds: ['activity-proof'],
+        },
+      ],
+    }
+    expect((await savePlanningFixture(planning, connection())).status).toBe(200)
+    const view =
+      await json<import('../../src/server/productTimeline.js').ProductTimelineView>(
+        '/api/products/timeline',
+      )
+    expect(view.years).toEqual([2025, 2026])
+    expect(view.products[0]?.id).toBe('product')
+    expect(view.products[0]?.entries.find((row) => row.id === 'activity')?.state).toBe('推定')
+    expect(JSON.stringify(view)).not.toContain('PRIVATE_ACTIVITY_PATH_CANARY')
+    const old = { ...planning }
+    delete old.activityLedger
+    expect((await savePlanningFixture(old, connection())).status).not.toBe(200)
+  })
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'devtax-api-'))
     // The server reads the default history roots under the isolated home.

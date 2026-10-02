@@ -379,6 +379,34 @@ export function reviewExportMarkdown(review: BalanceReview): string {
   }
   if (review.materials) {
     const material = review.materials
+    if (material.productTimeline) {
+      lines.push(
+        '',
+        '## 固定した制作物の活動タイムライン',
+        '',
+        '記録時点の全期間資料。公開・販売・終了から税務処理を確定しません。',
+      )
+      for (const product of material.productTimeline) {
+        lines.push(
+          `- ${text(product.name)} / 制作物ID ${text(product.id)}`,
+          `  - 費用資料の収録年: ${product.costYears?.join('・') || 'なし'}。収録年以外の費用がないという意味ではありません。`,
+        )
+        for (const row of product.entries) {
+          lines.push(
+            `  - ${text(row.time)} / ${text(row.title)} / ${text(row.state)} / ID ${text(row.id)} / 対象 ${text(row.taxUnitId ?? product.id)}`,
+            `    - 範囲 ${text(row.scope)} / 理由 ${text(row.reason)} / 記録日時 ${text(row.recordedAt ?? '旧記録に日時なし')} / 根拠 ${row.evidenceIds.map(text).join(', ') || '未指定'}`,
+          )
+          if (row.correctsId)
+            lines.push(`    - 訂正元 ${text(row.correctsId)} / ${text(row.correctionReason ?? '')}`)
+          if (row.correctedById) lines.push(`    - 訂正後 ${text(row.correctedById)}`)
+          for (const cost of row.costs)
+            lines.push(
+              `    - ${cost.year}年 / 配分 ${text(cost.contributionId)} / 費用基礎 ${text(cost.basisId)} / ${cost.amountJpy === null ? '不明' : cost.amountJpy + '円'}`,
+            )
+        }
+      }
+    }
+
     lines.push('', '## 固定した直接費の制作物別配分', '')
     for (const cost of material.planning.directCosts) {
       if (!cost.incurredOn.startsWith(review.year + '-') || cost.targets === undefined) continue

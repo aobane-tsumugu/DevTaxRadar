@@ -1,3 +1,7 @@
+import {
+  applicableActivityFacts,
+  proposeActivityTreatmentFacts,
+} from '../../core/activityTreatmentReuse'
 import { EDITOR_FILE_LIMIT } from '../editorRecovery'
 import { useState } from 'react'
 import type { AnnualCostProjection } from '../../accounting/costs'
@@ -309,6 +313,28 @@ export default function CostTreatmentFactsEditor({
                 <p>
                   既存の作業目的・資産種類・直接対応・理由・根拠を、この期間の編集案へ写します。支払・提供・年末の状態、金額、確認済み判断は流用しません。
                 </p>
+                {applicableActivityFacts(projection, planning, draft).map((fact) => (
+                  <p key={fact.id}>
+                    本人確認済みの活動期間：{fact.scope} / {fact.reason}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          edit(proposeActivityTreatmentFacts(projection, planning, draft, fact))
+                          setMessage(
+                            'この対象・期間の用途だけを編集案へ反映しました。保存前に確認してください。',
+                          )
+                        } catch (error) {
+                          setMessage(
+                            error instanceof Error ? error.message : '活動事実を使用できません。',
+                          )
+                        }
+                      }}
+                    >
+                      確認した活動用途を使う
+                    </button>
+                  </p>
+                ))}
                 {reusableTreatmentFacts(projection, planning, draft).map((source) => (
                   <p key={source.id}>
                     {source.costYear}年 / {treatmentPurposeLabels[source.workPurpose]} /{' '}
