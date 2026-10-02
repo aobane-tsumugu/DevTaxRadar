@@ -1,14 +1,15 @@
 # DevTaxの仕様と設計資料
 
-更新日: 2026-09-19。アプリ接続の確認基点は `6f574c4606e5e069640df96065d72bd081a33414`（PR #18）。現行の文書生成と照合は `f4e92ef` から反映しています。
+更新日: 2026-10-02。今回の原始請求取り込みの実装差分基点は `195b958bb847285c0ffc9ed4273864f13a6b5f5b`。現行の接続範囲は生成モデルと要件表へ反映し、以前の検証記録と今回の追加候補の受入を区別します。
 
 製品仕様v0.5と技術設計v0.5は完成形の正本です。接続したコード、実行した検証、まだ満たしていない要件を区別し、文書生成の成功を製品全体の受入へ読み替えません。
 
 ## 現行の入口
 
 - [製品仕様](../../PRODUCT_SPEC.md)と[技術設計](../../TECHNICAL_DESIGN.md)：要求と設計契約。
-- [現行設計図](workflow-blueprint.html)と[要件対応表](requirements-matrix.md)：同一モデルから生成した現在の接続範囲。31要件・36 API・21受入の対応。
+- [現行設計図](workflow-blueprint.html)と[要件対応表](requirements-matrix.md)：同一モデルから生成した現在の接続範囲。31要件・40 API・21受入の対応。
 - [実装計画](implementation-plan.md)：W01〜W08の責務・変更しない完了条件。[CURRENT](../evidence/v05-revision/CURRENT.md)：反映先・実行結果・未実施。
+- [原始請求の入力仕様](../ORIGINAL-CHARGE-INTAKE.md)：所定v1 CSV/JSON、候補確認、訂正・互換性と後続範囲。
 - [受入条件の生成元](acceptance-scenarios.md)と[方法比較の境界](method-comparison-rule.md)：受入の原文と条件付き計算の適用範囲。
 
 ## 生成と検査

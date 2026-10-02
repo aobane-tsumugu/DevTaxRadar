@@ -1,3 +1,4 @@
+import OriginalChargeDetails from './OriginalChargeDetails'
 import SourceAdjustmentDetails from './SourceAdjustmentDetails'
 import CostTreatmentPanel from './CostTreatmentPanel'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -289,6 +290,7 @@ export default function CostsPage({
               {source.billedOn && <p>請求日 {source.billedOn}</p>}
               <p>証拠参照 {source.evidenceIds.length}件 / 原額を費用基礎へ重ねて加算しません。</p>
               <EvidenceReferences ids={source.evidenceIds} records={evidence} />
+              <OriginalChargeDetails fact={source.originalChargeFact} evidence={evidence} />
               <SourceAdjustmentDetails records={source.adjustments ?? []} />
               {projection.bases
                 .filter((basis) => basis.sourceId === source.id)

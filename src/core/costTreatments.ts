@@ -100,6 +100,7 @@ function treatmentBasisRecord(
     ...selectedEvidenceIds,
     ...[...sources.values()].flatMap((row) => [
       ...row.evidenceIds,
+      ...(row.originalChargeFact?.original.conversionEvidenceIds ?? []),
       ...(row.adjustments ?? []).flatMap((adjustment) => adjustment.evidenceIds),
     ]),
     ...[...contributions.values()].flatMap((row) => row.evidenceIds),

@@ -50,6 +50,9 @@ cpSync(join(root, 'dist'), join(releaseRoot, 'dist'), {
 copyRequiredFile('README.md')
 copyRequiredFile('LICENSE')
 copyRequiredFile(join('docs', 'READING-SAVED-REVIEWS.md'))
+copyRequiredFile(join('docs', 'ORIGINAL-CHARGE-INTAKE.md'))
+copyRequiredFile(join('docs', 'examples', 'original-charge-v1.json'))
+copyRequiredFile(join('docs', 'examples', 'original-charge-v1.csv'))
 if (existsSync(join(root, 'docs', 'SECURITY.md'))) {
   copyRequiredFile(join('docs', 'SECURITY.md'))
 }
@@ -204,7 +207,11 @@ function inspectReleaseTree(directory: string): void {
     if (binaryAsset.test(name)) {
       continue
     }
-    if (!/\.(?:css|html|js|json|md|mjs|txt)$/i.test(name) && basename(name) !== 'LICENSE') {
+    if (
+      !/\.(?:css|html|js|json|md|mjs|txt)$/i.test(name) &&
+      basename(name) !== 'LICENSE' &&
+      name !== 'docs/examples/original-charge-v1.csv'
+    ) {
       findings.push(`${name}: file type is not allowlisted`)
       continue
     }

@@ -1,3 +1,4 @@
+import OriginalChargeIntake from './client/pages/OriginalChargeIntake'
 import ProductTimelinePage from './client/pages/ProductTimelinePage'
 import SourceAdjustmentsEditor from './client/pages/SourceAdjustmentsEditor'
 import TreatmentHandoffPanel from './client/pages/TreatmentHandoffPanel'
@@ -601,6 +602,28 @@ export default function App() {
     reviewCompletion.current = null
     await afterResolvedSave('変更の影響を確認した内容を保存しました。入力を続けられます。')
   }
+  async function reviewOriginalCharges(next: WorkspaceDraft): Promise<boolean> {
+    const base = workspaceBase.current
+    if (!base || onboarding || rulesBusy || comparison || impact || reviewCompletion.current)
+      throw new Error('別の入力・確認が進行中です。先に保存またはキャンセルしてください。')
+    if (next.revision !== base.revision)
+      throw new Error(
+        '取り込み元の保存版が変わりました。入力を保持し、最新の内容で確認し直してください。',
+      )
+    let finish: (saved: boolean) => void = () => {}
+    const completed = new Promise<boolean>((resolve) => {
+      finish = resolve
+    })
+    reviewCompletion.current = finish
+    try {
+      await openWorkspacePreview(next.configuration, next.planning, base)
+    } catch (error) {
+      reviewCompletion.current?.(false)
+      reviewCompletion.current = null
+      throw error
+    }
+    return completed
+  }
   async function reviewAdjustment(
     next: SourceAdjustmentRecord | null,
     previous: SourceAdjustmentRecord | null,
@@ -981,6 +1004,15 @@ export default function App() {
             </div>
           )}
           <div hidden={page !== 'costs'}>
+            {runtime?.datasetId && workspaceBase.current && data.meta.source === 'local' && (
+              <OriginalChargeIntake
+                key={`intake:${runtime.datasetId}`}
+                datasetId={runtime.datasetId}
+                workspace={workspaceBase.current}
+                disabled={onboarding || rulesBusy || Boolean(comparison) || Boolean(impact)}
+                onReview={reviewOriginalCharges}
+              />
+            )}
             <CostsPage
               navigation={costNavigation}
               initial={data.costProjection}

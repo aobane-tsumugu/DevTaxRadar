@@ -105,6 +105,9 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
   }
   async function verifySavedInvoice(url: string) {
     const workspace = (await get(url + '/api/workspace')) as unknown as WorkspaceDraft
+    assert.equal(workspace.planning.originalCharges?.facts[0]?.id, 'release-original-fact')
+    assert.equal(workspace.planning.originalCharges?.facts[0]?.original.amount, '0')
+    assert.equal(workspace.planning.originalCharges?.facts[0]?.dates?.paidOn, '2026-01-06')
     assert.equal(workspace.configuration.charges.claude, null)
     assert.equal(workspace.configuration.charges.codex, 0)
     assert.equal(
@@ -128,6 +131,9 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
     )) as unknown as AnnualCostProjection
     const invoice = projection.sources.find((row) => row.id === 'ai:charge:release-invoice')
     assert.ok(invoice)
+    const original = projection.sources.find((row) => row.id === 'direct:release-original-zero')
+    assert.equal(original?.originalAmountJpy, 0)
+    assert.equal(original?.originalChargeFact?.id, 'release-original-fact')
     assert.equal(invoice.originalAmountJpy, null)
     assert.deepEqual(invoice.unknownOriginalAmountReasons, ['配布検査：原額確認待ち'])
     assert.deepEqual(invoice.evidenceIds, ['release-invoice-proof'])
@@ -241,6 +247,50 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
           note: '配布検査：合成請求の確認記録',
         },
       ]
+      const originalRecord = {
+        id: 'release-original-zero',
+        incurredOn: '2026-01-05',
+        costType: 'other' as const,
+        amountJpy: 0,
+        directlyAttributable: false,
+        treatment: 'general' as const,
+        evidenceIds: ['release-invoice-proof'],
+      }
+      workspace.planning.directCosts.push(originalRecord)
+      workspace.planning.originalCharges = {
+        version: 1,
+        facts: [
+          {
+            id: 'release-original-fact',
+            sourceId: 'direct:release-original-zero',
+            category: 'direct',
+            record: originalRecord,
+            original: { currency: 'JPY', amount: '0', amountJpy: 0 },
+            dates: { incurredOn: '2026-01-05', paidOn: '2026-01-06' },
+            recordedAt: '2026-01-07T00:00:00Z',
+            evidenceIds: ['release-invoice-proof'],
+            provenance: { kind: 'manual' },
+          },
+        ],
+      }
+      const intakePreview = await fetch(url + '/api/workspace/preview', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: url,
+          'x-devtax-csrf': String(runtime.csrfToken),
+        },
+        body: JSON.stringify({
+          expectedRevision: workspace.revision,
+          configuration: workspace.configuration,
+          planning: workspace.planning,
+        }),
+        signal: AbortSignal.timeout(10000),
+      })
+      const intakePreviewBody = await intakePreview.text()
+      assert.equal(intakePreview.status, 200, intakePreviewBody)
+      const intakePreviewHash = (JSON.parse(intakePreviewBody) as { previewHash: string })
+        .previewHash
       const saved = await fetch(url + '/api/workspace', {
         method: 'PUT',
         headers: {
@@ -251,6 +301,7 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
         body: JSON.stringify({
           expectedRevision: workspace.revision,
           requestId: randomUUID(),
+          previewHash: intakePreviewHash,
           configuration: workspace.configuration,
           planning: workspace.planning,
         }),
@@ -365,7 +416,7 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       await get(url + '/api/workspace')
     })
     console.log(
-      'Release lifecycle passed: startup, invoice save and projection, backup, verification, full-table restore, standalone adopted review read, reconnect, restart.',
+      'Release lifecycle passed: startup, original-charge preview/save and projection, backup, verification, full-table restore, standalone adopted review read, reconnect, restart.',
     )
   } finally {
     // mkdtempSync returned this dedicated directory; no user-supplied path is removed.

@@ -1,3 +1,4 @@
+import { originalChargeMarkdown } from './originalChargeExport.js'
 import { projectProductTimeline } from './productTimeline.js'
 import type { Diagnosis, PlanningSnapshot } from '../planning/types.js'
 
@@ -113,6 +114,15 @@ export function planningMarkdown(snapshot: PlanningSnapshot, diagnosis?: Diagnos
       `- ${item.taxYear}年 ${{ equipment: '設備', home: '自宅費用', direct: '直接費' }[item.category]}: ${item.status === 'not-applicable' ? '該当なし' : '保留'} / 理由: ${text(item.reason)} / 記録日時: ${text(item.recordedAt)} / ID: ${text(item.id)}`,
     )
   if (!snapshot.costPresence?.length) lines.push('確認記録なし。')
+  if (snapshot.originalCharges?.facts.length) {
+    lines.push(
+      '',
+      '## 原始請求の取込・訂正履歴',
+      '',
+      '来歴の記録です。訂正前後の円額を合算しません。',
+    )
+    for (const fact of snapshot.originalCharges.facts) lines.push(...originalChargeMarkdown(fact))
+  }
   lines.push('', '## 設備', '')
   for (const item of snapshot.equipment) {
     lines.push(

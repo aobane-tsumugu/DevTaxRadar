@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "candidates": [
+    {
+      "category": "subscription",
+      "sourceKey": "example:contract-a:invoice-2026-001",
+      "record": {
+        "id": "example-ai-annual",
+        "provider": "codex",
+        "planName": "架空の年額請求",
+        "serviceStartedOn": "2026-07-15",
+        "serviceEndedOn": "2027-07-14",
+        "billedOn": "2026-07-15",
+        "amountJpy": 3000,
+        "evidenceIds": []
+      },
+      "original": {
+        "currency": "USD",
+        "amount": "20.00",
+        "amountJpy": 3000,
+        "fx": {
+          "currency": "USD",
+          "foreignAmount": "20.00",
+          "jpyPerUnit": "150",
+          "rounding": "nearest-yen",
+          "convertedOn": "2026-07-16",
+          "reference": "形式説明用の架空換算例"
+        }
+      },
+      "dates": {
+        "billedOn": "2026-07-15",
+        "paidOn": "2026-07-16"
+      },
+      "servicePeriod": {
+        "startedOn": "2026-07-15",
+        "endedOn": "2027-07-14"
+      },
+      "contract": {
+        "reference": "example-contract-a",
+        "reason": "形式説明用の架空契約"
+      },
+      "evidenceIds": []
+    },
+    {
+      "category": "equipment",
+      "sourceKey": "example:equipment:invoice-001",
+      "record": {
+        "id": "example-equipment",
+        "name": "架空の周辺機器",
+        "equipmentType": "peripheral",
+        "acquisitionCostJpy": 10000,
+        "acquiredOn": "2026-09-01",
+        "convertedFromPrivate": false,
+        "businessUseRatio": 1,
+        "role": "形式説明用の通常業務機器",
+        "projectAllocationRatio": 0,
+        "evidenceIds": []
+      },
+      "original": {
+        "currency": "JPY",
+        "amount": "10000",
+        "amountJpy": 10000
+      },
+      "dates": {
+        "acquiredOn": "2026-09-01"
+      },
+      "evidenceIds": []
+    },
+    {
+      "category": "home",
+      "sourceKey": "example:home:invoice-001",
+      "record": {
+        "id": "example-home",
+        "month": "2026-09",
+        "category": "internet",
+        "amountJpy": null,
+        "unknownAmountReason": "形式説明用の請求額未確認",
+        "method": "fixed-ratio",
+        "businessUseRatio": 0.5,
+        "basis": "形式説明用の割合",
+        "rationale": "実利用の確認を表す値ではありません",
+        "projectAllocationRatio": 0,
+        "treatment": "general",
+        "evidenceIds": []
+      },
+      "original": {
+        "currency": "JPY",
+        "amount": null,
+        "unknownAmountReason": "形式説明用の請求額未確認",
+        "amountJpy": null,
+        "unknownJpyReason": "形式説明用の請求額未確認"
+      },
+      "evidenceIds": []
+    },
+    {
+      "category": "direct",
+      "sourceKey": "example:direct:zero-001",
+      "record": {
+        "id": "example-direct-zero",
+        "incurredOn": "2026-09-01",
+        "costType": "other",
+        "amountJpy": 0,
+        "directlyAttributable": false,
+        "treatment": "general",
+        "note": "確認した0円の形式説明用例",
+        "evidenceIds": []
+      },
+      "original": {
+        "currency": "JPY",
+        "amount": "0",
+        "amountJpy": 0
+      },
+      "evidenceIds": []
+    }
+  ]
+}

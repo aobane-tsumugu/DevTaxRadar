@@ -191,6 +191,31 @@ export function mergeWorkspaceDrafts(
     Object.assign(result.planning, { [group]: values })
   }
   if (
+    base.planning.originalCharges ||
+    local.planning.originalCharges ||
+    latest.planning.originalCharges
+  ) {
+    result.planning.originalCharges = {
+      version: 1,
+      facts: records(
+        'originalCharges',
+        '原始請求・訂正',
+        base.planning.originalCharges?.facts ?? [],
+        local.planning.originalCharges?.facts ?? [],
+        latest.planning.originalCharges?.facts ?? [],
+        (row) => row.id,
+      ),
+    }
+    const acceptedOrder = new Map(
+      (latest.planning.originalCharges?.facts ?? []).map((fact, index) => [fact.id, index]),
+    )
+    result.planning.originalCharges.facts.sort(
+      (left, right) =>
+        (acceptedOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (acceptedOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+    )
+  }
+  if (
     base.planning.activityLedger ||
     local.planning.activityLedger ||
     latest.planning.activityLedger

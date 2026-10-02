@@ -1,0 +1,2 @@
+category,record,original,evidenceIds,sourceKey
+direct,"{""id"":""example-direct-zero"",""incurredOn"":""2026-09-01"",""costType"":""other"",""amountJpy"":0,""directlyAttributable"":false,""treatment"":""general"",""note"":""確認した0円の形式説明用例"",""evidenceIds"":[]}","{""currency"":""JPY"",""amount"":""0"",""amountJpy"":0}",[],example:direct:zero-001

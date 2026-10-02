@@ -1,3 +1,8 @@
+import {
+  validateOriginalChargesUpdate,
+  validateOriginalChargeTransition,
+} from './originalChargesRepository.js'
+import { validateOriginalChargeWorkspace } from './originalChargesRepository.js'
 import { validateActivityLedgerUpdate } from './activityLedgerRepository.js'
 import { createHash } from 'node:crypto'
 import { getDatabase } from './database.js'
@@ -29,7 +34,7 @@ export function yearsIn(input: unknown, years: Set<number>): void {
   for (const [key, value] of Object.entries(input)) {
     if ((key === 'taxYear' || key === 'costYear') && typeof value === 'number') years.add(value)
     else if (
-      /^(month|startedOn|endedOn|serviceStartedOn|serviceEndedOn|billedOn|activityStartedOn|effectiveFrom|effectiveTo|occurredOn|orderedOn|deliveredOn|acquiredOn|businessUseStartedOn|incurredOn)$/.test(
+      /^(month|startedOn|endedOn|serviceStartedOn|serviceEndedOn|billedOn|activityStartedOn|effectiveFrom|effectiveTo|occurredOn|orderedOn|deliveredOn|acquiredOn|businessUseStartedOn|incurredOn|paidOn|convertedOn)$/.test(
         key,
       ) &&
       typeof value === 'string' &&
@@ -51,6 +56,9 @@ export function previewWorkspace(input: unknown): WorkspaceImpact {
   return readWorkspace((base) => {
     if (base.revision !== parsed.expectedRevision) throw new WorkspaceConflict(base.revision)
     validateActivityLedgerUpdate(db, parsed.planning.activityLedger)
+    validateOriginalChargesUpdate(db, parsed.planning.originalCharges)
+    validateOriginalChargeWorkspace(parsed)
+    validateOriginalChargeTransition(base, parsed)
     const observation = readDashboardObservation()
     const dates = new Set<number>()
     yearsIn(base, dates)
@@ -162,7 +170,12 @@ export function verifyWorkspacePreview(input: {
   planning: unknown
   previewHash?: string
 }): void {
-  if (!input.previewHash) return
+  if (!input.previewHash) {
+    const current = readWorkspace((draft) => draft.planning.originalCharges)
+    const next = (input.planning as { originalCharges?: unknown }).originalCharges
+    if (JSON.stringify(current) !== JSON.stringify(next)) throw new WorkspacePreviewChanged()
+    return
+  }
   const { expectedRevision, configuration, planning } = input
   const fresh = previewWorkspace({ expectedRevision, configuration, planning })
   if (fresh.previewHash !== input.previewHash) throw new WorkspacePreviewChanged()

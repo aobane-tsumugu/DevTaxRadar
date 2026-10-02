@@ -1,3 +1,4 @@
+import { originalChargeSource } from './originalChargeProjection.js'
 import { attachCostTreatments } from './costTreatments.js'
 import { createSourceAdjuster, adjustSubscriptionScope } from './adjustedCostSources.js'
 import { allocateBusinessTargets } from './businessAllocation.js'
@@ -101,7 +102,7 @@ export function buildWorkspaceCostSnapshot(
     amountJpy: number | null,
     warnings: string[] = [],
   ): CostBasis {
-    const adjusted = adjustSource(source)
+    const adjusted = adjustSource(originalChargeSource(source, planning))
     source = adjusted.source
     if (source.adjustments?.length) {
       if (source.kind === 'home' || source.kind === 'direct')
@@ -145,7 +146,10 @@ export function buildWorkspaceCostSnapshot(
     return basis
   }
   for (const originalScope of subscriptions) {
-    const scope = adjustSubscriptionScope(originalScope, adjustSource)
+    const scope = adjustSubscriptionScope(
+      { ...originalScope, source: originalChargeSource(originalScope.source, planning) },
+      adjustSource,
+    )
     addSource(scope.source)
     const basis: CostBasis = {
       id: scope.basisId,
