@@ -342,3 +342,9 @@ export function saveBalanceDraft(
     body: JSON.stringify({ snapshot, expectedRevision, requestId }),
   })
 }
+
+export function getProductTimeline(): Promise<
+  import('../server/productTimeline').ProductTimelineView
+> {
+  return requestJson('/api/products/timeline')
+}

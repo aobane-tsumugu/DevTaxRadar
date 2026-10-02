@@ -1,3 +1,4 @@
+import { validateActivityLedgerUpdate } from './activityLedgerRepository.js'
 import { createHash } from 'node:crypto'
 import { getDatabase } from './database.js'
 import { readWorkspace, workspaceSaveSchema, WorkspaceConflict } from './workspaceRepository.js'
@@ -19,7 +20,7 @@ export class WorkspacePreviewChanged extends Error {
 }
 export class WorkspacePreviewRangeError extends Error {}
 
-function yearsIn(input: unknown, years: Set<number>): void {
+export function yearsIn(input: unknown, years: Set<number>): void {
   if (!input || typeof input !== 'object') return
   if (Array.isArray(input)) {
     for (const item of input) yearsIn(item, years)
@@ -49,6 +50,7 @@ export function previewWorkspace(input: unknown): WorkspaceImpact {
   }
   return readWorkspace((base) => {
     if (base.revision !== parsed.expectedRevision) throw new WorkspaceConflict(base.revision)
+    validateActivityLedgerUpdate(db, parsed.planning.activityLedger)
     const observation = readDashboardObservation()
     const dates = new Set<number>()
     yearsIn(base, dates)

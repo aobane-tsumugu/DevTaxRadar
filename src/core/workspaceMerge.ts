@@ -191,6 +191,39 @@ export function mergeWorkspaceDrafts(
     Object.assign(result.planning, { [group]: values })
   }
   if (
+    base.planning.activityLedger ||
+    local.planning.activityLedger ||
+    latest.planning.activityLedger
+  ) {
+    result.planning.activityLedger = {
+      version: 1,
+      products: records(
+        'activityProducts',
+        '作っているもの',
+        base.planning.activityLedger?.products ?? [],
+        local.planning.activityLedger?.products ?? [],
+        latest.planning.activityLedger?.products ?? [],
+        (row) => row.id,
+      ),
+      unitLinks: records(
+        'activityUnitLinks',
+        '制作物と費用単位',
+        base.planning.activityLedger?.unitLinks ?? [],
+        local.planning.activityLedger?.unitLinks ?? [],
+        latest.planning.activityLedger?.unitLinks ?? [],
+        (row) => row.id,
+      ),
+      facts: records(
+        'activityFacts',
+        '活動事実・訂正',
+        base.planning.activityLedger?.facts ?? [],
+        local.planning.activityLedger?.facts ?? [],
+        latest.planning.activityLedger?.facts ?? [],
+        (row) => row.id,
+      ),
+    }
+  }
+  if (
     base.planning.equipmentMethods ||
     local.planning.equipmentMethods ||
     latest.planning.equipmentMethods

@@ -1,3 +1,4 @@
+import { projectProductTimeline } from './productTimeline.js'
 import type { Diagnosis, PlanningSnapshot } from '../planning/types.js'
 
 const text = (value: unknown) =>
@@ -76,6 +77,25 @@ export function planningMarkdown(snapshot: PlanningSnapshot, diagnosis?: Diagnos
         `  - 前身の制作物: ${text(unit.predecessorId)}（利用終了・原価振替を意味しません）`,
       )
     if (unit.notes) lines.push(`  - メモ: ${text(unit.notes)}`)
+  }
+  lines.push(
+    '',
+    '## 制作物の活動タイムライン',
+    '',
+    '公開・販売は供用開始や所得区分の確定ではありません。終了・中止は自動費用化しません。',
+  )
+  for (const product of projectProductTimeline(snapshot)) {
+    lines.push('', `### ${text(product.name)} / ${text(product.id)}`)
+    for (const row of product.entries) {
+      lines.push(
+        `- ${text(row.time)} / ${text(row.title)} / ${text(row.state)} / ID ${text(row.id)}`,
+        `  - 対象範囲: ${text(row.scope)} / 理由: ${text(row.reason)} / 記録日時: ${text(row.recordedAt) || '旧記録に日時なし'}`,
+        `  - 証拠: ${row.evidenceIds.map(text).join(', ') || '未指定'}`,
+      )
+      if (row.correctsId)
+        lines.push(`  - 訂正元: ${text(row.correctsId)} / 訂正理由: ${text(row.correctionReason)}`)
+      if (row.correctedById) lines.push(`  - 訂正後: ${text(row.correctedById)}（元の記録は保持）`)
+    }
   }
   lines.push('', '## 期間付き分類ルール', '')
   for (const rule of snapshot.projectRules)

@@ -1,3 +1,4 @@
+import { decisionIsConfirmed } from './decisionConfirmation.js'
 import type { AnnualCostProjection } from '../accounting/costs.js'
 import type { PlanningSnapshot } from '../planning/types.js'
 import { canonicalTreatmentValue, type CostTreatmentFacts } from './costTreatmentFacts.js'
@@ -14,6 +15,27 @@ export function proposeCommonTreatmentFacts(
     throw new Error('参照する保存済み条件が変わっています。読み直してください。')
   if (target.costYear !== costs.year || source.costYear > costs.year || source.id === target.id)
     throw new Error('同じ対象の過去の条件を選択してください。未来の条件は流用しません。')
+  const production = (fact: CostTreatmentFacts) => {
+    const { methodComparison: _method, recordedAt: _time, ...fields } = fact
+    return canonicalTreatmentValue(fields)
+  }
+  if (
+    !(planning.decisions ?? []).some((decision) => {
+      if (
+        !decisionIsConfirmed(decision) ||
+        decision.treatmentBinding?.factsId !== source.id ||
+        decision.taxYear !== source.costYear
+      )
+        return false
+      try {
+        const binding = JSON.parse(decision.treatmentBinding.basis) as { fact?: CostTreatmentFacts }
+        return binding.fact && production(binding.fact) === production(source)
+      } catch {
+        return false
+      }
+    })
+  )
+    throw new Error('本人が判断元として確認した処理条件だけを再利用できます。')
   const destination = costs.contributions.find((row) => row.id === target.contributionId)
   const period = costs.bases.find((row) => row.id === destination?.basisId)?.period
   if (
@@ -69,15 +91,6 @@ export function proposeCommonTreatmentFacts(
     if (canonicalTreatmentValue(then) !== canonicalTreatmentValue(current))
       throw new Error('共通条件の根拠内容が変わっています。先に確認してください。')
   }
-  let placedInService: CostTreatmentFacts['placedInService'] = 'unknown'
-  const starts = planning.lifecycleEvents.filter(
-    (row) => row.taxUnitId === unit.id && row.eventType === 'internal-use-started',
-  )
-  if (unit.usageMode === 'internal' && starts.length === 1) {
-    const date = starts[0]!.occurredOn
-    if (date <= period.startedOn) placedInService = 'after'
-    else if (date > period.endedOn) placedInService = 'before'
-  }
   return {
     ...structuredClone(target),
     workPurpose: source.workPurpose,
@@ -85,7 +98,7 @@ export function proposeCommonTreatmentFacts(
     directlyAttributable: source.directlyAttributable,
     reason: source.reason,
     evidenceIds: [...source.evidenceIds],
-    placedInService,
+    placedInService: 'unknown',
     // Payment, performance, year-end state, liability, methods and the destination seal stay separate.
   }
 }

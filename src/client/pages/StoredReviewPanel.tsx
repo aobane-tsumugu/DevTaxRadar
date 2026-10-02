@@ -1,3 +1,4 @@
+import ProductTimelinePanel from './ProductTimelinePanel'
 import ConsultationAnswersPanel from './ConsultationAnswersPanel'
 import HomeAllocationPanel from './HomeAllocationPanel'
 import BalanceFlowPanel from './BalanceFlowPanel'
@@ -53,6 +54,16 @@ export default function StoredReviewPanel({ review }: { review: BalanceReview })
       <ConsultationAnswersPanel snapshot={review.snapshot} year={review.year} />
       {review.materials ? (
         <>
+          {review.materials.productTimeline ? (
+            <ProductTimelinePanel
+              products={review.materials.productTimeline}
+              evidence={review.materials.planning.evidence}
+            />
+          ) : (
+            <p>
+              この旧保存版には活動タイムラインの固定資料がありません。現在の入力から補完しません。
+            </p>
+          )}
           <OpeningLotCarryPanel carry={review.materials.openingLotCarry} />
           <BalanceFlowPanel
             check={review.materials.balanceFlowCheck}

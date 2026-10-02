@@ -1,3 +1,4 @@
+import { readActivityLedger, writeActivityLedger } from './activityLedgerRepository.js'
 import { readSourceAdjustments, writeSourceAdjustments } from './sourceAdjustmentsRepository.js'
 import {
   readDecisionSoftwareAnnualBindings,
@@ -48,6 +49,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     has_bookkeeping AS hasBookkeeping, notes FROM planning_profiles WHERE singleton_id = 1`,
     )
     .get() as Record<string, unknown> | undefined
+  const activityLedger = readActivityLedger(db)
   const sourceAdjustments = readSourceAdjustments(db)
   const decisionBindings = readDecisionTreatmentBindings(db)
   const annualBindings = readDecisionSoftwareAnnualBindings(db)
@@ -55,6 +57,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
   if (!profile)
     return {
       ...emptyPlanningSnapshot(),
+      ...(activityLedger ? { activityLedger } : {}),
       ...(sourceAdjustments.length ? { sourceAdjustments } : {}),
       ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}),
     }
@@ -209,6 +212,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     equipmentMethods = readEquipmentMethods(db)
   return planningSnapshotSchema.parse({
     ...snapshot,
+    ...(activityLedger ? { activityLedger } : {}),
     ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}),
     ...(sourceAdjustments.length ? { sourceAdjustments } : {}),
     ...(costPresence.length ? { costPresence } : {}),
@@ -223,6 +227,7 @@ export function savePlanningSnapshot(
   const parsed = planningSaveSchema.parse(snapshot)
   db.exec('SAVEPOINT devtax_planning_write')
   try {
+    writeActivityLedger(db, parsed.activityLedger)
     writeSourceAdjustments(db, parsed.sourceAdjustments)
     writeDecisionTreatmentBindings(db, parsed.decisions)
     writeDecisionSoftwareAnnualBindings(db, parsed.decisions)

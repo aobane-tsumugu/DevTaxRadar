@@ -21,10 +21,10 @@ function withDocs(action: (directory: string) => void) {
   }
 }
 describe('actual current blueprint and requirement matrix generation', () => {
-  it('renders all 31 requirements, 21 unchanged acceptance scenarios and 39 route contracts', () => {
+  it('renders all 31 requirements, 21 unchanged acceptance scenarios and 40 route contracts', () => {
     const { model, acceptance } = renderer.readInputs(root)
     assert.equal(model.requirements.length, 31)
-    assert.equal(model.api.length, 39)
+    assert.equal(model.api.length, 40)
     assert.equal([...acceptance.matchAll(/^\| AC-/gm)].length, 21)
     assert.equal(renderer.generate(root, { check: true }).checked, true)
   })

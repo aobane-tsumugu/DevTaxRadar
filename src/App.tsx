@@ -1,3 +1,4 @@
+import ProductTimelinePage from './client/pages/ProductTimelinePage'
 import SourceAdjustmentsEditor from './client/pages/SourceAdjustmentsEditor'
 import TreatmentHandoffPanel from './client/pages/TreatmentHandoffPanel'
 import { draftTreatmentDecision, refreshTreatmentDecision } from './core/costTreatmentDraft'
@@ -82,9 +83,18 @@ import type { WorkspaceDraft, WorkspaceView, WorkspaceSave } from './planning/wo
 import './index.css'
 
 type Page =
-  'tasks' | 'summary' | 'evidence' | 'folders' | 'guide' | 'costs' | 'balances' | 'transfer'
+  | 'timeline'
+  | 'tasks'
+  | 'summary'
+  | 'evidence'
+  | 'folders'
+  | 'guide'
+  | 'costs'
+  | 'balances'
+  | 'transfer'
 type Provider = 'すべて' | 'Claude Code' | 'Codex'
 const pageTitles: Record<Page, string> = {
+  timeline: '作っているものの歩み',
   tasks: '今回確認すること',
   transfer: 'PCとデータ',
   summary: '今年どうなる？',
@@ -95,6 +105,7 @@ const pageTitles: Record<Page, string> = {
   balances: '残高と繰越し',
 }
 const descriptions: Record<Page, string> = {
+  timeline: '年をまたぐ開発・利用・公開・訂正と、費用・残高・判断を確認します。',
   tasks: '変わったこと・未確認のことから、今年と翌年の説明に必要な作業へ進みます。',
   transfer:
     '複数PCの履歴を集める方法と、DevTaxの保存データを別PCへ安全に引っ越す方法を分けて扱います。',
@@ -109,7 +120,34 @@ const descriptions: Record<Page, string> = {
 export default function App() {
   const [data, setData] = useState<DashboardData | null>(null)
   // The public demo has no pending work of its own, so it opens on the annual summary.
-  const [page, setPage] = useState<Page>(() => (isLocalRuntime() ? 'tasks' : 'summary'))
+  const [page, setPageState] = useState<Page>(() => (isLocalRuntime() ? 'tasks' : 'summary'))
+  const [costNavigation, setCostNavigation] = useState<{
+    year: number
+    contributionId?: string
+    request: number
+  }>()
+  function setPage(next: Page) {
+    if (next !== page)
+      window.history.pushState(
+        { ...window.history.state, devtaxPage: next },
+        '',
+        window.location.pathname + window.location.search,
+      )
+    setPageState(next)
+  }
+  const initialPage = useRef(page)
+  useEffect(() => {
+    window.history.replaceState({ ...window.history.state, devtaxPage: initialPage.current }, '')
+    const restore = () => {
+      const next = window.history.state?.devtaxPage
+      if (Object.hasOwn(pageTitles, next ?? '')) {
+        setPageState(next)
+        if (next === 'balances') setBalancesOpened(true)
+      }
+    }
+    window.addEventListener('popstate', restore)
+    return () => window.removeEventListener('popstate', restore)
+  }, [])
   const [balancesOpened, setBalancesOpened] = useState(false)
   const [balanceNavigation, setBalanceNavigation] = useState<{
     year: number
@@ -741,9 +779,9 @@ export default function App() {
       charge.serviceStartedOn <= `${planning.profile.taxYear}-12-31` &&
       charge.serviceEndedOn >= `${planning.profile.taxYear}-01-01`,
   )
-  function openBalances() {
+  function openBalances(year?: number) {
     setBalanceNavigation((previous) => ({
-      year: planning.profile.taxYear,
+      year: year ?? planning.profile.taxYear,
       request: (previous?.request ?? 0) + 1,
       datasetId: runtime?.datasetId,
     }))
@@ -780,6 +818,7 @@ export default function App() {
           {(
             [
               ['tasks', '00', '今回確認すること', '変化・未確認から始める'],
+              ['timeline', '時', '作っているものの歩み', '並行する活動と期間・根拠'],
               ['costs', '01', '支払と配分', '全費用の原額・期間・対応先'],
               ['balances', '02', '残高と繰越し', '期首・増減・期末の記録'],
               ['summary', '⌁', '今年どうなる？', '対象年の費用と確認事項'],
@@ -943,6 +982,7 @@ export default function App() {
           )}
           <div hidden={page !== 'costs'}>
             <CostsPage
+              navigation={costNavigation}
               initial={data.costProjection}
               evidence={planning.evidence}
               local={data.meta.source === 'local'}
@@ -1021,10 +1061,27 @@ export default function App() {
               historySources={historySources}
               onManageSources={() => editAt(0)}
             />
+          ) : page === 'timeline' ? (
+            <ProductTimelinePage
+              planning={planning}
+              local={data.meta.source === 'local'}
+              datasetId={runtime?.datasetId}
+              costs={data.costProjection}
+              onEdit={() => editAt(2)}
+              onCosts={(year, contributionId) => {
+                setCostNavigation((previous) => ({
+                  year: year ?? planning.profile.taxYear,
+                  contributionId,
+                  request: (previous?.request ?? 0) + 1,
+                }))
+                setPage('costs')
+              }}
+              onBalances={openBalances}
+            />
           ) : page === 'summary' ? (
             <SummaryPage
               key={`summary:${runtime?.datasetId}`}
-              onOpenBalances={openBalances}
+              onOpenBalances={() => openBalances()}
               data={data}
               planning={planning}
               diagnosis={diagnosis}

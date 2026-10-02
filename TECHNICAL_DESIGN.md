@@ -599,3 +599,13 @@ ConsultationNavigationは元の確認事項ID、制作物ID、問い、回答の
 resolution.questionBasisは確認事項ID・制作物ID・発生年・金額状態・残高ID・問い・根拠ID・解消年・判断ID・解消理由を保持する。解消確認ボタンはanswerBasisとquestionBasisを同時に作る。consultationResolutionMatchesはID順・フィールド順を揃え、問いや対象額だけが変わった場合も再確認対象とする。参照ID配列の順序だけの変化は差としない。不明額と既知の0円は別の状態として扱う。
 
 現行の作業計算・参照検査・採用前確認は、回答のある解消についてquestionBasisを必要とする。旧採用版の読取り・出力は、questionBasisがない旧形式なら従来の回答照合を維持する。旧版を現在の検査規則で書き換えず、現在入力の採用時に再確認する。回答のない従来の解消記録は互換を維持し、今回の確認を実行したものから対象の固定を追加する。
+
+### 共通活動事実と制作物タイムライン（追加実装）
+
+`PlanningSnapshot.activityLedger` は version 1 の厳格な追加契約。products と既存 taxUnit の unitLinks、facts を `app_settings.planning_activity_ledger_v1` に保存する。物理DB schema の変更や旧記録の書換え・確認済みへの移行は不要。初回保存から既存 workspace SAVEPOINT、期待revision、要求ID、影響hash、3版比較を使い、失敗は全体rollback。保存後のfact/linkは追記訂正だけを認め、対象誤りも元IDを残す。既存ledgerを省略する旧クライアント、未知version/fieldを拒否。バックアップは既存検証付きVACUUM形式を利用し、復元前にもenvelopeを検査する。古い採用資料のoffline readerは現行schema/calculatorを通さない。
+
+活動の時刻は単日・開始終了期間・不明を区別し、stateはobserved/estimated/confirmed/unknown/conflicted。範囲と理由、記録日時、証拠IDを保持する。旧出来事・期間分類・費用条件は確認状態なしの読取りadapterとし、不足日時を作らない。活動日を供用日・所得区分・自動償却へ転用しない。期間/対象に関係する訂正連鎖・証拠を費用の確認元へ追加し、関係ない単位・期間は除外。根拠の変更は同額でも再確認とし、結び直しだけでは用途の矛盾を消さない。用途再利用は同一費用単位の全費用期間をカバーする本人確認済み・矛盾なしの閉じた期間に限定する。用途だけを編集案へ写し、支払・供用・年末債務・方法を推定しない。従来の費用条件再利用も本人確認判断の元資料に一致するものだけを許す。
+
+`GET /api/products/timeline` は同じread snapshotから登録年の連続範囲（200年未満）のcost projection、記録残高、事実・根拠を返す。ローカル原本パスを含めない。新しい独立page/editorを既存入力・影響確認導線へ接続。部分入力はdataset/editor/revision付き控えと個人ファイルで復旧し、自動送信しない。pageのBack/Forwardと訂正元anchorを扱い、費用リンクは年と配分IDを保つ。
+
+採用時はproductTimelineを固定materialへ追加する。全年の事実に対して収録costYearsは当該採用年と参照された過去年だけの場合があるため明示する。保存版UI/Markdown/JSONは固定値だけを利用し、旧資料に後付けしない。historicalReviewMaterialsは関連年の活動/根拠を比較し、N年訂正後のN+1再採用は従来の訂正確認に従う。旧N・N+1のpayload/hash/exportは不変。統一請求取込、領収書抽出、会計CSV、特殊償却はこの段階の完成範囲に含めない。

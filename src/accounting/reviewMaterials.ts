@@ -12,6 +12,7 @@ import type { BalanceLotTrace } from '../core/balanceLotTrace.js'
 
 /** Fixed calculation inputs and outputs. Original evidence locations remain in the private workspace. */
 export type ReviewMaterials = {
+  productTimeline?: import('../core/productTimeline.js').ProductTimeline
   schemaVersion: 1
   engineVersion: 'review-materials/1'
   year: number

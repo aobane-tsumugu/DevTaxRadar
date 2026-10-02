@@ -61,6 +61,26 @@ function fixture() {
     evidence: [proof],
     costTreatmentFacts: [source],
     lifecycleEvents: [],
+    decisions: [
+      {
+        id: 'confirmed-source',
+        taxUnitId: 'software',
+        taxYear: 2026,
+        engineVersion: 'manual-decision/1',
+        candidate: 'ordinary-expense',
+        selectedCandidate: 'ordinary-expense',
+        status: 'confirmed',
+        reason: '本人が対象と根拠を確認',
+        createdAt: '2026-01-31T00:00:00Z',
+        confirmedAt: '2026-01-31T00:00:00Z',
+        treatmentBinding: {
+          factsId: source.id,
+          costYear: source.costYear,
+          contributionId: source.contributionId,
+          basis: canonicalTreatmentValue({ fact: source }),
+        },
+      },
+    ],
   } as unknown as PlanningSnapshot
   const costs = {
     year: 2026,
@@ -130,7 +150,7 @@ describe('reuse scoped common facts without copying tax confirmation or monthly 
       assert.throws(() => proposeCommonTreatmentFacts(f.costs, f.planning, f.target, f.source))
       assert.equal(reusableTreatmentFacts(f.costs, f.planning, f.target).length, 0)
     })
-  it('derives supply state only from an explicit dated event, not current lifecycleStatus', () => {
+  it('never infers tax supply state from a legacy event or current lifecycleStatus', () => {
     const f = fixture()
     f.planning.taxUnits[0]!.lifecycleStatus = 'in-use'
     assert.equal(
@@ -147,7 +167,7 @@ describe('reuse scoped common facts without copying tax confirmation or monthly 
     })
     assert.equal(
       proposeCommonTreatmentFacts(f.costs, f.planning, f.target, f.source).placedInService,
-      'after',
+      'unknown',
     )
   })
   it('rejects unsaved donor modifications', () => {

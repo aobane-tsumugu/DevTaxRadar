@@ -180,6 +180,7 @@ export type DecisionRecord = {
   confirmedAt?: string
 }
 export type PlanningSnapshot = {
+  activityLedger?: import('./activityFacts.js').ActivityLedger
   costTreatmentFacts?: CostTreatmentFacts[]
   sourceAdjustments?: SourceAdjustmentRecord[]
   costPresence?: CostPresenceRecord[]

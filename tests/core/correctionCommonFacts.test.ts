@@ -63,6 +63,26 @@ function fixture() {
     evidence: [proof],
     costTreatmentFacts: [source],
     lifecycleEvents: [],
+    decisions: [
+      {
+        id: 'confirmed-source',
+        taxUnitId: 'software',
+        taxYear: 2026,
+        engineVersion: 'manual-decision/1',
+        candidate: 'ordinary-expense',
+        selectedCandidate: 'ordinary-expense',
+        status: 'confirmed',
+        reason: '本人が対象と根拠を確認',
+        createdAt: '2026-01-31T00:00:00Z',
+        confirmedAt: '2026-01-31T00:00:00Z',
+        treatmentBinding: {
+          factsId: source.id,
+          costYear: source.costYear,
+          contributionId: source.contributionId,
+          basis: canonicalTreatmentValue({ fact: source }),
+        },
+      },
+    ],
   } as unknown as PlanningSnapshot
   const costs = {
     year: 2026,
@@ -134,7 +154,7 @@ describe('C04 common facts remain a scoped editable proposal', () => {
       assert.throws(() => proposeCommonTreatmentFacts(f.costs, f.planning, f.target, f.source))
       assert.equal(reusableTreatmentFacts(f.costs, f.planning, f.target).length, 0)
     })
-  it('does not infer historical supply from current status, only an explicit dated event', () => {
+  it('does not infer tax supply from current status or legacy dated events', () => {
     const f = fixture()
     f.planning.taxUnits[0]!.lifecycleStatus = 'in-use'
     assert.equal(
@@ -151,7 +171,7 @@ describe('C04 common facts remain a scoped editable proposal', () => {
     })
     assert.equal(
       proposeCommonTreatmentFacts(f.costs, f.planning, f.target, f.source).placedInService,
-      'after',
+      'unknown',
     )
   })
   it('refuses an unsaved donor version, while ignoring a private-path relocation', () => {

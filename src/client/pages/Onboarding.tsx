@@ -1,3 +1,4 @@
+import ActivityFactsEditor from './ActivityFactsEditor'
 import AllocationTargetsEditor from './AllocationTargetsEditor'
 import { monthlyChargeInputIssue } from '../monthlyChargeValidation'
 import MonthlyChargesEditor from './MonthlyChargesEditor'
@@ -1575,6 +1576,14 @@ function Onboarding({
             )}
             {step === 2 && (
               <>
+                <ActivityFactsEditor
+                  planning={planningDraft}
+                  onChange={(activityLedger) =>
+                    setPlanningDraft((current) => ({ ...current, activityLedger }))
+                  }
+                  datasetId={runtime?.datasetId ?? 'synthetic-demo'}
+                  revision={workspaceBase?.revision ?? 0}
+                />
                 <span className="step-label">3 / 5　制作物ごとの状況</span>
                 <h3>制作物ごとに、売上や利用状況を確認します</h3>
                 <p>
