@@ -1,7 +1,7 @@
 {
   "name": "devtax-radar",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Allocate Claude Code and Codex subscriptions to explainable product costs.",
   "license": "MIT",
   "repository": {

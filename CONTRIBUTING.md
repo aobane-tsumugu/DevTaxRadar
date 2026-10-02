@@ -39,7 +39,7 @@ $env:DEVTAX_RADAR_DATA_DIR = "$env:TEMP\devtax-dev"; $env:DEVTAX_RADAR_AUTO_SCAN
 
 ## 送る前の確認
 
-READMEの[開発に参加する](./README.md#開発に参加する)にある9つのコマンドを順に実行してください。`format:check`は既存の未整形ファイルのため現在は失敗します。変更したファイルだけを`npx prettier --write <file>`で整形してください。
+READMEの[開発に参加する](./README.md#開発に参加する)にある9つのコマンドを順に実行してください。`format:check`も必須です。失敗した対象を`npx prettier --write <file>`で整形し、差分を確認してから再実行してください。対象は`src/**/*.{ts,tsx,css}`、`tests/**/*.ts`、`scripts/*.ts`です。Markdownや`tests/**/*.tsx`はこのコマンドの対象外です。既存の未整形を理由にゲートを省略しないでください。
 
 - 挙動を変えたら、それを確かめるテストを足してください。
 - APIを追加・変更したら`docs/design/current-design.json`も更新し、`npm run docs:check`を通してください。
