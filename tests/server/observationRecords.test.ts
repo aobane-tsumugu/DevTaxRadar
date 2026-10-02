@@ -422,6 +422,10 @@ test('retains capture warnings in recorded Markdown as well as the stored JSON',
     const input = fixture(),
       cap = capture()
     cap.files[0]!.state = 'deferred-previous'
+    cap.files.push(
+      { ...cap.files[0]!, fileKey: 'b'.repeat(64), state: 'missing-retained' },
+      { ...cap.files[0]!, fileKey: 'c'.repeat(64), state: 'unverified-retained' },
+    )
     input.captures = [{ ...cap, matchesCurrentValues: true }]
     input.costs.sources = [
       {
@@ -467,6 +471,9 @@ test('retains capture warnings in recorded Markdown as well as the stored JSON',
       'recorded',
     )
     assert.match(markdown, /前回値使用 1ファイル/)
+    assert.match(markdown, /見つからなかった原本 1ファイル/)
+    assert.match(markdown, /原本との対応を確認できない 1セッション/)
+    assert.match(markdown, /取り込み前に削除された履歴は復元できません/)
     assert.match(markdown, /全利用の捕捉を保証しません/)
     assert.match(markdown, /1,000円/)
     assert.equal(
@@ -474,6 +481,103 @@ test('retains capture warnings in recorded Markdown as well as the stored JSON',
       row.sessionKey,
     )
     assert.deepEqual(saved.payload.scanTimeZones, { codex: 'UTC' })
+  } finally {
+    db.close()
+  }
+})
+
+test('retained states remain distinct in validated records and summary counts', () => {
+  const db = database()
+  try {
+    const cap = capture()
+    cap.files[0]!.state = 'missing-retained'
+    cap.files.push({
+      ...cap.files[0]!,
+      fileKey: 'b'.repeat(64),
+      state: 'unverified-retained',
+      observationRefs: [
+        { sessionKey: 'legacy-session', projectKey: row.projectKey, month: '2026-07' },
+        { sessionKey: 'legacy-session', projectKey: 'other-project', month: '2026-08' },
+      ],
+    })
+    records.saveSourceCapture(db, cap)
+    assert.deepEqual(records.readSourceCapture(db, cap.sourceId, cap.provider)!.files, cap.files)
+    const input = fixture()
+    input.captures = [{ ...cap, matchesCurrentValues: true }]
+    const saved = records.saveObservationRecord(db, input, 'after-scan')!
+    const summary = records.listObservationRecords(db).records[0]!
+    assert.equal(summary.missingRetained, 1)
+    assert.equal(summary.unverifiedRetained, 1)
+    assert.equal(summary.deferredPrevious, 0)
+    assert.equal(summary.deferredMissing, 0)
+    assert.equal(summary.incompleteSources, 1)
+    assert.deepEqual(
+      records.readObservationRecord(db, saved.id)!.payload.captures[0]!.files,
+      cap.files,
+    )
+    assert.throws(() =>
+      records.saveSourceCapture(db, {
+        ...cap,
+        files: [{ ...cap.files[0]!, state: 'deleted' as never }],
+      }),
+    )
+  } finally {
+    db.close()
+  }
+})
+
+test.each(['complete', 'unavailable', 'failed'] as const)(
+  'retained provenance explains absence limits and keeps %s scan status distinct',
+  (status) => {
+    const cap = capture()
+    cap.status = status
+    cap.files[0]!.state = 'missing-retained'
+    cap.files.push({ ...cap.files[0]!, fileKey: 'b'.repeat(64), state: 'unverified-retained' })
+    const warnings = captureWarnings(
+      [
+        {
+          sourceId: row.sourceId,
+          provider: 'codex',
+          enabled: true,
+          capture: { ...cap, matchesCurrentValues: true },
+        },
+      ],
+      'codex',
+    ).join('\n')
+    assert.match(warnings, /最後まで走査できた時点で見つからなかった原本 1ファイル/)
+    assert.match(warnings, /原本との対応を確認できない 1セッション/)
+    assert.match(warnings, /削除されたのか、まだ見えていないのかは判定できず/)
+    assert.match(warnings, /会話本文のバックアップではなく/)
+    assert.match(warnings, /取り込み前に削除された履歴は復元できません/)
+    assert.match(warnings, /税務上の証明や法定保存を保証しません/)
+    if (status === 'complete') assert.doesNotMatch(warnings, /更新は未完了/)
+    if (status === 'unavailable') assert.match(warnings, /に接続できず、更新は未完了/)
+    if (status === 'failed') assert.match(warnings, /最後まで安全に読めず、更新は未完了/)
+  },
+)
+
+test('suppressed missing duplicates do not claim retained contributions', () => {
+  const db = database()
+  try {
+    const cap = capture()
+    cap.files.push({
+      ...cap.files[0]!,
+      fileKey: 'b'.repeat(64),
+      state: 'missing-retained',
+      eventCount: 0,
+      observationRefs: [],
+    })
+    const input = fixture()
+    input.captures = [{ ...cap, matchesCurrentValues: true }]
+    records.saveObservationRecord(db, input, 'after-scan')
+    const summary = records.listObservationRecords(db).records[0]!
+    assert.equal(summary.missingRetained, 0)
+    assert.equal(summary.incompleteSources, 0)
+    const warnings = captureWarnings(
+      [{ ...input.sources[0]!, capture: input.captures[0] }],
+      'codex',
+    ).join('\n')
+    assert.doesNotMatch(warnings, /見つからなかった原本|取込済み数値を保持/)
   } finally {
     db.close()
   }

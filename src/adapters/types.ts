@@ -73,6 +73,8 @@ export type AdapterFileReadResult = {
   events: NormalizedUsage[]
   diagnostics: AdapterDiagnostics
   state: 'accepted' | 'unstable' | 'incompatible' | 'io_error'
+  /** Opaque identity, including recognized zero-usage Codex sessions. */
+  sessionKeys?: string[]
   snapshot?: { byteSize: number; fileMtime: string }
 }
 

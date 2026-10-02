@@ -125,6 +125,9 @@ export type HistoryFileCacheEntry = {
   fileKey: string
   byteSize: number
   fileMtime: string
+  sourceState?: 'present' | 'missing'
+  sourceRank?: number
+  sessionKeys?: string[]
   adapter: string
   schemaVersion: string
   events: CachedNormalizedUsage[]
@@ -135,6 +138,24 @@ export type HistoryFileCacheMutation = {
   upsert: Array<Omit<HistoryFileCacheEntry, 'valid'>>
   deleteFileKeys: string[]
 }
+
+const HISTORY_FILE_CACHE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS history_file_cache (
+      source_id TEXT NOT NULL,
+      provider TEXT NOT NULL CHECK(provider IN ('claude', 'codex')),
+      file_key TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      file_mtime TEXT NOT NULL,
+      source_state TEXT NOT NULL DEFAULT 'present' CHECK(source_state IN ('present', 'missing')),
+      source_rank INTEGER NOT NULL DEFAULT 0,
+      session_keys_json TEXT NOT NULL DEFAULT '[]',
+      adapter TEXT NOT NULL,
+      schema_version TEXT NOT NULL,
+      events_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(source_id, provider, file_key)
+    ) STRICT;
+`
 
 const USAGE_EVENTS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS usage_events (
@@ -303,6 +324,14 @@ export function getDatabase(): DatabaseSync {
       createVerifiedMigrationBackup(database, directory, 'equipment-methods')
     }
 
+    if (
+      databaseAlreadyExisted &&
+      tableExists(database, 'history_file_cache') &&
+      !tableColumns(database, 'history_file_cache').has('source_state')
+    ) {
+      createVerifiedMigrationBackup(database, directory, 'codex-history-retention')
+    }
+
     database.exec('BEGIN IMMEDIATE')
     try {
       database.exec(`
@@ -358,18 +387,7 @@ export function getDatabase(): DatabaseSync {
     -- File cache rows contain an opaque source-scoped file key and sanitized
     -- normalized usage only. They must never contain a history root, a
     -- transcript path, a native session ID, or a working directory.
-    CREATE TABLE IF NOT EXISTS history_file_cache (
-      source_id TEXT NOT NULL,
-      provider TEXT NOT NULL CHECK(provider IN ('claude', 'codex')),
-      file_key TEXT NOT NULL,
-      byte_size INTEGER NOT NULL,
-      file_mtime TEXT NOT NULL,
-      adapter TEXT NOT NULL,
-      schema_version TEXT NOT NULL,
-      events_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY(source_id, provider, file_key)
-    ) STRICT;
+    ${HISTORY_FILE_CACHE_SCHEMA}
 
     CREATE INDEX IF NOT EXISTS history_file_cache_source_provider
       ON history_file_cache(source_id, provider);
@@ -459,6 +477,23 @@ export function getDatabase(): DatabaseSync {
       confirmed_at TEXT
     ) STRICT;
     `)
+
+      const cacheColumns = tableColumns(database, 'history_file_cache')
+      if (!cacheColumns.has('source_state')) {
+        // Rebuild to the identical canonical schema used by fresh databases.
+        // Data bundles compare schema hashes, including sqlite_schema SQL.
+        database.exec(`
+          ALTER TABLE history_file_cache RENAME TO history_file_cache_before_retention;
+          ${HISTORY_FILE_CACHE_SCHEMA}
+          INSERT INTO history_file_cache(source_id, provider, file_key, byte_size, file_mtime,
+            adapter, schema_version, events_json, updated_at)
+          SELECT source_id, provider, file_key, byte_size, file_mtime,
+            adapter, schema_version, events_json, updated_at FROM history_file_cache_before_retention;
+          DROP TABLE history_file_cache_before_retention;
+          CREATE INDEX IF NOT EXISTS history_file_cache_source_provider
+      ON history_file_cache(source_id, provider);
+        `)
+      }
 
       const defaults = getDefaultHistoryPaths()
       const usageColumns = tableColumns(database, 'usage_events')
@@ -912,7 +947,7 @@ function isCachedUsage(value: unknown, provider: UsageProvider): value is Cached
   )
 }
 
-function parseCachedEvents(
+export function parseCachedEvents(
   value: string,
   provider: UsageProvider,
 ): CachedNormalizedUsage[] | undefined {
@@ -997,6 +1032,7 @@ export function getHistoryFileCacheEntries(
   const rows = getDatabase()
     .prepare(
       `SELECT file_key AS fileKey, byte_size AS byteSize, file_mtime AS fileMtime,
+              source_state AS sourceState, source_rank AS sourceRank, session_keys_json AS sessionKeysJson,
               adapter, schema_version AS schemaVersion, events_json AS eventsJson
        FROM history_file_cache
        WHERE source_id = ? AND provider = ?`,
@@ -1005,16 +1041,35 @@ export function getHistoryFileCacheEntries(
     fileKey: string
     byteSize: number
     fileMtime: string
+    sourceState: 'present' | 'missing'
+    sourceRank: number
+    sessionKeysJson: string
     adapter: string
     schemaVersion: string
     eventsJson: string
   }>
   return rows.map((row) => {
     const events = parseCachedEvents(row.eventsJson, provider)
+    let sessionKeys: string[] = []
+    try {
+      const decoded: unknown = JSON.parse(row.sessionKeysJson)
+      if (
+        Array.isArray(decoded) &&
+        decoded.every((key) => typeof key === 'string' && /^session_[a-f0-9]{24}$/.test(key))
+      )
+        sessionKeys = decoded
+    } catch {
+      /* A legacy/bad identity cannot claim another session. */
+    }
     return {
       fileKey: row.fileKey,
       byteSize: row.byteSize,
       fileMtime: row.fileMtime,
+      sourceState: row.sourceState,
+      sourceRank: row.sourceRank,
+      sessionKeys: [
+        ...new Set([...sessionKeys, ...(events ?? []).map((event) => event.sessionKey)]),
+      ],
       adapter: row.adapter,
       schemaVersion: row.schemaVersion,
       events: events ?? [],
@@ -1203,7 +1258,7 @@ export function replaceHistorySourceSessions(
   sourceId: string,
   provider: UsageProvider,
   sessions: UsageSession[],
-  diagnostics: { filesSeen: number; malformedLines: number },
+  diagnostics: { filesSeen: number; malformedLines: number; timeZone?: string },
   fileCache?: HistoryFileCacheMutation,
 ): { changedReferences: ReferenceChange[] } {
   const db = getDatabase()
@@ -1215,7 +1270,7 @@ export function replaceHistorySourceSessions(
     sourceId,
     provider,
     new Date().toISOString(),
-    resolvedTimeZone(),
+    diagnostics.timeZone ?? resolvedTimeZone(),
   )
   const scanId = Number(scanResult.lastInsertRowid)
 
@@ -1293,15 +1348,18 @@ export function replaceHistorySourceSessions(
   const upsertCachedFile = db.prepare(`
     INSERT INTO history_file_cache(
       source_id, provider, file_key, byte_size, file_mtime, adapter,
-      schema_version, events_json, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      schema_version, events_json, updated_at, source_state, source_rank, session_keys_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(source_id, provider, file_key) DO UPDATE SET
       byte_size = excluded.byte_size,
       file_mtime = excluded.file_mtime,
       adapter = excluded.adapter,
       schema_version = excluded.schema_version,
       events_json = excluded.events_json,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      source_state = excluded.source_state,
+      source_rank = excluded.source_rank,
+      session_keys_json = excluded.session_keys_json
   `)
   const capturedAt = new Date().toISOString()
 
@@ -1388,6 +1446,11 @@ export function replaceHistorySourceSessions(
           cached.schemaVersion,
           serializedCachedEvents(cached.events),
           updatedAt,
+          cached.sourceState ?? 'present',
+          cached.sourceRank ?? 0,
+          JSON.stringify(
+            cached.sessionKeys ?? [...new Set(cached.events.map((event) => event.sessionKey))],
+          ),
         )
       }
     }

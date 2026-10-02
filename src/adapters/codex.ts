@@ -233,7 +233,13 @@ export async function readCodexHistoryFile(
   // Preserve known deltas even when one timestamp is missing. Its coarse marker
   // prevents attribution to the session start; other dated deltas stay dated.
   const events = points.map((point) => normalizePoint(point, options, filePath, summary))
-  return { events, diagnostics, state: 'accepted', snapshot: after }
+  return {
+    events,
+    diagnostics,
+    state: 'accepted',
+    snapshot: after,
+    sessionKeys: context.id ? [privateKey('session', context.id, options.identifierSalt)] : [],
+  }
 }
 
 function normalizePoint(

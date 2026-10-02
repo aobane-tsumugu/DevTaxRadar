@@ -202,12 +202,14 @@ app.get('/api/sessions/detail', async (request, reply) => {
     preview: transcriptExists
       ? await readSessionPreview(reference.sourcePath, parsed.data.provider)
       : undefined,
-    resume: buildResumeCommand(
-      parsed.data.provider,
-      reference.nativeSessionId,
-      reference.workingDirectory,
-      existsSync(reference.workingDirectory),
-    ),
+    resume: transcriptExists
+      ? buildResumeCommand(
+          parsed.data.provider,
+          reference.nativeSessionId,
+          reference.workingDirectory,
+          existsSync(reference.workingDirectory),
+        )
+      : undefined,
   }
 })
 app.get('/api/config', async () => getConfiguration())

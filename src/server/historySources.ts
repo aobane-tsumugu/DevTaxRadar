@@ -5,7 +5,8 @@ import { createHmac } from 'node:crypto'
 import { applyRestoreSources } from './restoreSources.js'
 import { getAppDataDirectory } from './paths.js'
 import { opendir, realpath } from 'node:fs/promises'
-import { isAbsolute, relative, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { selectCodexFileContributions } from '../core/codexFileSelection.js'
 
 import {
   CLAUDE_HISTORY_ADAPTER,
@@ -32,6 +33,8 @@ import {
   getDatabase,
   getHistoryFileCacheEntries,
   getHistorySourceScanStatuses,
+  getSessionReference,
+  getUsageSessions,
   getHistorySources,
   recordHistorySourceScanFailure,
   removeHistorySource,
@@ -118,6 +121,40 @@ export async function probeHistoryRoot(
   }
 }
 
+/** Only the built-in Codex source owns its sibling archive directory. */
+function sourceRoots(source: HistorySource): Array<{ root: string; prefix: string; rank: number }> {
+  const roots = [{ root: source.root, prefix: '', rank: 0 }]
+  if (
+    source.provider === 'codex' &&
+    source.kind === 'default' &&
+    basename(source.root) === 'sessions'
+  ) {
+    roots.push({
+      root: join(dirname(source.root), 'archived_sessions'),
+      prefix: '\0archived_sessions\0',
+      rank: 1,
+    })
+  }
+  return roots
+}
+
+async function availableSourceRoots(source: HistorySource) {
+  const roots = await Promise.all(
+    sourceRoots(source).map(async (root) => ({
+      ...root,
+      ...(await probeHistoryRoot(root.root)),
+    })),
+  )
+  // Missing optional directories are normal. Permission/timeout failures are
+  // not evidence of absence and must protect the complete last-good snapshot.
+  if (roots.some((root) => root.reason === 'not_readable'))
+    return { availability: 'unavailable' as const, reason: 'not_readable' as const, roots: [] }
+  const available = roots.filter((root) => root.availability === 'available')
+  return available.length
+    ? { availability: 'available' as const, roots: available }
+    : { availability: 'unavailable' as const, reason: 'not_found' as const, roots: [] }
+}
+
 export async function testHistorySource(
   input: HistorySourceInput,
 ): Promise<HistorySourceTestResult> {
@@ -149,7 +186,7 @@ export async function listHistorySourceViews(): Promise<HistorySourceView[]> {
   return await Promise.all(
     sources.map(async (source) => {
       const availability = source.enabled
-        ? await probeHistoryRoot(source.root)
+        ? await availableSourceRoots(source)
         : ({ availability: 'unavailable', reason: 'not_readable' } as const)
       const status = statuses.get(`${source.id}:${source.provider}`)
       const lastScan: HistorySourceView['lastScan'] = status
@@ -196,6 +233,7 @@ type DiscoveredHistoryFile = {
   byteSize: number
   fileMtime: string
   canonicalRelativeIdentity: string
+  sourceRank: number
 }
 
 type AdapterSignature = { adapter: string; schemaVersion: string }
@@ -235,6 +273,8 @@ async function discoverSourceFiles(
   root: string,
   cacheSalt: string,
   diagnostics: AdapterDiagnostics,
+  identityPrefix = '',
+  sourceRank = 0,
 ): Promise<DiscoveredHistoryFile[] | undefined> {
   let canonicalRoot: string
   try {
@@ -265,7 +305,8 @@ async function discoverSourceFiles(
     }
     files.push({
       path: filePath,
-      fileKey: opaqueFileKey(cacheSalt, relativeIdentity),
+      fileKey: opaqueFileKey(cacheSalt, identityPrefix + relativeIdentity),
+      sourceRank,
       byteSize: snapshot.byteSize,
       fileMtime: snapshot.fileMtime,
       canonicalRelativeIdentity: relativeIdentity,
@@ -287,6 +328,7 @@ function cacheMatches(
   return Boolean(
     cached &&
     cached.valid &&
+    cached.sourceState !== 'missing' &&
     cached.byteSize === file.byteSize &&
     cached.fileMtime === file.fileMtime &&
     cached.adapter === signature.adapter &&
@@ -350,6 +392,7 @@ type IncrementalSourceRead = {
   fileCache: HistoryFileCacheMutation
   captures: FileCapture[]
   failed: boolean
+  knownSessionKeys?: string[]
 }
 
 async function readSourceIncrementally(
@@ -362,8 +405,14 @@ async function readSourceIncrementally(
   // Use a source namespace even for default sources, whose session/project
   // identifiers intentionally retain their legacy salt for compatibility.
   const cacheSalt = sourceIdentifierSalt(identifierSalt, source.id)
-  const files = await discoverSourceFiles(source.root, cacheSalt, diagnostics)
-  if (!files) {
+  const availability = await availableSourceRoots(source)
+  const discovered = await Promise.all(
+    availability.roots.map((root) =>
+      discoverSourceFiles(root.root, cacheSalt, diagnostics, root.prefix, root.rank),
+    ),
+  )
+  const files = discovered.flatMap((files) => files ?? [])
+  if (availability.availability !== 'available' || discovered.some((files) => !files)) {
     return {
       events: [],
       diagnostics,
@@ -386,6 +435,14 @@ async function readSourceIncrementally(
   const events: NormalizedUsage[] = []
   const upsert: HistoryFileCacheMutation['upsert'] = []
   const seenClaudeMessages = new Set<string>()
+  const contributions: Array<{
+    fileKey: string
+    fileMtime: string
+    sourceState: 'present' | 'missing'
+    sourceRank: number
+    sessionKeys?: string[]
+    events: NormalizedUsage[]
+  }> = []
   const scanSalt =
     source.kind === 'default' ? identifierSalt : sourceIdentifierSalt(identifierSalt, source.id)
   const adapterOptions: AdapterOptions = {
@@ -415,9 +472,23 @@ async function readSourceIncrementally(
   for (const file of files) {
     seenFileKeys.add(file.fileKey)
     const cached = cachedByFileKey.get(file.fileKey)
-    if (mode === 'incremental' && cacheMatches(cached, file, signature)) {
+    const referenceMoved =
+      source.kind === 'default' &&
+      cached?.events.some(
+        (event) =>
+          getSessionReference(source.provider, event.sessionKey, source.id)?.sourcePath !==
+          file.path,
+      )
+    if (mode === 'incremental' && !referenceMoved && cacheMatches(cached, file, signature)) {
       diagnostics.filesReused += 1
-      appendCachedContribution(cached!.events)
+      if (source.provider === 'codex')
+        contributions.push({
+          ...file,
+          sourceState: 'present',
+          sessionKeys: cached!.sessionKeys,
+          events: restoredCachedEvents(cached!.events),
+        })
+      else appendCachedContribution(cached!.events)
       captures.push({
         fileKey: file.fileKey,
         state: 'reused',
@@ -447,7 +518,15 @@ async function readSourceIncrementally(
       }
     }
     if (parsed.state === 'accepted' && parsed.snapshot) {
-      appendContribution(parsed.events)
+      if (source.provider === 'codex')
+        contributions.push({
+          ...file,
+          sourceState: 'present',
+          sessionKeys: parsed.sessionKeys,
+          fileMtime: parsed.snapshot.fileMtime,
+          events: parsed.events,
+        })
+      else appendContribution(parsed.events)
       captures.push({
         fileKey: file.fileKey,
         state: 'read',
@@ -461,6 +540,9 @@ async function readSourceIncrementally(
         fileKey: file.fileKey,
         byteSize: parsed.snapshot.byteSize,
         fileMtime: parsed.snapshot.fileMtime,
+        sourceState: 'present',
+        sourceRank: file.sourceRank,
+        sessionKeys: parsed.sessionKeys,
         adapter: signature.adapter,
         schemaVersion: signature.schemaVersion,
         events: parsed.events.map(cachedEvent),
@@ -472,7 +554,20 @@ async function readSourceIncrementally(
     // file. Its last accepted contribution survives if present; a new bad file
     // contributes zero and can be retried next incremental scan.
     diagnostics.filesDeferred += 1
-    if (cached?.valid) appendCachedContribution(cached.events)
+    if (cached?.valid) {
+      if (source.provider === 'codex')
+        contributions.push({
+          ...file,
+          sourceState: 'present',
+          sessionKeys: cached.sessionKeys,
+          fileMtime: cached.fileMtime,
+          events: restoredCachedEvents(cached.events),
+        })
+      else appendCachedContribution(cached.events)
+      // A restored but not yet readable file is not a newly verified import.
+      if (cached.sourceState === 'missing')
+        upsert.push({ ...cached, sourceState: 'present', sourceRank: file.sourceRank })
+    }
     captures.push({
       fileKey: file.fileKey,
       state: cached?.valid ? 'deferred-previous' : 'deferred-missing',
@@ -486,17 +581,78 @@ async function readSourceIncrementally(
     })
   }
 
+  const deleteFileKeys: string[] = []
+  const presentSessions = new Set(
+    contributions.flatMap((file) => [
+      ...(file.sessionKeys ?? []),
+      ...file.events.map((event) => event.sessionKey),
+    ]),
+  )
+  for (const cached of cacheEntries.filter((entry) => !seenFileKeys.has(entry.fileKey))) {
+    // Retire superseded paths after a move. A returning file must be read again;
+    // old copies can never resurrect an obsolete cumulative series.
+    const retained =
+      source.provider === 'codex' && cached.valid
+        ? cached.events.filter((event) => !presentSessions.has(event.sessionKey))
+        : []
+    const retainedKeys =
+      source.provider === 'codex' && cached.valid
+        ? (cached.sessionKeys ?? cached.events.map((event) => event.sessionKey)).filter(
+            (key) => !presentSessions.has(key),
+          )
+        : []
+    if (!retainedKeys.length) {
+      deleteFileKeys.push(cached.fileKey)
+      continue
+    }
+    upsert.push({
+      ...cached,
+      events: retained,
+      sessionKeys: [...new Set(retainedKeys)],
+      sourceState: 'missing',
+    })
+    contributions.push({
+      ...cached,
+      events: restoredCachedEvents(retained),
+      sessionKeys: [...new Set(retainedKeys)],
+      sourceState: 'missing',
+      sourceRank: cached.sourceRank ?? 0,
+    })
+    captures.push({
+      fileKey: cached.fileKey,
+      state: 'missing-retained',
+      adapter: cached.adapter,
+      schemaVersion: cached.schemaVersion,
+      eventCount: retained.length,
+      observationRefs: captureReferences(retained),
+      ...(previousFiles.get(cached.fileKey)?.acceptedAt
+        ? { acceptedAt: previousFiles.get(cached.fileKey)!.acceptedAt }
+        : {}),
+    })
+  }
+  if (source.provider === 'codex') {
+    const selected = selectCodexFileContributions(contributions)
+    events.push(...selected.flatMap((file) => file.events))
+    const selectedByKey = new Map(selected.map((file) => [file.fileKey, file.events]))
+    // Provenance refers to the selected numerical series, not redundant copies.
+    for (const capture of captures) {
+      const selectedEvents = selectedByKey.get(capture.fileKey) ?? []
+      capture.observationRefs = captureReferences(selectedEvents)
+      capture.eventCount = selectedEvents.length
+    }
+  }
   return {
     events,
     diagnostics,
-    fileCache: {
-      upsert,
-      deleteFileKeys: cacheEntries
-        .filter((entry) => !seenFileKeys.has(entry.fileKey))
-        .map((entry) => entry.fileKey),
-    },
+    fileCache: { upsert, deleteFileKeys },
     captures,
     failed: false,
+    knownSessionKeys: [
+      ...cacheEntries
+        .filter((entry) => entry.valid)
+        .flatMap((entry) => entry.sessionKeys ?? entry.events.map((event) => event.sessionKey)),
+      ...contributions.flatMap((file) => file.sessionKeys ?? []),
+    ],
   }
 }
 
@@ -521,7 +677,7 @@ async function executeHistoryScan(
     for (const source of sources) {
       beginScan(source.provider, source.id, source.name)
       const providerResult = (providerResults[source.provider] ??= { events: 0, diagnostics: {} })
-      const availability = await probeHistoryRoot(source.root)
+      const availability = await availableSourceRoots(source)
       if (availability.availability === 'unavailable') {
         recordHistorySourceScanFailure(
           source.id,
@@ -567,6 +723,51 @@ async function executeHistoryScan(
 
         const aggregationDiagnostics: AggregationDiagnostics = { nonUtcTimestamps: 0 }
         const sessions = aggregateSessions(result.events, aggregationDiagnostics)
+        if (source.provider === 'codex') {
+          const represented = new Set([
+            ...(result.knownSessionKeys ?? []),
+            ...sessions.map((row) => row.sessionKey),
+          ])
+          const legacy = getUsageSessions().filter(
+            (row) =>
+              row.sourceId === source.id &&
+              row.provider === 'codex' &&
+              !represented.has(row.sessionKey),
+          )
+          for (const row of legacy)
+            sessions.push({
+              ...row,
+              projectLabel: row.projectLabel ?? undefined,
+              model: row.model ?? undefined,
+              schemaVersion: 'codex-retained-summary',
+              confidence: 'low',
+            })
+          const legacySessions = new Set(legacy.map((row) => row.sessionKey))
+          for (const sessionKey of legacySessions) {
+            const rows = legacy.filter((row) => row.sessionKey === sessionKey)
+            result.captures.push({
+              fileKey: opaqueFileKey(
+                sourceIdentifierSalt(identifierSalt, source.id),
+                'unverified-session/' + sessionKey,
+              ),
+              state: 'unverified-retained',
+              adapter: 'stored-summary',
+              schemaVersion: 'codex-retained-summary',
+              eventCount: rows.reduce((count, row) => count + row.messageCount, 0),
+              observationRefs: rows.map(({ sessionKey, projectKey, month }) => ({
+                sessionKey,
+                projectKey,
+                month,
+              })),
+            })
+          }
+          Object.assign(result.diagnostics, {
+            filesMissingRetained: result.captures.filter(
+              (file) => file.state === 'missing-retained' && file.eventCount > 0,
+            ).length,
+            sessionsUnverifiedRetained: legacySessions.size,
+          })
+        }
         // Reads above await filesystem I/O. Capture again here so changes saved
         // during that wait are paired with the values about to be replaced.
         archiveCurrentObservation('before-scan')
@@ -577,11 +778,20 @@ async function executeHistoryScan(
           {
             filesSeen: result.diagnostics.filesDiscovered,
             malformedLines: result.diagnostics.malformedJsonLines,
+            ...(result.captures.some((file) => file.state === 'unverified-retained')
+              ? { timeZone: 'unknown' }
+              : {}),
           },
           result.fileCache,
         )
         recordSourceCapture(source.id, source.provider, mode, 'complete', result.captures)
         addDiagnostics(providerResult.diagnostics, {
+          filesMissingRetained: result.captures.filter(
+            (file) => file.state === 'missing-retained' && file.eventCount > 0,
+          ).length,
+          sessionsUnverifiedRetained: result.captures.filter(
+            (file) => file.state === 'unverified-retained',
+          ).length,
           nonUtcTimestamps: aggregationDiagnostics.nonUtcTimestamps,
           changedSinceLastScan: changedReferences.length,
         })

@@ -1,6 +1,6 @@
 # DevTax v0.5 要件・実装・受入対応表
 
-更新日: 2026-09-21
+更新日: 2026-10-02
 実装差分基点: `53c16ff65c449f958108d4ee15b68c0719bace96`。main統合済みの目的是正を基点に、タスク型ホームとローカルPC移行導線を追加した改善候補。#25の既存main C06受入とは分離し、この改善ブランチ自身のNode24・React・Windows受入は未実施。
 
 製品仕様v0.5の要求・既存の受入条件を維持する。以下は現在の接続範囲であり、各ACの総合受入済みを示さない。実機確認は別枠、正式環境の全体試験は未実施として区別する。
@@ -14,7 +14,7 @@
 | REQ-LIFE-01 | 制作物・単位・用途・活動 | 制作物、用途、期間分類、出来事を保存。独立した活動全体の共通事実モデルは目標仕様であり、現行のtaxUnitモデルの範囲を超えて完成とはしない。 [types.ts](../../src/planning/types.ts) | AC-LIFE |
 | REQ-LIFE-02 | 稼働版・改良・複数用途 | 前身後継・単一振替・残額使用を既存経路で扱う。混在用途の資産境界は本人の条件として保持し、全自動の資産分割は行わない。 [balanceUseDraft.ts](../../src/core/balanceUseDraft.ts) [BalancesPage.tsx](../../src/client/pages/BalancesPage.tsx) | AC-LIFE、AC-GRAPH |
 | REQ-FACT-01 | 事実の時点・根拠・訂正 | 発生日と記録日、条件と証拠を保持。同額の根拠変更も候補元変更へ反映する。すべての取込様式に共通する訂正モデルは未完成。 [costTreatmentFacts.ts](../../src/core/costTreatmentFacts.ts) [reviewHistory.ts](../../src/core/reviewHistory.ts) | AC-FACT |
-| REQ-SOURCE-01 | 取得元品質・旧値・保全 | 取得元単位のI/O失敗とファイル単位保留、前回値・未取得、捕捉来歴を区別。採用前の数値観測を保全し、税務採用と混同しない。現HEADで全取得回帰の再実行は必要。 [historySources.ts](../../src/server/historySources.ts) [observationRecords.ts](../../src/server/observationRecords.ts) | AC-SOURCE、AC-RECORD |
+| REQ-SOURCE-01 | 取得元品質・旧値・保全 | 取得元単位のI/O失敗、ファイル保留、正常走査で原本不在の数値保持、ファイル対応未確認の旧集計保持を区別。既定Codexは通常・アーカイブを同じ取得元で読み同一セッションの一コピーを採用。数値来歴を費用・記録・出力へ残し、原本バックアップや税務採用と混同しない。 [historySources.ts](../../src/server/historySources.ts) [observationRecords.ts](../../src/server/observationRecords.ts) | AC-SOURCE、AC-RECORD |
 | REQ-SOURCE-02 | 履歴粒度・重複 | 契約選択と履歴粒度の制約を計算へ渡す。同じnative IDと実ログ複製を区別し、精度不足時に月・契約別利用を推定しない。 [usageGranularity.ts](../../src/core/usageGranularity.ts) [contractUsage.ts](../../src/core/contractUsage.ts) | AC-SOURCE、AC-TIME |
 | REQ-EXPENSE-01 | 原額・期間・調整 | 全費用は共通費用源へ正規化。料金の優先順位はproviderと対象月。理由付きnullと0、返金と元費用訂正、残高減少への対応を保持する。 [workspaceCosts.ts](../../src/core/workspaceCosts.ts) [sourceAdjustments.ts](../../src/core/sourceAdjustments.ts) [adjustmentBalanceLinks.ts](../../src/core/adjustmentBalanceLinks.ts) | AC-EXPENSE |
 | REQ-EXPENSE-02 | 入力・取込・換算 | 手入力と返金・訂正の共通検証、明示した換算額・率・日付・出典を保存。全原始請求の統一取込UIを実装した意味ではない。 [sourceAdjustmentSchema.ts](../../src/planning/sourceAdjustmentSchema.ts) [SourceAdjustmentsEditor.tsx](../../src/client/pages/SourceAdjustmentsEditor.tsx) | AC-EXPENSE |

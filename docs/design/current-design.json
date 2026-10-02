@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedOn": "2026-09-21",
+  "updatedOn": "2026-10-02",
   "baseline": "53c16ff65c449f958108d4ee15b68c0719bace96",
   "delivery": "main統合済みの目的是正を基点に、タスク型ホームとローカルPC移行導線を追加した改善候補。#25の既存main C06受入とは分離し、この改善ブランチ自身のNode24・React・Windows受入は未実施。",
   "requirements": [
@@ -43,7 +43,7 @@
     {
       "id": "REQ-SOURCE-01",
       "title": "取得元品質・旧値・保全",
-      "state": "取得元単位のI/O失敗とファイル単位保留、前回値・未取得、捕捉来歴を区別。採用前の数値観測を保全し、税務採用と混同しない。現HEADで全取得回帰の再実行は必要。",
+      "state": "取得元単位のI/O失敗、ファイル保留、正常走査で原本不在の数値保持、ファイル対応未確認の旧集計保持を区別。既定Codexは通常・アーカイブを同じ取得元で読み同一セッションの一コピーを採用。数値来歴を費用・記録・出力へ残し、原本バックアップや税務採用と混同しない。",
       "refs": [
         "src/server/historySources.ts",
         "src/server/observationRecords.ts"
@@ -419,7 +419,7 @@
     {
       "id": "W02",
       "title": "取得・旧値保持",
-      "implementation": "取得来歴と数値保全を保持。元履歴と採用記録を分離。",
+      "implementation": "原本不在・対応未確認・走査失敗を分けて取込済み数値と来歴を保持。通常・アーカイブの同一セッションは一コピーを採用。会話本文・税務採用とは分離。",
       "source": "src/server/observationRecords.ts"
     },
     {
@@ -625,7 +625,7 @@
     {
       "method": "POST",
       "path": "/api/scan",
-      "purpose": "履歴走査。復元保留時409",
+      "purpose": "履歴走査。diagnostics.filesMissingRetained（ファイル）/sessionsUnverifiedRetained（セッション）で保持範囲を明示。復元保留時409",
       "source": "src/server/index.ts"
     },
     {
@@ -685,13 +685,13 @@
     {
       "method": "GET",
       "path": "/api/observations/records",
-      "purpose": "自動保全した数値記録のページ取得",
+      "purpose": "自動保全した数値記録のページ取得。任意missingRetained（ファイル）/unverifiedRetained（セッション）の件数を含む",
       "source": "src/server/observationRoutes.ts"
     },
     {
       "method": "GET",
       "path": "/api/observations/records/:id",
-      "purpose": "保全した数値記録の検証付き読取り",
+      "purpose": "保全した数値記録の検証付き読取り。FileCapture.stateにmissing-retained/unverified-retainedを保持",
       "source": "src/server/observationRoutes.ts"
     }
   ],

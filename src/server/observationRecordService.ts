@@ -65,7 +65,9 @@ export function recordSourceCapture(
   const key = sourceId === `local-${provider}` ? provider : `${sourceId}:${provider}`
   const timeZone =
     status === 'complete'
-      ? resolvedTimeZone()
+      ? files?.some((file) => file.state === 'unverified-retained')
+        ? 'unknown'
+        : resolvedTimeZone()
       : (previous?.timeZone ?? getLastScanTimeZones(db)[key] ?? 'unknown')
   saveSourceCapture(db, {
     sourceId,
@@ -78,7 +80,14 @@ export function recordSourceCapture(
       files ??
       (previous?.files ?? []).map((file) => ({
         ...file,
-        state: file.state === 'deferred-missing' ? 'deferred-missing' : 'deferred-previous',
+        // Preserve the last completed walk's absence/uncertainty evidence. The source
+        // status separately says that this scan could not verify present visibility.
+        state:
+          file.state === 'deferred-missing' ||
+          file.state === 'missing-retained' ||
+          file.state === 'unverified-retained'
+            ? file.state
+            : 'deferred-previous',
       })),
     observationsHash: observationHash(
       getUsageSessions(db).filter((row) => row.sourceId === sourceId && row.provider === provider),
