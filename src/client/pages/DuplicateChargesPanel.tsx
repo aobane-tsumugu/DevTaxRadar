@@ -14,13 +14,24 @@ export default function DuplicateChargesPanel({
   onChange?: (period: ProviderChargePeriod) => void
 }) {
   const groups = chargeReviewGroups(periods)
-  if (!groups.length && !periods.some((period) => period.contractConfirmation)) return null
+  if (!periods.length || (!groups.length && !onChange)) return null
   return (
-    <section aria-label="請求の重複候補">
-      <h4>請求の重複・期間の重なりを確認してください</h4>
-      <p>
-        別契約やプラン変更の場合もあるため、明細を見て確認してください。現在は各請求を合計に含めています。不明額は合計に含めず、未算定として保持します。
-      </p>
+    <section aria-label={groups.length ? '請求の重複候補' : '請求と契約・履歴の対応'}>
+      {groups.length ? (
+        <>
+          <h4>請求の重複・期間の重なりを確認してください</h4>
+          <p>
+            別契約やプラン変更の場合もあるため、明細を見て確認してください。現在は各請求を合計に含めています。不明額は合計に含めず、未算定として保持します。
+          </p>
+        </>
+      ) : (
+        <>
+          <h4>請求と契約・履歴の対応</h4>
+          <p>
+            各請求の契約の呼び名、利用した履歴の範囲、履歴にない利用の割合と根拠を記録できます。
+          </p>
+        </>
+      )}
       {groups.map(({ kind, ids }) => (
         <article key={kind + JSON.stringify(ids)}>
           <strong>
@@ -54,16 +65,9 @@ export default function DuplicateChargesPanel({
         </article>
       ))}
       {onChange &&
-        periods.map((period, index) =>
-          period.contractConfirmation || groups.some((group) => group.ids.includes(period.id)) ? (
-            <ChargeContractEditor
-              key={period.id}
-              period={period}
-              index={index}
-              onChange={onChange}
-            />
-          ) : null,
-        )}
+        periods.map((period, index) => (
+          <ChargeContractEditor key={period.id} period={period} index={index} onChange={onChange} />
+        ))}
       <p>
         誤入力なら該当する請求行を修正し、保存前に「変更の影響を確認」で差分を確認できます。自動統合や金額の除外は行いません。
       </p>

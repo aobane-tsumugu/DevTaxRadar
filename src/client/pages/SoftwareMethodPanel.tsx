@@ -35,7 +35,7 @@ const labels = {
 }
 type Context = { preview: BalancePreview; signature: string; accountId: string; year: number }
 const integer = (value: string): number | null => {
-  if (!/^\\d+$/.test(value.trim())) return null
+  if (!/^\d+$/.test(value.trim())) return null
   const parsed = Number(value.trim())
   return Number.isSafeInteger(parsed) ? parsed : null
 }

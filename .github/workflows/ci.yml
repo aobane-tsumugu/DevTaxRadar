@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -50,3 +54,6 @@ jobs:
 
       - name: Check built output for private data
         run: npm run privacy:check
+
+      - name: Verify release package lifecycle
+        run: npm run release:pack
