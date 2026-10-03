@@ -300,7 +300,7 @@ CostsPageは操作の可否（readOnly）と資料の状態（recordState: draft
 
 複数配分の過年度比較では、targetsがある年度条件から未使用の旧taxUnitId/projectAllocationRatioを比較対象として除く。保存版の原本は変更しない。配分指定の説明もID順にし、入力順だけの変更で過年度訂正を要求しない。業務割合・実際の配分指定・根拠の変更は引き続き比較対象となる。
 
-GET /api/balances/reviews/:id/export はUUIDとformat（markdown/json、既定markdown）を検証し、getBalanceReviewで保存内容のhashを確認してから出力する。現在の料金・計画・観測を読み直さず、固定した一つの資料だけを対象とする。UTF-8、attachment、Cache-Control: no-store。存在なし404、不正なID・形式・追加queryは400。
+GET /api/balances/reviews/:id/export はUUIDとformat（markdown/json/accountant-csv、既定markdown）を検証し、getBalanceReviewで保存内容のhashを確認してから出力する。現在の料金・計画・観測を読み直さず、固定した一つの資料だけを対象とする。UTF-8、attachment、Cache-Control: no-store。存在なし404、不正なID・形式・追加queryは400。
 
 reviewExportJsonはexportVersion=1、kind=stored-year-reviewと保存したreview全体を返す。reviewExportMarkdownは資料ID・前年度/訂正元・記録理由、既知/未知の残高、増減・判断・証拠・費用基礎を説明し、同じ全JSONを添付する。JSON内の任意のバッククォート連続より長いコードフェンスを使い、説明の自由記述はMarkdownとしてエスケープする。古い残高のみの資料を最新の費用で補完しない。
 
@@ -620,3 +620,16 @@ resolution.questionBasisは確認事項ID・制作物ID・発生年・金額状�
 候補を編集中workspaceへ反映した後は、既存の影響preview、期待revision、要求ID、3版比較、SAVEPOINTによる一括保存を使う。共通事実と既存の費用行の保存を分割しない。費用源と固定採用資料へ出典を保持し、日付・根拠だけの訂正も履歴比較の対象とする。後の訂正で旧採用版のpayload・hash・exportを更新せず、共通事実がない旧版へ現在値を補完しない。
 
 現行サーバーは、保存済みの共通事実を省略する旧ブラウザの書き込み、未対応version、未知fieldを拒否する。この境界は旧実行バイナリで同じDBを安全に利用できる保証ではない。旧実行版へのダウングレード・新旧実行版の同一DB共有は未対応として区別する。バックアップと復元は既存の全DB snapshot・schema/hash/整合検査に加えて、このversion付き共通事実の検証を行う。
+
+
+### ローカル領収書候補抽出
+
+[対応範囲と制約](docs/RECEIPT-CANDIDATES.md)を参照。receiptFileReaderは選択Fileのバイトだけを読み、PDF.jsのローカル専用Workerへ渡す。5 MiB・20ページ・15秒・512 KiB・20,000項目で制限し、成功/失敗/abortで破棄する。外部URL/フォント/AI/OCR通信、埋め込みJavaScript実行、サーバーのパス読取りを行わない。画像OCRや暗号化PDFは手入力へ戻す。
+
+receiptExtractionは明示ラベルのテキストと厳格な文書JSONからallowlist項目の複数候補だけを返す。ReceiptCandidateIntakeは未選択状態から本人が選んだ値をOriginalChargeIntakeへ渡す。原文・ファイル名・パスは控え/DTO/固定資料へ保存しない。OriginalChargeCandidate.documentは確認済みissuer/invoiceNumberだけの任意strict objectで、既存候補hashの対象。既存文書に項目がなければhashは変わらない。請求書番号とcontract.referenceを混同しない。
+
+receipt provenanceと抽出テキストdigestの取込キー・安定IDを既存adapterへ渡し、既存の共通検証/訂正/重複確認/原子的workspace保存を使う。選択後は共通入力控え、選択前はファイル再読込が必要。キャンセル・遅延応答・画面/版変更はepoch+AbortControllerで遮断する。発行元/番号の訂正も事実追記で、旧事実を失う旧クライアント書込みは拒否する。採用年度出力は当時固定したdocument項目を表示し、原本へ再アクセスしない。
+
+### 固定採用版の汎用会計CSV
+
+`accountantCsvFiles`は保存済みBalanceReviewの明示したフィールドだけを投影する。APIはstoredReviewのhash検証、CLIはread-only reviewArchive経由。現在の計算器・元ログを呼ばない。UIはStoredReviewPanelから同じreviewのZIPと全文プレビューを一緒に作り、確認後だけダウンロードする。ZIP32 STORE・固定ファイル名・CRC32・定数日時、UTF-8 BOM CSV・CRLF・引用符エスケープ・数式接頭辞ガード。schema/金額意味/旧版欠落は[仕様](docs/ACCOUNTANT-CSV.md)参照。

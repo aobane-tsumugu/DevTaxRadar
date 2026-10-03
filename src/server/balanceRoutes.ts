@@ -9,6 +9,7 @@ import { readWorkspace } from './workspaceRepository.js'
 import { buildReviewMaterials, readReviewMaterials } from './reviewMaterials.js'
 import { readDashboardObservation, projectWorkspaceYears } from './dashboard.js'
 import { reviewExportJson, reviewExportMarkdown } from '../core/reviewExport.js'
+import { accountantCsvZip } from '../core/accountantCsv.js'
 import { compareReview } from '../core/reviewComparison.js'
 import { describeCostLots } from '../core/costLotLabel.js'
 import {
@@ -225,7 +226,7 @@ export function registerBalanceRoutes(app: FastifyInstance, getDatabase: () => D
   app.get('/api/balances/reviews/:id/export', async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).strict().safeParse(request.params)
     const query = z
-      .object({ format: z.enum(['markdown', 'json']).default('markdown') })
+      .object({ format: z.enum(['markdown', 'json', 'accountant-csv']).default('markdown') })
       .strict()
       .safeParse(request.query)
     if (!params.success || !query.success) return reply.code(400).send({ error: 'invalid_request' })
@@ -235,6 +236,7 @@ export function registerBalanceRoutes(app: FastifyInstance, getDatabase: () => D
         .code(404)
         .send({ error: 'not_found', message: '指定した年度資料が見つかりません。' })
     const json = query.data.format === 'json'
+    const csv = query.data.format === 'accountant-csv'
     return reply
       .header('Cache-Control', 'no-store')
       .header(
@@ -243,10 +245,22 @@ export function registerBalanceRoutes(app: FastifyInstance, getDatabase: () => D
           review.year +
           '-' +
           params.data.id +
-          (json ? '.json' : '.md') +
+          (csv ? '-accountant-csv.zip' : json ? '.json' : '.md') +
           '"',
       )
-      .type(json ? 'application/json; charset=utf-8' : 'text/markdown; charset=utf-8')
-      .send(json ? reviewExportJson(review) : reviewExportMarkdown(review))
+      .type(
+        csv
+          ? 'application/zip'
+          : json
+            ? 'application/json; charset=utf-8'
+            : 'text/markdown; charset=utf-8',
+      )
+      .send(
+        csv
+          ? Buffer.from(accountantCsvZip(review))
+          : json
+            ? reviewExportJson(review)
+            : reviewExportMarkdown(review),
+      )
   })
 }

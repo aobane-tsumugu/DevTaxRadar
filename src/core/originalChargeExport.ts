@@ -8,6 +8,10 @@ export function originalChargeMarkdown(fact: OriginalChargeFact): string[] {
     `  - 原通貨額: ${text(value.currency ?? '通貨不明')} ${text(value.amount ?? '金額不明')} / 採用円額: ${value.amountJpy === null ? '不明' : value.amountJpy + '円'}`,
     `  - 入力経路: ${fact.provenance.kind} / 証拠: ${fact.evidenceIds.map(text).join('、') || '未登録'}`,
   ]
+  if (fact.document)
+    lines.push(
+      `  - 発行元: ${text(fact.document.issuer ?? '未確認')} / 請求書番号: ${text(fact.document.invoiceNumber ?? '未確認')}`,
+    )
   if (value.unknownAmountReason)
     lines.push(`  - 原通貨額不明の理由: ${text(value.unknownAmountReason)}`)
   if (value.unknownJpyReason) lines.push(`  - 円額不明の理由: ${text(value.unknownJpyReason)}`)

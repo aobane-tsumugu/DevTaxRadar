@@ -4,12 +4,14 @@ import { once } from 'node:events'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { WorkspaceDraft } from '../src/planning/workspace.js'
 import type { AnnualCostProjection } from '../src/accounting/costs.js'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import type { BalanceReview } from '../src/accounting/balanceWorkspace.js'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createServer } from 'node:net'
 import { chargeContractBasis } from '../src/core/chargePeriods.js'
+import { accountantCsvFiles, accountantCsvZip } from '../src/core/accountantCsv.js'
 
 /** Exercises the bundled entries without tsx, source imports, or a user's database. */
 export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void> {
@@ -44,6 +46,36 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
         },
       ),
     )
+  let checkedPdfAssets = false
+  async function verifyPdfAssets(url: string) {
+    const assets = readdirSync(join(releaseRoot, 'dist', 'assets'))
+    const worker = assets.find((name) => /^pdf\.worker\.min-.*\.mjs$/.test(name))
+    const library = assets.find((name) => /^pdf-.*\.js$/.test(name))
+    assert.ok(worker && library, 'Local PDF library and dedicated Worker must be packaged')
+    for (const name of [worker, library]) {
+      const response = await fetch(`${url}/assets/${name}`, { signal: AbortSignal.timeout(10_000) })
+      assert.equal(response.status, 200)
+      assert.match(response.headers.get('content-type') ?? '', /javascript/)
+      assert.equal(
+        await response.text(),
+        readFileSync(join(releaseRoot, 'dist', 'assets', name), 'utf8'),
+      )
+    }
+    for (const name of [
+      'pdfjs-dist-LICENSE.txt',
+      'core-js-LICENSE.txt',
+      'receipt-pdf-NOTICE.txt',
+    ]) {
+      const response = await fetch(`${url}/licenses/${name}`, {
+        signal: AbortSignal.timeout(10_000),
+      })
+      assert.equal(response.status, 200)
+      assert.equal(
+        await response.text(),
+        readFileSync(join(releaseRoot, 'docs', 'licenses', name), 'utf8'),
+      )
+    }
+  }
   async function withServer(dataDirectory: string, check: (url: string) => Promise<void>) {
     const reservation = createServer()
     reservation.listen(0, '127.0.0.1')
@@ -87,6 +119,10 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
           }
         })
       })
+      if (!checkedPdfAssets) {
+        await verifyPdfAssets(url)
+        checkedPdfAssets = true
+      }
       await check(url)
     } finally {
       if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
@@ -107,6 +143,10 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
     const workspace = (await get(url + '/api/workspace')) as unknown as WorkspaceDraft
     assert.equal(workspace.planning.originalCharges?.facts[0]?.id, 'release-original-fact')
     assert.equal(workspace.planning.originalCharges?.facts[0]?.original.amount, '0')
+    assert.deepEqual(workspace.planning.originalCharges?.facts[0]?.document, {
+      issuer: '配布検査の発行元',
+      invoiceNumber: 'SYNTHETIC-RECEIPT-0',
+    })
     assert.equal(workspace.planning.originalCharges?.facts[0]?.dates?.paidOn, '2026-01-06')
     assert.equal(workspace.configuration.charges.claude, null)
     assert.equal(workspace.configuration.charges.codex, 0)
@@ -160,6 +200,23 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
   }
   let savedReviewId = ''
   const savedExports: Record<string, string> = {}
+  let savedAccountantCsv: Buffer = Buffer.alloc(0)
+  async function readAccountantCsv(url: string): Promise<Buffer> {
+    const response = await fetch(
+      url + '/api/balances/reviews/' + savedReviewId + '/export?format=accountant-csv',
+      { signal: AbortSignal.timeout(10_000) },
+    )
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('content-type'), 'application/zip')
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(
+      response.headers.get('content-disposition'),
+      `attachment; filename="devtax-2026-${savedReviewId}-accountant-csv.zip"`,
+    )
+    const bytes = Buffer.from(await response.arrayBuffer())
+    assert.equal(bytes.readUInt32LE(0), 0x04034b50, 'CSV export must be an actual ZIP archive')
+    return bytes
+  }
   try {
     await withServer(source, async (url) => {
       const html = await fetch(url, { signal: AbortSignal.timeout(10_000) })
@@ -266,6 +323,7 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
             category: 'direct',
             record: originalRecord,
             original: { currency: 'JPY', amount: '0', amountJpy: 0 },
+            document: { issuer: '配布検査の発行元', invoiceNumber: 'SYNTHETIC-RECEIPT-0' },
             dates: { incurredOn: '2026-01-05', paidOn: '2026-01-06' },
             recordedAt: '2026-01-07T00:00:00Z',
             evidenceIds: ['release-invoice-proof'],
@@ -330,8 +388,21 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       })
       const adoptedBody = await adoption.text()
       assert.equal(adoption.status, 200, adoptedBody)
-      savedReviewId = (JSON.parse(adoptedBody) as { review: { id: string } }).review.id
+      const adoptedReview = (JSON.parse(adoptedBody) as { review: BalanceReview }).review
+      savedReviewId = adoptedReview.id
       assert.ok(savedReviewId)
+      const storedReview = (await get(url + '/api/balances/reviews/' + savedReviewId))
+        .review as BalanceReview
+      assert.deepEqual(storedReview, adoptedReview)
+      savedAccountantCsv = await readAccountantCsv(url)
+      assert.deepEqual(savedAccountantCsv, Buffer.from(accountantCsvZip(storedReview)))
+      for (const file of accountantCsvFiles(storedReview)) {
+        assert.ok(savedAccountantCsv.includes(Buffer.from(file.name, 'utf8')), file.name)
+        assert.ok(
+          savedAccountantCsv.includes(Buffer.from(file.content, 'utf8')),
+          `ZIP must contain exact stored-review content for ${file.name}`,
+        )
+      }
       for (const format of ['json', 'markdown']) {
         const exported = await fetch(
           url + '/api/balances/reviews/' + savedReviewId + '/export?format=' + format,
@@ -394,12 +465,29 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       assert.equal(result.reviewId, savedReviewId)
       assert.equal(readFileSync(output, 'utf8'), savedExports[format])
     }
+    const csvOutput = join(temporary, '保存資料-accountant-csv.zip')
+    const csvResult = cli(
+      'read-review',
+      'export',
+      bundle,
+      savedReviewId,
+      'accountant-csv',
+      csvOutput,
+    )
+    assert.equal(csvResult.reviewId, savedReviewId)
+    assert.equal(csvResult.format, 'accountant-csv')
+    assert.deepEqual(readFileSync(csvOutput), savedAccountantCsv)
+    assert.throws(() =>
+      cli('read-review', 'export', bundle, savedReviewId, 'accountant-csv', csvOutput),
+    )
+    assert.deepEqual(readFileSync(csvOutput), savedAccountantCsv)
     assert.deepEqual(cli('data-backup', 'verify', bundle).files, manifest.files)
     await withServer(restored, async (url) => {
       assert.equal((await get(url + '/api/runtime')).restoreRequiresReconnect, true)
       await verifySavedInvoice(url)
       await get(url + '/api/workspace')
       await get(url + '/api/restore/sources')
+      assert.deepEqual(await readAccountantCsv(url), savedAccountantCsv)
     })
     const planPath = join(temporary, 'reconnect plan.json')
     const preview = cli('restore-sources', 'preview', restored, planPath)
@@ -414,9 +502,10 @@ export async function verifyReleaseLifecycle(releaseRoot: string): Promise<void>
       assert.equal((await get(url + '/api/runtime')).restoreRequiresReconnect, false)
       await verifySavedInvoice(url)
       await get(url + '/api/workspace')
+      assert.deepEqual(await readAccountantCsv(url), savedAccountantCsv)
     })
     console.log(
-      'Release lifecycle passed: startup, original-charge preview/save and projection, backup, verification, full-table restore, standalone adopted review read, reconnect, restart.',
+      'Release lifecycle passed: startup, original-charge preview/save and projection, backup, verification, full-table restore, standalone adopted review read, accountant CSV API/CLI byte equality, reconnect, restart.',
     )
   } finally {
     // mkdtempSync returned this dedicated directory; no user-supplied path is removed.

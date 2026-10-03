@@ -81,6 +81,12 @@ export const originalMoneySchema = z
 
 const metadata = {
   original: originalMoneySchema,
+  document: z
+    .strictObject({
+      issuer: z.string().trim().min(1).max(160).optional(),
+      invoiceNumber: z.string().trim().min(1).max(160).optional(),
+    })
+    .optional(),
   dates: z
     .strictObject({
       billedOn: date.optional(),
@@ -207,12 +213,14 @@ export function originalChargeDigest(text: string): string {
 }
 
 export function originalChargeContentHash(candidate: OriginalChargeCandidate): string {
-  const { category, record, original, dates, servicePeriod, contract, evidenceIds } = candidate
+  const { category, record, original, document, dates, servicePeriod, contract, evidenceIds } =
+    candidate
   return originalChargeDigest(
     canonicalOriginalCharge({
       category,
       record,
       original,
+      document,
       dates,
       servicePeriod,
       contract,

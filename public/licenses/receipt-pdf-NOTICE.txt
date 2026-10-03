@@ -1,0 +1,22 @@
+Receipt text extraction dependencies
+
+PDF.js / pdfjs-dist 6.3.289
+Copyright 2024 Mozilla Foundation
+https://github.com/mozilla/pdf.js
+License: Apache License, Version 2.0. See pdfjs-dist-LICENSE.txt.
+
+DevTax bundles PDF.js's legacy display library and legacy PDF worker from
+the pinned npm distribution. The display library is bundled/minified by
+Vite; the worker is copied as an application-local asset. No upstream
+source files are modified. Only the text and document-info APIs are used.
+No PDF viewer, scripting sandbox, external fonts, CMaps, or wasm assets
+are loaded by receipt extraction.
+
+The legacy bundles include core-js 3.50.0 polyfills.
+Copyright (c) 2013–2025 Denis Pushkarev (zloirock.ru)
+Copyright (c) 2025–2026 CoreJS Company (core-js.io)
+https://github.com/zloirock/core-js/tree/v3.50.0
+License: MIT. See core-js-LICENSE.txt.
+
+The Apache license was copied from pdfjs-dist 6.3.289's LICENSE file.
+The MIT license was copied from core-js 3.50.0's LICENSE file.

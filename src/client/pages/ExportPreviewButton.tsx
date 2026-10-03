@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createFocusTrap } from '../focusTrap.js'
 
-/** The bytes previewed are exactly the bytes downloaded; no second API read. */
+/** Load preview and download together, including prepared archive contents; no second API read. */
 export default function ExportPreviewButton({
   label,
   filename,
@@ -10,7 +10,7 @@ export default function ExportPreviewButton({
 }: {
   label: string
   filename: string
-  load: () => Promise<Blob>
+  load: () => Promise<Blob | { blob: Blob; text: string }>
   disabled?: boolean
 }) {
   const id = useId()
@@ -35,8 +35,9 @@ export default function ExportPreviewButton({
     setBusy(true)
     setError('')
     try {
-      const blob = await load()
-      const text = await blob.text()
+      const loaded = await load()
+      const blob = 'blob' in loaded ? loaded.blob : loaded
+      const text = 'blob' in loaded ? loaded.text : await loaded.text()
       if (current === sequence.current) setPreview({ blob, text })
     } catch (cause) {
       if (current === sequence.current)

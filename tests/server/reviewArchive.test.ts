@@ -24,6 +24,7 @@ import {
 import { listArchiveReviews, readArchiveReview } from '../../src/server/reviewArchive.js'
 import { runReviewArchiveCli } from '../../src/server/reviewArchiveCli.js'
 import { reviewExportJson, reviewExportMarkdown } from '../../src/core/reviewExport.js'
+import { accountantCsvZip } from '../../src/core/accountantCsv.js'
 
 const payload = readFileSync(resolve('fixtures/archive/stored-review-v1.json'), 'utf8').trimEnd()
 const golden = JSON.parse(payload) as BalanceReview
@@ -341,6 +342,51 @@ describe('originals-independent read-only archive', () => {
 })
 
 describe('archive CLI and existing export functions', () => {
+  it('writes exact accountant ZIP bytes from a fixed record without sources or overwriting files', () => {
+    fixture((f) => {
+      const output = join(f.root, '税理士相談用.zip')
+      const before = digest(f.file)
+      const result = JSON.parse(
+        runReviewArchiveCli(['export', f.directory, golden.id, 'accountant-csv', output]),
+      )
+      assert.deepEqual(result, {
+        exported: true,
+        reviewId: golden.id,
+        year: golden.year,
+        format: 'accountant-csv',
+        output,
+      })
+      assert.deepEqual(readFileSync(output), Buffer.from(accountantCsvZip(golden)))
+      assert.throws(() =>
+        runReviewArchiveCli(['export', f.directory, golden.id, 'accountant-csv', output]),
+      )
+      assert.deepEqual(readFileSync(output), Buffer.from(accountantCsvZip(golden)))
+      assert.equal(digest(f.file), before)
+
+      const corrected = { ...golden, id: 'later', correctsReviewId: golden.id, reason: '訂正後' }
+      edit(f, (db) => {
+        insert(db, corrected)
+        db.prepare('UPDATE balance_review_heads SET review_id=?').run(corrected.id)
+      })
+      const repeated = join(f.root, 'same-fixed-review.zip')
+      runReviewArchiveCli(['export', f.directory, golden.id, 'accountant-csv', repeated])
+      assert.deepEqual(readFileSync(repeated), readFileSync(output))
+      assert.deepEqual(readdirSync(f.directory), ['devtax-radar.db'])
+    })
+  })
+  it('preserves frozen material records in the CLI ZIP', () => {
+    fixture((f) => {
+      const materialReview = JSON.parse(
+        readFileSync(resolve('fixtures/archive/stored-review-materials-v1.json'), 'utf8'),
+      ) as BalanceReview
+      edit(f, (db) => insert(db, materialReview))
+      const before = digest(f.file)
+      const output = join(f.root, 'frozen-materials.zip')
+      runReviewArchiveCli(['export', f.directory, materialReview.id, 'accountant-csv', output])
+      assert.deepEqual(readFileSync(output), Buffer.from(accountantCsvZip(materialReview)))
+      assert.equal(digest(f.file), before)
+    })
+  })
   for (const format of ['json', 'markdown']) {
     it(`preserves frozen costs, evidence and observations in ${format}`, () => {
       fixture((f) => {
@@ -395,6 +441,16 @@ describe('archive CLI and existing export functions', () => {
         }),
       )
       assert.equal(listed.reviews[0].id, golden.id)
+      const zipOutput = join(f.root, 'entry-point-export.zip')
+      const exported = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [...args, 'export', f.directory, golden.id, 'accountant-csv', zipOutput],
+          { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
+        ),
+      )
+      assert.equal(exported.format, 'accountant-csv')
+      assert.deepEqual(readFileSync(zipOutput), Buffer.from(accountantCsvZip(golden)))
       const bad = spawnSync(process.execPath, [...args, 'export'], {
         env,
         encoding: 'utf8',
@@ -414,6 +470,11 @@ describe('archive CLI and existing export functions', () => {
       for (const output of [join(f.directory, 'export.json'), join(nested, 'export.json')]) {
         assert.throws(
           () => runReviewArchiveCli(['export', f.directory, golden.id, 'json', output]),
+          /フォルダの外/,
+        )
+        assert.equal(existsSync(output), false)
+        assert.throws(
+          () => runReviewArchiveCli(['export', f.directory, golden.id, 'accountant-csv', output]),
           /フォルダの外/,
         )
         assert.equal(existsSync(output), false)

@@ -11,6 +11,7 @@ import {
 import {
   applyOriginalChargeCandidates,
   manualOriginalChargeCandidate,
+  adaptOriginalChargeCandidates,
   originalChargeCandidateFromSource,
   ORIGINAL_CHARGE_IMPORT_LIMIT,
   ORIGINAL_CHARGE_IMPORT_ROWS,
@@ -25,6 +26,7 @@ import AllocationTargetsEditor from './AllocationTargetsEditor'
 import EvidenceReferences from './EvidenceReferences'
 import { yen } from './shared'
 import './OriginalChargeIntake.css'
+import ReceiptCandidateIntake, { type ReceiptSelection } from './ReceiptCandidateIntake'
 
 const categoryLabels = {
   subscription: 'AIサブスクリプション',
@@ -37,6 +39,9 @@ type Category = keyof typeof categoryLabels
 const strings = {
   id: '',
   label: '',
+  issuer: '',
+  invoiceNumber: '',
+  receiptSourceKey: '',
   amount: '',
   amountJpy: '',
   unknownAmountReason: '',
@@ -75,6 +80,13 @@ const inputSchema = z
     ...(Object.fromEntries(Object.keys(strings).map((key) => [key, z.string().max(4000)])) as {
       [K in keyof typeof strings]: z.ZodString
     }),
+    issuer: z.string().max(4000).optional(),
+    invoiceNumber: z.string().max(4000).optional(),
+    receiptSourceKey: z
+      .string()
+      .regex(/^receipt:[a-f0-9]{64}$/)
+      .optional()
+      .or(z.literal('')),
     category: z.enum(['subscription', 'equipment', 'home', 'direct']),
     rounding: z.enum(['nearest-yen', 'floor-yen', 'ceiling-yen']),
     unknownOriginal: z.boolean(),
@@ -179,6 +191,14 @@ function fromInput(input: Input): OriginalChargeCandidate {
         }
       : {}),
     evidenceIds: input.evidenceIds,
+    ...(input.issuer || input.invoiceNumber
+      ? {
+          document: {
+            ...(input.issuer ? { issuer: input.issuer } : {}),
+            ...(input.invoiceNumber ? { invoiceNumber: input.invoiceNumber } : {}),
+          },
+        }
+      : {}),
     ...(base?.correctsId ? { correctsId: base.correctsId } : {}),
     ...(base?.legacySourceId ? { legacySourceId: base.legacySourceId } : {}),
     ...(base ? { correctionReason: input.correctionReason } : {}),
@@ -256,9 +276,15 @@ function fromInput(input: Input): OriginalChargeCandidate {
         : {}),
     }
   // Omit cleared optional fields. Imported and manual candidates share the same strict validator.
-  return manualOriginalChargeCandidate(
+  const candidate = manualOriginalChargeCandidate(
     JSON.parse(JSON.stringify({ category: input.category, record, ...facts })),
   )
+  return input.receiptSourceKey && !base
+    ? adaptOriginalChargeCandidates(
+        { kind: 'receipt', extract: () => [{ ...candidate, sourceKey: input.receiptSourceKey }] },
+        null,
+      )[0]
+    : candidate
 }
 
 /** A correction always starts from the existing category record, preserving its allocation detail. */
@@ -302,6 +328,8 @@ function toInput(candidate: OriginalChargeCandidate): Input {
     endedOn: candidate.servicePeriod?.endedOn ?? '',
     contractReference: candidate.contract?.reference ?? '',
     contractReason: candidate.contract?.reason ?? '',
+    issuer: candidate.document?.issuer ?? '',
+    invoiceNumber: candidate.document?.invoiceNumber ?? '',
     evidenceIds: candidate.evidenceIds,
     conversionEvidenceIds: candidate.original.conversionEvidenceIds ?? [],
     rate: candidate.original.fx?.jpyPerUnit ?? '',
@@ -569,7 +597,7 @@ function IntakeEditor({
             : null
         if (!format)
           throw new Error(
-            '構造化CSVまたはJSONファイルを選択してください。画像・PDFはまだ読み取れません。',
+            '構造化CSVまたはJSONファイルを選択してください。領収書の読み取りは専用の入力欄を使ってください。',
           )
         const candidates = parseOriginalChargeImport(raw, format)
         // Only validated, allowlisted candidate fields enter recovery. The file body is discarded.
@@ -619,6 +647,32 @@ function IntakeEditor({
       if (live.current) setBusy(false)
     }
   }
+  function useReceipt(selection: ReceiptSelection) {
+    if (draft || busy || disabled || reading) return
+    epoch.current++
+    const input = blank(selection.category)
+    Object.assign(input, {
+      id: `receipt-${selection.sourceKey.slice(8, 48)}`,
+      receiptSourceKey: selection.sourceKey,
+      issuer: selection.issuer ?? '',
+      invoiceNumber: selection.invoiceNumber ?? '',
+      currency: selection.currency ?? '',
+      amount: selection.total ?? '',
+      amountJpy: '',
+      billedOn: selection.billedOn ?? '',
+      paidOn: selection.paidOn ?? '',
+      startedOn: selection.startedOn ?? '',
+      endedOn: selection.endedOn ?? '',
+    })
+    // Do not convert currency, adopt a yen amount, date of acquisition/incurrence,
+    // business-use date, contract or tax classification from receipt contents.
+    recovery.change({ kind: 'manual', input })
+    setPreview(null)
+    setReviewed(false)
+    setMessage(
+      '選んだ候補を入力へ引き継ぎました。採用円額・発生日や取得日・配分・根拠は自分で確認してください。まだ保存していません。',
+    )
+  }
   function textField(key: keyof typeof strings, label: string, type = 'text') {
     return (
       <label>
@@ -626,7 +680,7 @@ function IntakeEditor({
         <input
           type={type}
           value={input?.[key] ?? ''}
-          maxLength={2000}
+          maxLength={key === 'issuer' || key === 'invoiceNumber' ? 160 : 2000}
           onInput={(event) => edit({ [key]: event.currentTarget.value })}
           onChange={(event) => edit({ [key]: event.currentTarget.value })}
         />
@@ -709,8 +763,13 @@ function IntakeEditor({
         手入力とCSV・JSONは同じ候補確認を通ります。請求日・支払日・取得日・発生日を分け、金額不明と確認した0円を区別します。
       </p>
       <p>
-        画像・PDFの読み取りは未対応です。読み込んだファイルの全文やパスは入力控えへ保存しません。
+        文字を持つPDF・テキスト・指定形式のJSONから候補を確認できます。画像OCRは未対応です。読み込んだファイルの全文やパスは入力控えへ保存しません。
       </p>
+      <ReceiptCandidateIntake
+        disabled={disabled || busy || reading || Boolean(draft)}
+        revision={workspace.revision}
+        onUse={useReceipt}
+      />
       {message && <p role="status">{message}</p>}
       {reading && (
         <p role="status">ファイルを確認しています。別のファイルの選択や取り消しができます。</p>
@@ -853,6 +912,8 @@ function IntakeEditor({
                   ? '設備名'
                   : '支払の説明',
             )}
+            {textField('issuer', '発行元（原本で確認した値）')}
+            {textField('invoiceNumber', '請求書番号（契約番号とは別）')}
             {textField('currency', '原通貨（JPY・USDなど、不明は空欄）')}
             <label className="intake-check">
               <input
@@ -1095,6 +1156,12 @@ function IntakeEditor({
                 {categoryLabels[candidate.category]}：{candidateLabel(candidate)}
               </h4>
               <p>元費用ID：{originalChargeSourceId(candidate)}</p>
+              {candidate.document && (
+                <p>
+                  発行元：{candidate.document.issuer ?? '未確認'} / 請求書番号：
+                  {candidate.document.invoiceNumber ?? '未確認'}
+                </p>
+              )}
               <p>
                 原通貨：{candidate.original.amount ?? '不明'}{' '}
                 {candidate.original.currency ?? '通貨不明'} / 採用円額：
