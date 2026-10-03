@@ -1,3 +1,4 @@
+import { originalChargeSource } from '../core/originalChargeProjection.js'
 import { createSourceAdjuster, adjustSubscriptionScope } from '../core/adjustedCostSources.js'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Allocation, DashboardData } from '../client/types.js'
@@ -496,7 +497,7 @@ function buildDashboardFromSnapshot(
       )
     const scope = adjustSubscriptionScope(
       {
-        source: input.source,
+        source: originalChargeSource(input.source, planning),
         sourceWarnings,
         basisId: `ai:${input.scopeId}:basis`,
         period: input.period,

@@ -1,0 +1,69 @@
+.original-charge-intake {
+  min-width: 0;
+}
+.original-charge-intake fieldset {
+  min-width: 0;
+  margin: 1rem 0;
+}
+.original-charge-intake label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+.original-charge-intake input:not([type='checkbox']),
+.original-charge-intake select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+}
+.original-charge-intake button {
+  min-height: 44px;
+  white-space: normal;
+}
+.original-charge-intake .intake-check {
+  flex-direction: row;
+  align-items: center;
+}
+.original-charge-intake .intake-check input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.intake-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 0.2rem 1rem;
+}
+.intake-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.intake-actions > label {
+  flex: 1 1 260px;
+}
+.intake-preview article {
+  border-top: 1px solid var(--border, #ddd);
+  padding: 1rem 0;
+  overflow-wrap: anywhere;
+}
+.intake-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+@media (max-width: 600px) {
+  .intake-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .intake-actions > label {
+    flex-basis: auto;
+  }
+}
+
+.original-charge-details {
+  overflow-wrap: anywhere;
+}

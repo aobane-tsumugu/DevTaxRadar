@@ -1,3 +1,4 @@
+import { originalChargeFactSchema } from '../planning/originalCharges.js'
 import { z } from 'zod'
 import { sourceAdjustmentsSchema } from '../planning/sourceAdjustmentSchema.js'
 
@@ -26,6 +27,7 @@ export const expenseSourceSchema = z
     kind: z.enum(['subscription', 'equipment', 'home', 'direct', 'opening-balance']),
     label: note,
     originalAmountJpy: yen.nullable(),
+    originalChargeFact: originalChargeFactSchema.optional(),
     unknownOriginalAmountReasons: z.array(z.string().trim().min(1).max(10_000)).min(1).optional(),
     currency: z.literal('JPY'),
     servicePeriod: costPeriodSchema.optional(),
@@ -40,6 +42,20 @@ export const expenseSourceSchema = z
   })
   .strict()
   .superRefine((source, context) => {
+    if (
+      source.originalChargeFact &&
+      (source.originalChargeFact.sourceId !== source.id ||
+        (source.originalChargeFact.category !== source.kind &&
+          !(
+            source.originalChargeFact.category === 'direct' && source.kind === 'opening-balance'
+          )) ||
+        source.originalChargeFact.original.amountJpy !== source.originalAmountJpy)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['originalChargeFact'],
+        message: '原始請求と費用源のID・種類・原額が一致しません。',
+      })
     for (const [index, record] of (source.adjustments ?? []).entries())
       if (record.sourceId !== source.id)
         context.addIssue({

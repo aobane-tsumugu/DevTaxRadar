@@ -1,3 +1,4 @@
+import { OriginalChargesConflict } from './originalChargesRepository.js'
 import { ActivityLedgerConflict } from './activityLedgerRepository.js'
 import { readProductTimeline } from './productTimeline.js'
 import { existsSync } from 'node:fs'
@@ -428,6 +429,8 @@ function workspaceView(draft: WorkspaceDraft) {
   }
 }
 function sendWorkspaceError(error: unknown, reply: FastifyReply) {
+  if (error instanceof OriginalChargesConflict)
+    return reply.code(409).send({ error: 'original_charges_conflict', message: error.message })
   if (error instanceof ActivityLedgerConflict)
     return reply.code(409).send({ error: 'activity_conflict', message: error.message })
   if (error instanceof WorkspaceConflict)

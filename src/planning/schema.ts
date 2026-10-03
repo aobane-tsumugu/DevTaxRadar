@@ -1,8 +1,9 @@
+import { originalChargesSchema } from './originalCharges.js'
 import { activityLedgerSchema } from './activityFacts.js'
 import { sourceAdjustmentsSchema } from './sourceAdjustmentSchema.js'
 import { treatmentDecisionBindingSchema } from './treatmentDecisionBindingSchema.js'
 import { costTreatmentFactsSchema } from './costTreatmentFactsSchema.js'
-import { allocationTargetsSchema } from './allocationTargets.js'
+import { equipmentSchema, homeCostSchema, directCostSchema } from './chargeRecords.js'
 import { planningDateIssues } from './calendarDates.js'
 import { z } from 'zod'
 import { validIsoCalendarDate } from '../core/chargePeriods.js'
@@ -12,9 +13,7 @@ import { decisionIsConfirmed, MANUAL_DECISION_VERSION } from '../core/decisionCo
 import { SOFTWARE_ANNUAL_DECISION_VERSION } from '../core/softwareAnnualDecision.js'
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
-const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)
 const identifier = z.string().trim().min(1).max(120)
-const ratio = z.number().min(0).max(1)
 const evidenceIds = z.array(identifier).max(100)
 
 const profileSchema = z.object({
@@ -119,80 +118,6 @@ const lifecycleEventSchema = z.object({
   note: z.string().trim().max(2_000).optional(),
 })
 
-const equipmentSchema = z
-  .object({
-    id: identifier,
-    name: z.string().trim().min(1).max(160),
-    equipmentType: z.enum(['pc', 'gpu', 'dgx', 'server', 'desk', 'peripheral', 'other']),
-    acquisitionCostJpy: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
-    unknownAmountReason: z.string().trim().min(1).max(2_000).optional(),
-    orderedOn: date.optional(),
-    deliveredOn: date.optional(),
-    acquiredOn: date,
-    businessUseStartedOn: date.optional(),
-    convertedFromPrivate: z.boolean(),
-    openingUnamortizedBalanceJpy: z.number().int().nonnegative().optional(),
-    businessUseRatio: ratio,
-    usefulLifeYears: z.number().int().positive().max(100).optional(),
-    role: z.string().trim().min(1).max(1_000),
-    taxUnitId: identifier.optional(),
-    projectAllocationRatio: ratio,
-    evidenceIds,
-  })
-  .refine((item) => (item.acquisitionCostJpy === null) === Boolean(item.unknownAmountReason), {
-    message: '設備の購入額が不明なときだけ、その理由を入力してください。',
-    path: ['unknownAmountReason'],
-  })
-
-const homeCostSchema = z
-  .object({
-    id: identifier,
-    month,
-    category: z.enum(['rent', 'electricity', 'internet']),
-    amountJpy: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
-    unknownAmountReason: z.string().trim().min(1).max(2_000).optional(),
-    method: z.enum(['area', 'area-time', 'meter', 'watt-hour', 'usage-time', 'fixed-ratio']),
-    businessUseRatio: ratio,
-    basis: z.string().trim().min(1).max(2_000),
-    rationale: z.string().trim().min(1).max(2_000),
-    taxUnitId: identifier.optional(),
-    projectAllocationRatio: ratio,
-    targets: allocationTargetsSchema.optional(),
-    treatment: z.enum(['direct', 'shared', 'general']),
-    evidenceIds,
-  })
-  .refine((item) => (item.amountJpy === null) === Boolean(item.unknownAmountReason), {
-    message: '自宅費用の金額が不明なときだけ、その理由を入力してください。',
-    path: ['unknownAmountReason'],
-  })
-
-const directCostSchema = z
-  .object({
-    id: identifier,
-    targets: allocationTargetsSchema.optional(),
-    taxUnitId: identifier.optional(),
-    incurredOn: date,
-    costType: z.enum([
-      'outsource',
-      'material',
-      'cloud',
-      'domain',
-      'license',
-      'old-version-balance',
-      'other',
-    ]),
-    amountJpy: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
-    unknownAmountReason: z.string().trim().min(1).max(2_000).optional(),
-    directlyAttributable: z.boolean(),
-    treatment: z.enum(['direct', 'shared', 'general']),
-    note: z.string().trim().max(2_000).optional(),
-    evidenceIds,
-  })
-  .refine((item) => (item.amountJpy === null) === Boolean(item.unknownAmountReason), {
-    message: '直接費の金額が不明なときだけ、その理由を入力してください。',
-    path: ['unknownAmountReason'],
-  })
-
 const evidenceSchema = z.object({
   id: identifier,
   evidenceType: z.enum([
@@ -277,6 +202,7 @@ const decisionSchema = z
 export const planningSnapshotSchema = z
   .strictObject({
     activityLedger: activityLedgerSchema.optional(),
+    originalCharges: originalChargesSchema.optional(),
     sourceAdjustments: sourceAdjustmentsSchema.optional(),
     costTreatmentFacts: costTreatmentFactsSchema.optional(),
     costPresence: costPresenceRecordsSchema.optional(),
@@ -310,6 +236,32 @@ export const planningSnapshotSchema = z
             path: ['activityLedger'],
             message: '活動記録の証拠が存在しません。',
           })
+    for (const fact of snapshot.originalCharges?.facts ?? []) {
+      for (const evidenceId of [
+        ...fact.evidenceIds,
+        ...(fact.original.conversionEvidenceIds ?? []),
+        ...(fact.legacyPreviousRecord?.evidenceIds ?? []),
+      ])
+        if (!knownEvidence.has(evidenceId))
+          context.addIssue({
+            code: 'custom',
+            path: ['originalCharges'],
+            message: '原請求または換算根拠の証拠が存在しません。',
+          })
+      const targetIds = [
+        ...('taxUnitId' in fact.record && fact.record.taxUnitId ? [fact.record.taxUnitId] : []),
+        ...('targets' in fact.record
+          ? (fact.record.targets ?? []).map((target) => target.taxUnitId)
+          : []),
+      ]
+      for (const targetId of targetIds)
+        if (!unitIds.has(targetId))
+          context.addIssue({
+            code: 'custom',
+            path: ['originalCharges'],
+            message: '原請求の分類先に対応する制作物が存在しません。',
+          })
+    }
     const collections = [
       ['taxUnits', snapshot.taxUnits],
       ['projectRules', snapshot.projectRules],

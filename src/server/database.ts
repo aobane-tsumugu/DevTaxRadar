@@ -1,3 +1,4 @@
+import { readOriginalCharges } from './originalChargesRepository.js'
 import { readActivityLedger } from './activityLedgerRepository.js'
 import {
   PROVIDER_SETTINGS_TABLE,
@@ -286,7 +287,10 @@ export function getDatabase(): DatabaseSync {
   })
 
   try {
-    if (tableExists(database, 'app_settings')) readActivityLedger(database)
+    if (tableExists(database, 'app_settings')) {
+      readActivityLedger(database)
+      readOriginalCharges(database)
+    }
     database.exec('PRAGMA journal_mode = WAL')
 
     if (databaseAlreadyExisted && requiresMultiSourceMigration(database)) {

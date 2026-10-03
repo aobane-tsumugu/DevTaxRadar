@@ -1,3 +1,9 @@
+import {
+  readOriginalCharges,
+  writeOriginalCharges,
+  validateOriginalChargeTransition,
+} from './originalChargesRepository.js'
+import { validateOriginalChargeWorkspace } from './originalChargesRepository.js'
 import { readActivityLedger, writeActivityLedger } from './activityLedgerRepository.js'
 import { readSourceAdjustments, writeSourceAdjustments } from './sourceAdjustmentsRepository.js'
 import {
@@ -26,7 +32,7 @@ import {
   type PlanningSnapshot,
   type ProjectRuleRecord,
 } from '../planning/types.js'
-import { getDatabase } from './database.js'
+import { getDatabase, getConfiguration } from './database.js'
 import { readCostPresence, writeCostPresence } from './costPresenceRepository.js'
 import { readEquipmentMethods, writeEquipmentMethods } from './equipmentMethodsRepository.js'
 
@@ -49,6 +55,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     has_bookkeeping AS hasBookkeeping, notes FROM planning_profiles WHERE singleton_id = 1`,
     )
     .get() as Record<string, unknown> | undefined
+  const originalCharges = readOriginalCharges(db)
   const activityLedger = readActivityLedger(db)
   const sourceAdjustments = readSourceAdjustments(db)
   const decisionBindings = readDecisionTreatmentBindings(db)
@@ -58,6 +65,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
     return {
       ...emptyPlanningSnapshot(),
       ...(activityLedger ? { activityLedger } : {}),
+      ...(originalCharges ? { originalCharges } : {}),
       ...(sourceAdjustments.length ? { sourceAdjustments } : {}),
       ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}),
     }
@@ -213,6 +221,7 @@ export function getPlanningSnapshot(db: DatabaseSync = getDatabase()): PlanningS
   return planningSnapshotSchema.parse({
     ...snapshot,
     ...(activityLedger ? { activityLedger } : {}),
+    ...(originalCharges ? { originalCharges } : {}),
     ...(costTreatmentFacts.length ? { costTreatmentFacts } : {}),
     ...(sourceAdjustments.length ? { sourceAdjustments } : {}),
     ...(costPresence.length ? { costPresence } : {}),
@@ -227,6 +236,9 @@ export function savePlanningSnapshot(
   const parsed = planningSaveSchema.parse(snapshot)
   db.exec('SAVEPOINT devtax_planning_write')
   try {
+    validateOriginalChargeWorkspace({ planning: parsed, configuration: getConfiguration(db) })
+    validateOriginalChargeTransition({ planning: getPlanningSnapshot(db) }, { planning: parsed })
+    writeOriginalCharges(db, parsed.originalCharges)
     writeActivityLedger(db, parsed.activityLedger)
     writeSourceAdjustments(db, parsed.sourceAdjustments)
     writeDecisionTreatmentBindings(db, parsed.decisions)

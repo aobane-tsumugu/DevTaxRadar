@@ -44,6 +44,7 @@ export function isNewWorkspace(input: Contents, observedSessionCount: number): b
   const { configuration, planning } = input
   return (
     observedSessionCount === 0 &&
+    !planning.originalCharges?.facts.length &&
     !planning.activityLedger?.products.length &&
     !planning.activityLedger?.facts.length &&
     planning.taxUnits.length === 0 &&

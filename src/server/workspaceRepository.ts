@@ -1,3 +1,8 @@
+import {
+  validateOriginalChargesUpdate,
+  validateOriginalChargeTransition,
+} from './originalChargesRepository.js'
+import { validateOriginalChargeWorkspace } from './originalChargesRepository.js'
 import { readSourceAdjustments } from './sourceAdjustmentsRepository.js'
 import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
@@ -102,6 +107,12 @@ export function saveWorkspace<T>(
         revision,
         '保存済みの返金・訂正記録を含む最新の計画を読み直してください。記録を削除する場合は明示的に空の一覧を指定します。',
       )
+    validateOriginalChargesUpdate(db, parsed.planning.originalCharges)
+    validateOriginalChargeWorkspace(parsed)
+    validateOriginalChargeTransition(
+      readWorkspace((draft) => draft, db),
+      parsed,
+    )
     beforeWrite?.(parsed)
     saveConfiguration(parsed.configuration, db)
     savePlanningSnapshot(parsed.planning, db)

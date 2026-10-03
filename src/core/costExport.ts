@@ -1,3 +1,4 @@
+import { originalChargeMarkdown } from './originalChargeExport.js'
 import { costTreatmentMarkdown } from './costTreatmentExport.js'
 import type { AnnualCostProjection, CostTarget } from '../accounting/costs.js'
 
@@ -56,6 +57,7 @@ export function costProjectionMarkdown(
       `  - 費用源ID: ${text(source.id)} / 入力経路: ${source.origin}`,
       `  - 証拠参照ID: ${source.evidenceIds.map(text).join('、') || '未登録'}`,
     )
+    if (source.originalChargeFact) lines.push(...originalChargeMarkdown(source.originalChargeFact))
     for (const reason of source.unknownOriginalAmountReasons ?? [])
       lines.push(`  - 原額が不明な理由: ${text(reason)}`)
     if (source.servicePeriod)

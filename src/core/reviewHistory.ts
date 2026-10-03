@@ -35,7 +35,7 @@ function comparableCosts(costs: AnnualCostProjection): AnnualCostProjection {
     ...costs,
     ...(qualification ? { treatments: qualification } : {}),
     sources: costs.sources.map((source) => {
-      if (source.adjustments?.length) return source
+      if (source.adjustments?.length || source.originalChargeFact) return source
       const { incurredOn: _duplicateDate, ...compatible } = source
       return compatible
     }),
@@ -86,7 +86,12 @@ export function historicalReviewMaterials(material: ReviewMaterials, balances: B
   const evidenceIds = new Set([
     ...activityFacts.flatMap((fact) => fact.evidenceIds),
     ...costTreatmentFacts.flatMap((fact) => fact.evidenceIds),
-    ...costInputs.flatMap((costs) => costs.sources.flatMap((source) => source.evidenceIds)),
+    ...costInputs.flatMap((costs) =>
+      costs.sources.flatMap((source) => [
+        ...source.evidenceIds,
+        ...(source.originalChargeFact?.original.conversionEvidenceIds ?? []),
+      ]),
+    ),
     ...costInputs.flatMap((costs) => costs.contributions.flatMap((item) => item.evidenceIds)),
     ...costInputs.flatMap((costs) =>
       costs.sources.flatMap((source) =>
