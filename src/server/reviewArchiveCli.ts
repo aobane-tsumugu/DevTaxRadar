@@ -1,14 +1,15 @@
 import { closeSync, fsyncSync, openSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { reviewExportJson, reviewExportMarkdown } from '../core/reviewExport.js'
+import { accountantCsvZip } from '../core/accountantCsv.js'
 import { listArchiveReviews, readArchiveReview } from './reviewArchive.js'
 
 const usage =
   'Usage: data:read list <data-or-backup-directory> | ' +
-  'export <data-or-backup-directory> <review-id> <json|markdown> <new-output-file>'
+  'export <data-or-backup-directory> <review-id> <json|markdown|accountant-csv> <new-output-file>'
 
 /** Exclusive creation: never overwrite a user's file, DB, or existing export. */
-function writeNewExport(file: string, content: string): void {
+function writeNewExport(file: string, content: string | Uint8Array): void {
   const descriptor = openSync(file, 'wx', 0o600)
   let complete = false
   try {
@@ -34,7 +35,7 @@ export function runReviewArchiveCli(args: string[]): string {
     !id ||
     !destination ||
     extra.length ||
-    !['json', 'markdown'].includes(format ?? '')
+    !['json', 'markdown', 'accountant-csv'].includes(format ?? '')
   )
     throw new Error(usage)
   const review = readArchiveReview(directory, id)
@@ -46,7 +47,12 @@ export function runReviewArchiveCli(args: string[]): string {
     (withinSource !== '..' && !withinSource.startsWith('..' + sep) && !isAbsolute(withinSource))
   )
     throw new Error('読取り元フォルダの外に、新しい出力先を指定してください。')
-  const content = format === 'json' ? reviewExportJson(review) : reviewExportMarkdown(review)
+  const content =
+    format === 'accountant-csv'
+      ? accountantCsvZip(review)
+      : format === 'json'
+        ? reviewExportJson(review)
+        : reviewExportMarkdown(review)
   writeNewExport(output, content)
   return (
     JSON.stringify({ exported: true, reviewId: review.id, year: review.year, format, output }) +

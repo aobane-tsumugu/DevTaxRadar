@@ -1,3 +1,4 @@
+import { containsUnexpectedUuid } from './publicVendorIdentifiers.js'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { extname, join, relative } from 'node:path'
@@ -72,10 +73,7 @@ function visit(path: string): void {
     findings.push(`${file}: contains a forbidden raw-content field`)
   }
 
-  if (
-    releaseSurface &&
-    /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i.test(content)
-  ) {
+  if (releaseSurface && containsUnexpectedUuid(content, file)) {
     findings.push(`${file}: contains a UUID-like identifier`)
   }
 

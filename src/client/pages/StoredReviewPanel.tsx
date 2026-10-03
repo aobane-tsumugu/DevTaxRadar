@@ -11,6 +11,8 @@ import CostsPage from './CostsPage'
 import EquipmentCalculationsPanel from './EquipmentCalculationsPanel'
 import EquipmentAllocationPanel from './EquipmentAllocationPanel'
 import { reviewExportJson, reviewExportMarkdown } from '../../core/reviewExport'
+import { accountantCsvPreview, accountantCsvZip } from '../../core/accountantCsv'
+import ExportPreviewButton from './ExportPreviewButton'
 
 const amount = (value: AmountState) =>
   value.status === 'known'
@@ -31,6 +33,19 @@ export default function StoredReviewPanel({ review }: { review: BalanceReview })
       <p>
         指定した固定版を表示しています。現在の入力から再計算・補完せず、金額を税務上の確定額とは扱いません。
       </p>
+      <p>
+        汎用転記CSVは費用源・配分・処理候補・残高増減・未解決を別表にします。表どうしを合算しないでください。
+        特定会計ソフトの仕訳形式ではありません。名称・理由などの自由記述を確認してから保存し、外部への送信は行いません。
+      </p>
+      <ExportPreviewButton
+        key={review.id}
+        label="税理士相談用CSV一式を確認"
+        filename={`devtax-${review.year}-${review.id}-accountant-csv.zip`}
+        load={async () => ({
+          blob: new Blob([new Uint8Array(accountantCsvZip(review))], { type: 'application/zip' }),
+          text: accountantCsvPreview(review),
+        })}
+      />
       <h4>保存時の年度別残高</h4>
       {!review.projection.accounts.length && (
         <p>この年度の残高は未登録です。残高なしの確認ではありません。</p>

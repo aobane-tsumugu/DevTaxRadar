@@ -115,6 +115,17 @@ async function read(server: Running, route: string): Promise<string> {
   return body
 }
 
+async function readAccountantCsv(server: Running, reviewPath: string): Promise<Uint8Array> {
+  const response = await fetch(server.origin + reviewPath + '/export?format=accountant-csv', {
+    signal: AbortSignal.timeout(15000),
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'application/zip')
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.match(response.headers.get('content-disposition') ?? '', /-accountant-csv\.zip"$/)
+  return new Uint8Array(await response.arrayBuffer())
+}
+
 function records(data: string) {
   const db = new DatabaseSync(join(data, 'devtax-radar.db'), { readOnly: true })
   try {
@@ -246,6 +257,7 @@ describe('full product restore with originals unavailable', () => {
         reviewPath + '/export?format=markdown',
       ]
       const expected = await Promise.all(paths.map((path) => read(original, path)))
+      const expectedCsv = await readAccountantCsv(original, reviewPath)
       const expectedRecords = records(originalData)
       const salt = readFileSync(join(originalData, 'identifier-salt'))
       const manifest = backup('create', originalData, bundle)
@@ -274,6 +286,7 @@ describe('full product restore with originals unavailable', () => {
       const blockedBody = (await blocked.json()) as { error: string }
       assert.equal(blockedBody.error, 'restore_requires_reconnect')
       assert.deepEqual(await Promise.all(paths.map((path) => read(held, path))), expected)
+      assert.deepEqual(await readAccountantCsv(held, reviewPath), expectedCsv)
 
       const reconnect = JSON.parse(await read(held, '/api/restore/sources')) as {
         plan: { sources: { sourceId: string; root: string; enabled: boolean }[] }
@@ -289,6 +302,7 @@ describe('full product restore with originals unavailable', () => {
       assert.equal(restarted.runtime.datasetId, original.runtime.datasetId)
       assert.equal(restarted.runtime.restoreRequiresReconnect, false)
       assert.deepEqual(await Promise.all(paths.map((path) => read(restarted, path))), expected)
+      assert.deepEqual(await readAccountantCsv(restarted, reviewPath), expectedCsv)
       const sources = JSON.parse(await read(restarted, '/api/sources')) as {
         sources: { id: string; root: string; enabled: boolean }[]
       }

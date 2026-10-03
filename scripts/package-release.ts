@@ -1,3 +1,4 @@
+import { containsUnexpectedUuid } from './publicVendorIdentifiers.js'
 import { execFileSync } from 'node:child_process'
 import {
   copyFileSync,
@@ -51,6 +52,10 @@ copyRequiredFile('README.md')
 copyRequiredFile('LICENSE')
 copyRequiredFile(join('docs', 'READING-SAVED-REVIEWS.md'))
 copyRequiredFile(join('docs', 'ORIGINAL-CHARGE-INTAKE.md'))
+copyRequiredFile(join('docs', 'RECEIPT-CANDIDATES.md'))
+copyRequiredFile(join('docs', 'licenses', 'pdfjs-dist-LICENSE.txt'))
+copyRequiredFile(join('docs', 'licenses', 'core-js-LICENSE.txt'))
+copyRequiredFile(join('docs', 'licenses', 'receipt-pdf-NOTICE.txt'))
 copyRequiredFile(join('docs', 'examples', 'original-charge-v1.json'))
 copyRequiredFile(join('docs', 'examples', 'original-charge-v1.csv'))
 if (existsSync(join(root, 'docs', 'SECURITY.md'))) {
@@ -187,7 +192,6 @@ function inspectReleaseTree(directory: string): void {
   const forbiddenName =
     /(?:^|\/)(?:node_modules|fixtures|\.git|\.local|\.claude|\.codex|raw-data|private-data)(?:\/|$)|(?:^|\/)\.env(?:\.|$)|\.(?:db|db-wal|db-shm|sqlite|sqlite3)$/i
   const forbiddenRawField = /"(?:prompt|response|sourcecode|absolutePath)"\s*:/i
-  const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
   const userHome = /(?:[a-z]:\/users\/[^./\s]+|\/(?:home|users)\/[^./\s]+)\//i
   const binaryAsset = /\.(?:gif|ico|jpe?g|png|webp|woff2?)$/i
   const findings: string[] = []
@@ -222,7 +226,7 @@ function inspectReleaseTree(directory: string): void {
     if (
       content.includes(home) ||
       forbiddenRawField.test(content) ||
-      uuid.test(content) ||
+      containsUnexpectedUuid(content, name) ||
       userHome.test(content)
     ) {
       findings.push(`${name}: privacy check failed`)

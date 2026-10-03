@@ -20,6 +20,12 @@ export default function OriginalChargeDetails({
         原通貨額：{money.currency ?? '通貨不明'} {money.amount ?? '金額不明'} / 採用円額：
         {money.amountJpy === null ? '不明' : yen.format(money.amountJpy)}
       </p>
+      {fact.document && (
+        <p>
+          発行元：{fact.document.issuer ?? '未確認'} / 請求書番号：
+          {fact.document.invoiceNumber ?? '未確認'}
+        </p>
+      )}
       {money.unknownAmountReason && <p>原通貨額不明の理由：{money.unknownAmountReason}</p>}
       {money.unknownJpyReason && <p>円額不明の理由：{money.unknownJpyReason}</p>}
       {money.fx && (

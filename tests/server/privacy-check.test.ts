@@ -79,3 +79,20 @@ describe('release privacy check', () => {
     expect(result.stderr).toBeTruthy()
   })
 })
+
+describe('public PDF.js event sentinel', () => {
+  const sentinel = '59968104-cc61-4cf9-b570-014b35b3709c'
+  it('permits only the exact upstream sentinel in a bundled PDF asset', () => {
+    const root = createSurfaceFile('dist/assets/pdf-test.js', `const event = "${sentinel}"`)
+    expect(runPrivacyCheck(root).status).toBe(0)
+  })
+  it.each([
+    ['dist/assets/pdf-test.js', `${sentinel} 6a5b02c8-7df0-43e8-889c-581ea2ba14b7`],
+    ['dist/assets/index-test.js', sentinel],
+    ['public/pdf-test.js', sentinel],
+    ['dist/assets/pdf-test.js', '59968104-cc61-4cf9-b570-014b35b3709d'],
+  ])('still rejects an unapproved UUID in %s', (path, content) => {
+    const root = createSurfaceFile(path, content)
+    expect(runPrivacyCheck(root).status).not.toBe(0)
+  })
+})
